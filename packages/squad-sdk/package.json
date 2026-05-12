@@ -102,6 +102,10 @@
       "types": "./dist/resolution.d.ts",
       "import": "./dist/resolution.js"
     },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
     "./presets": {
       "types": "./dist/presets/index.d.ts",
       "import": "./dist/presets/index.js"
