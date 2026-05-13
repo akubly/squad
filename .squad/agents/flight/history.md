@@ -204,4 +204,9 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 
 **Test count:** 17 → 28 (11 new tests added in remediation). All green. FIDO conditional approval gates on acceptance of architectural decisions (error model + naming policy).
 
+### Piece 03 adversarial review (2026-05-13)
+
+**Verdict:** APPROVE — 94 tests all green, spec-parity confirmed across all 21 test-surface bullets and all mechanism requirements. Implementation is comprehensive and correct.
+
+**Review heuristic captured:** URL canonicalization audits benefit from verifying both directions: that distinct URL forms for the same repo canonicalize identically, AND that similar-looking URLs for different repos remain distinct. The ADO 4-form equivalence test (N.13) is the gold standard pattern.
 
