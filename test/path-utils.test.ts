@@ -11,7 +11,7 @@ import { mkdirSync, rmSync, existsSync, symlinkSync, writeFileSync } from 'node:
 import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-import { clonesMatch, pathsRefSameLocation } from '@bradygaster/squad-sdk/path-utils';
+import { clonesMatch, normalisedPathKey, pathsRefSameLocation } from '@bradygaster/squad-sdk/path-utils';
 import { SquadError } from '@bradygaster/squad-sdk/adapter/errors';
 
 const TMP = join(process.cwd(), `.test-path-utils-${randomBytes(4).toString('hex')}`);
@@ -234,5 +234,49 @@ describe('clonesMatch() — separator normalization', () => {
     // path.resolve strips trailing separators on both sides before comparison
     expect(clonesMatch(dir('repo') + sep, dir('repo'))).toBe(true);
     expect(clonesMatch(dir('repo'), dir('repo') + sep)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalisedPathKey
+// ---------------------------------------------------------------------------
+
+describe('normalisedPathKey()', () => {
+  it('PK.1 returns the same key for the same path', () => {
+    scaffold('some-dir');
+    expect(normalisedPathKey(dir('some-dir'))).toBe(normalisedPathKey(dir('some-dir')));
+  });
+
+  it('PK.2 returns different keys for different paths', () => {
+    scaffold('dir-a', 'dir-b');
+    expect(normalisedPathKey(dir('dir-a'))).not.toBe(normalisedPathKey(dir('dir-b')));
+  });
+
+  it('PK.3 resolves relative segments so equivalent paths produce the same key', () => {
+    scaffold('base/sub');
+    const canonical = dir('base', 'sub');
+    const withDotDot = join(dir('base', 'sub'), '..', 'sub');
+    expect(normalisedPathKey(canonical)).toBe(normalisedPathKey(withDotDot));
+  });
+
+  it('PK.4 produces a lowercase key on win32 and darwin (case-insensitive platforms)', () => {
+    if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+    scaffold('SomePath');
+    const key = normalisedPathKey(dir('SomePath'));
+    expect(key).toBe(key.toLowerCase());
+  });
+
+  it('PK.5 produces keys with different casing on linux (case-sensitive)', () => {
+    if (process.platform !== 'linux') return;
+    scaffold('LowerPath', 'lowerpath');
+    expect(normalisedPathKey(dir('LowerPath'))).not.toBe(normalisedPathKey(dir('lowerpath')));
+  });
+
+  it('PK.6 same mixed-case path always produces the same key regardless of input case on win32/darwin', () => {
+    if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+    scaffold('CasedDir');
+    const upper = normalisedPathKey(dir('CasedDir').toUpperCase());
+    const lower = normalisedPathKey(dir('CasedDir').toLowerCase());
+    expect(upper).toBe(lower);
   });
 });

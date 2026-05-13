@@ -22,6 +22,15 @@ function normCase(p: string): string {
 }
 
 /**
+ * Produces the duplicate-detection key used for registry path uniqueness.
+ * Resolves the path and applies OS-aware casing rules: case-insensitive on
+ * win32 and darwin, case-sensitive on linux.
+ */
+export function normalisedPathKey(value: string): string {
+  return normCase(path.normalize(path.resolve(value)));
+}
+
+/**
  * Bidirectional symlink-aware path equality. Resolves one realpath per side;
  * falls back to the literal path when realpathSync fails (e.g. path does not exist).
  */

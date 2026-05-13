@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
 import { resolveSquadHome } from './resolution.js';
+import { normalisedPathKey } from './path-utils.js';
 
 export interface RegistryEntry {
   callsign?: string;
@@ -42,11 +43,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/).includes('..');
-}
-
-function pathKey(value: string): string {
-  const normalized = path.normalize(path.resolve(value));
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 function validateStringArray(value: unknown, fieldName: string, entryIndex: number): string[] | undefined {
@@ -166,7 +162,7 @@ export function validateRegistry(obj: unknown): Registry {
       callsigns.add(entry.callsign);
     }
 
-    const normalizedPath = pathKey(entry.path);
+    const normalizedPath = normalisedPathKey(entry.path);
     if (paths.has(normalizedPath)) {
       throw validationError(`Registry contains duplicate path "${entry.path}".`);
     }
@@ -178,12 +174,17 @@ export function validateRegistry(obj: unknown): Registry {
   return { version: 1, squads };
 }
 
-export function registerEntry(entry: RegistryEntry, opts: { onWarn?: (msg: string) => void } = {}): RegistryEntry {
+export function upsertEntry(entry: RegistryEntry, opts: { onWarn?: (msg: string) => void } = {}): RegistryEntry {
   const validated = validateEntry(entry, 0);
   if (!fs.existsSync(validated.path)) {
     opts.onWarn?.(`Registry entry path does not exist: ${validated.path}`);
   }
   return validated;
+}
+
+/** @deprecated Use {@link upsertEntry} instead. */
+export function registerEntry(entry: RegistryEntry, opts: { onWarn?: (msg: string) => void } = {}): RegistryEntry {
+  return upsertEntry(entry, opts);
 }
 
 export function writeRegistry(filePath: string, registry: Registry): void {

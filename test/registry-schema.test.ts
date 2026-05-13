@@ -6,6 +6,7 @@ import {
   loadRegistryFromDisk,
   parseRegistry,
   registerEntry,
+  upsertEntry,
   writeRegistry,
 } from '../packages/squad-sdk/src/registry.js';
 
@@ -106,6 +107,24 @@ describe('registry schema', () => {
     }))).toThrow(/duplicate.*path/i);
   });
 
+  it('S9b rejects registry with case-variant duplicate paths on win32/darwin', () => {
+    const pathA = path.join(dir.toLowerCase(), 'alpha.squad');
+    const pathB = path.join(dir.toUpperCase(), 'alpha.squad');
+    const registry = JSON.stringify({
+      version: 1,
+      squads: [
+        { callsign: 'one', path: pathA },
+        { callsign: 'two', path: pathB },
+      ],
+    });
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      expect(() => parseRegistry(registry)).toThrow(/duplicate.*path/i);
+    } else {
+      // linux: case-sensitive — the two paths are distinct, no duplicate
+      expect(() => parseRegistry(registry)).not.toThrow();
+    }
+  });
+
   it('S10 rejects registry with missing version field', () => {
     expect(() => parseRegistry(JSON.stringify({ squads: [] }))).toThrow(SquadError);
     expect(() => parseRegistry(JSON.stringify({ squads: [] }))).toThrow(/version.*required/i);
@@ -132,11 +151,11 @@ describe('registry schema', () => {
     expect(parseRegistry(JSON.stringify({ version: 1, squads: [{ path: stalePath }] })).squads[0]?.path).toBe(stalePath);
   });
 
-  it('S14b warns when path does not exist at register time', () => {
+  it('S14b warns when path does not exist at write-preparation time', () => {
     const warnings: string[] = [];
     const entry = { path: path.join(dir, 'missing.squad') };
 
-    expect(registerEntry(entry, { onWarn: (msg) => warnings.push(msg) })).toEqual(entry);
+    expect(upsertEntry(entry, { onWarn: (msg) => warnings.push(msg) })).toEqual(entry);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/does not exist/i);
   });
@@ -203,5 +222,70 @@ describe('registry schema', () => {
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toMatch(/squad-repos\.json/i);
     expect(warnings).toEqual(result.warnings);
+  });
+});
+describe('upsertEntry()', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeCaseDir('upsert');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  });
+
+  it('UE.1 returns a validated entry for an existing path', () => {
+    const existingPath = path.join(dir, 'alpha.squad');
+    fs.mkdirSync(existingPath, { recursive: true });
+    const entry = { path: existingPath };
+    const result = upsertEntry(entry);
+    expect(result).toEqual(entry);
+  });
+
+  it('UE.2 warns but does not throw when path does not exist at write-preparation time', () => {
+    const warnings: string[] = [];
+    const entry = { path: path.join(dir, 'missing.squad') };
+    expect(upsertEntry(entry, { onWarn: (msg) => warnings.push(msg) })).toEqual(entry);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/does not exist/i);
+  });
+
+  it('UE.3 throws SquadError when entry path does not end with .squad', () => {
+    const entry = { path: path.join(dir, 'alpha') };
+    expect(() => upsertEntry(entry)).toThrow(SquadError);
+    expect(() => upsertEntry(entry)).toThrow(/\.squad/i);
+  });
+
+  it('UE.4 preserves optional callsign, origins, and clones fields', () => {
+    const entry = {
+      path: path.join(dir, 'alpha.squad'),
+      callsign: 'my/squad',
+      origins: ['https://github.com/example/repo'],
+      clones: [path.join(dir, 'clone-a')],
+    };
+    expect(upsertEntry(entry)).toEqual(entry);
+  });
+});
+
+describe('registerEntry() backward-compatibility alias', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeCaseDir('compat');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  });
+
+  it('BC.1 registerEntry delegates to upsertEntry and produces identical output', () => {
+    const warnings1: string[] = [];
+    const warnings2: string[] = [];
+    const entry = { path: path.join(dir, 'missing.squad') };
+    const r1 = registerEntry(entry, { onWarn: (msg) => warnings1.push(msg) });
+    const r2 = upsertEntry(entry, { onWarn: (msg) => warnings2.push(msg) });
+    expect(r1).toEqual(r2);
+    expect(warnings1).toEqual(warnings2);
   });
 });

@@ -477,5 +477,5 @@ export function resolveSquad(opts: ResolveOpts): ResolvedSquad | null {
 }
 
 // Re-export path-utils helpers so callers can import them from the same subpath.
-export { clonesMatch, pathsRefSameLocation } from './path-utils.js';
+export { clonesMatch, normalisedPathKey, pathsRefSameLocation } from './path-utils.js';
 
