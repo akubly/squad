@@ -8,7 +8,16 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
-### clones/origins resolver + init-mode guard — piece 03 (2026-05-13)
+### Adversarial review follow-up — piece 03 test hardening (2026-05-13)
+
+**Tautology tests are invisible failures:** `typeof result === 'boolean'` always passes regardless of behavior. Real assertions like `toBe(true)` on win32/darwin and `toBe(false)` on linux require understanding the platform path — here, `normCase` folds to lowercase on case-insensitive platforms, so even if `realpathSync` falls back to literal, the comparison still resolves correctly.
+
+**Empty `clones: []` and missing `clones` are structurally distinct but behaviorally identical:** The resolver checks `!entry.clones || entry.clones.length === 0` — both cases continue. Explicit empty-array coverage (`4.6b`) documents intent even when behavior matches the missing-field case.
+
+**Broken-symlink realpath fallback is already safe:** Each `realpathSync` call in `pathsRefSameLocation` is individually try/caught; no production change needed for PU.6. The test exercises that path and confirms `toBe(true)` for `(link, link)`.
+
+**Chain precedence gaps require active teardown:** 9.6 and 9.7 need real `git init` and `git worktree add` calls because the linked-worktree and origins steps depend on live git output. Mirror existing 5.x/7.x fixture helpers; wrap in try/catch and return early to skip cleanly when git is unavailable.
+
 
 **Fixture isolation in TMP dirs under an outer git repo:** All TMP dirs created under `D:\git\squad-replay` are inside the squad-replay git repo which has its own `.git` + `.squad/`. Without a `.git` marker inside TMP, `findGitRoot` walks up past TMP to the squad-replay root and returns `source: 'local'` pointing to the real `.squad/` — causing step 2 (worktree-local) to fire before steps 4–7. Fix: always scaffold a `.git` file/directory inside TMP when the test needs TMP to be the git root with no squad present.
 
