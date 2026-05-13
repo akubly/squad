@@ -336,6 +336,68 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 
 ---
 
+### 2026-05-13: normalisedPathKey dedup must be integration-tested at the registry layer
+
+**Proposed by:** FIDO  
+**Trigger:** Adversarial review of piece 04 (`akubly/upstream-04-path-utils-upsert-rename`)
+
+Any piece that wires a path-normalizing function into a data structure validation layer **MUST** include at least one test that:
+1. Creates two registry entries whose paths are identical after normalization but differ in literal string form.
+2. Verifies that `validateRegistry` or `parseRegistry` throws a duplicate-path error.
+3. Is platform-gated correctly: the duplicate must be detected on win32/darwin.
+
+Test should be named alongside existing S9 test (e.g., `S9b rejects registry with two entries whose paths are case variants on win32/darwin`).
+
+Applies to all future pieces that extract or refactor path comparison logic. Remediation for piece 04 required before merge: add `S9b` test to `test/registry-schema.test.ts`.
+
+---
+
+### 2026-05-13: CAPCOM Review — Piece 04 (path-utils-upsert-rename)
+
+**Branch reviewed:** `akubly/upstream-04-path-utils-upsert-rename` (commit `1eae929a`)
+
+**VERDICT: APPROVE** — Functionally correct; findings to address in piece 05 or follow-up.
+
+**MAJOR findings:**
+- Spurious `@bradygaster/squad-cli: patch` changeset (no CLI source changed)
+- Test S14b still calls `registerEntry` instead of `upsertEntry`
+
+**MINOR findings:**
+- `normalisedPathKey` added to `resolution-v2.ts` re-exports (scope creep)
+- Spec-mandated test files missing without documented substitution
+- Wrapper-style `registerEntry` alias vs. const re-export (drift risk on signature changes)
+- `@deprecated` tag missing removal version/milestone
+
+---
+
+### 2026-05-13: Path normalization safety checks as standard for future pieces
+
+**Filed by:** RETRO  
+**Trigger:** Adversarial review of piece 04
+
+Standard checks for any piece adding path-comparison or path-key logic:
+1. **Symlink identity audit:** Does this check use `normalisedPathKey` (literal) or `pathsRefSameLocation` (realpath)? Must be explicit.
+2. **Trust boundary declaration:** Where do path inputs originate? Are all unvalidated inputs checked before calling path helpers?
+3. **upsertEntry / write-path documentation:** Any function that prepares registry data without writing must have `@see writeRegistry` JSDoc so callers don't mistake "validated entry returned" for "entry persisted."
+
+---
+
+### 2026-05-13: Rename PRs require non-BC test suite grep for old name
+
+**Author:** EECOM  
+**Trigger:** Piece 04 revision — S14b finding
+
+Any PR that renames a public API must include a `grep` sweep of the full test suite for the old name. Acceptable residuals: imports (if needed for BC tests), BC describe block contents, deprecated alias definitions, re-exports in index.ts.
+
+The sweep command:
+```
+grep -rn "oldName" test/ packages/*/test/
+```
+
+Call sites falling outside the explicit BC describe block are non-BC usages and must be updated.
+
+---
+
 ## Decision: EECOM Resolver Decisions — piece 03
 
 **Date:** 2026-05-13  

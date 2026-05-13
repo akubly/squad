@@ -8,7 +8,34 @@ Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, f
 
 ## Learnings
 
-### Discussion Triage Patterns (2026-03-23 Release Incident)
+### PR #11 Docs Quality Review — TypeDoc API Reference (2026-03-24)
+
+**Status:** REQUEST CHANGES (3 fixes required, 2 recommended)
+
+**Key findings:**
+- **Research + PRD:** Excellent quality. Clear problem statement, realistic effort estimate, pragmatic tool choice (TypeDoc over Starlight/api-extractor). Scannability framework applied correctly.
+- **Navigation strategy:** Collapsible `<details>` approach for 395-page API reference is sound UX. Sidebar nav plan well-structured with clear open questions about CI/CD safety.
+- **Microsoft Style compliance:** Mostly strong; discovered 3 minor issues.
+
+**Issues found:**
+1. **🔴 Blocking:** sdk.md crosslink banner missing. Users navigating from curated "SDK" guide have no callout to the auto-generated "API Reference".
+2. **🔴 Blocking:** Navigation URL inconsistency. `navigation.ts` hardcodes `reference/api/index` when it should be `reference/api`.
+3. **🟡 Blocking:** Nav plan's "Open Questions" section asks about CI/CD fallback.
+4. **🟡 Recommended:** 2–3 test descriptions need more specificity.
+5. **🟡 Recommended:** Screenshot filenames don't align with skill convention.
+
+**Pattern identified:** Generated documentation requires crosslinks from curated guides. When adding a new docs section, ensure the old curated page has a visible pointer.
+
+**Effort to fix:** < 2 hours.
+
+### 2026-03-22T12:46:00Z — Automated Version Sync Implementation
+
+Booster implemented automated version sync for `whatsnew.md`. Script reads `package.json` version, updates "Current Release" heading on every prebuild, with Vitest test gate. Heading now correct (v0.8.25+), will stay in sync automatically on all future builds.
+
+## Archive
+
+See `history-archive.md` for learnings prior to 2026-03-24 (discussions, blog patterns, boundary reviews, docs audit, etc.).
+
 **Context:** v0.9.1 release completed; 15 open discussions analyzing whether community response patterns matched feature releases.
 
 **Pattern identified:** Feature releases without follow-up discussion closes = missed trust opportunity. When you ship features (personal squad, worktrees, economy mode, rate limiting), search discussions for matching feature-requests → respond + close proactively. This signals to community that you listen.

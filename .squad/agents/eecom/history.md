@@ -22,6 +22,10 @@ The revision added S9b, the cross-case duplicate-path integration test, and swap
 
 **Commit structure**: impl commit amended to `c971b743`, Scribe housekeeping cherry-picked to `2a444c91`. Branch force-pushed with `--force-with-lease`.
 
+### Piece 04 deferred findings — scope for pieces 05+ (2026-05-13)
+
+Adversarial review identified deferred findings that affect follow-up pieces (init fail-fast, assign, unassign, doctor). See `.squad/decisions.md` under "### 2026-05-13: CAPCOM Review" and "### 2026-05-13: Path normalization safety checks as standard" for full list. Key items: spurious CLI changeset bump, scope creep on resolution-v2 re-exports, deprecated tag removal timeline, symlink collision warnings, write-path documentation. These are follow-up pieces' concerns; piece 04 is approved as-is.
+
 ### Adversarial review follow-up — piece 03 test hardening (2026-05-13)
 
 Test patterns learned from piece 03 review: tautology tests pass regardless of behavior; real assertions required on platform branches. Empty array vs missing field are structurally distinct. Chain precedence tests need active git teardown. Fixture isolation in TMP requires .git marker inside TMP to avoid walking up to outer git root.

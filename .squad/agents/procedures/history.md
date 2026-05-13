@@ -4,7 +4,13 @@
 
 ## Learnings
 
-### Issue Triage (2026-03-22T06:44:01Z)
+### Piece 04 Path-Utils Centralization (2026-05-13)
+
+Path-utils centralized as single source of truth for OS-aware path comparison logic. All future pieces (init fail-fast, assign, unassign, doctor) import from centralized path-utils module. Cross-case dedup test pattern established (S9b: platform-gated assertions on case-variant paths).
+
+## Archive
+
+See `history-archive.md` for learnings prior to 2026-05-13 (deterministic skill pattern, issue triage, economy mode governance, model catalog refresh, VS Code routing, templating, protected files, etc.).
 
 **Flight triaged 6 unlabeled issues and filed 1 new issue.**
 

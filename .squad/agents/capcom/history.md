@@ -69,3 +69,5 @@ Written full technical analysis to `.squad/identity/sdk-init-technical-analysis.
 
 📌 **Team update (2026-03-25T18:11Z):** CLI platform research complete — identified Copilot CLI 1.0.5–1.0.11 (8 releases in 10 days) contain three high-impact changes affecting Squad routing: monorepo instruction discovery (1.0.11), idle subagent hiding (1.0.8), subagentStart hook context injection (1.0.7). SDK version pinning doesn't prevent CLI runtime auto-updates. Recommendations: clean up template naming, upgrade to SDK 0.2.0 customize mode, file CLI issue. Report in decisions inbox.
 
+📌 **Team update (2026-05-13T18:28:28Z — Piece 04 Adversarial Review Complete):** Piece 04 (path-utils-upsert-rename) approved after revision cycle. Deferred architectural findings for piece 05+: spurious @bradygaster/squad-cli changeset bump, normalisedPathKey re-export scope creep on resolution-v2.ts (registry primitive on resolver surface), wrapper-style registerEntry alias drift risk, @deprecated tag missing removal timeline. See `.squad/decisions.md` "### 2026-05-13: CAPCOM Review" for full action items. Future pieces that re-export SDK primitives should apply same scope discipline.
+
