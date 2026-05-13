@@ -487,4 +487,25 @@ Public exports that accept `cwd` and invoke git should document that callers are
 
 ---
 
+### 2026-05-13: path-utils canonical home for OS-aware path helpers
+
+**Author:** CONTROL  
+**Piece:** 04
+
+`packages/squad-sdk/src/path-utils.ts` is the single source of truth for all OS-aware path comparison logic. No other module (registry, resolver, CLI command) may define its own case-normalization or path-equality logic. They import from path-utils or from the SDK subpath `@bradygaster/squad-sdk/path-utils`.
+
+**Rationale:** After pieces 01–03, the same `normCase` / path-equality pattern was independently implemented in `registry.ts` (private `pathKey`) and would have been duplicated again in future CLI command modules. Centralizing in path-utils ensures consistent behavior and prevents drift between the registry duplicate-key check and the resolver clone-containment check.
+
+**Scope:**
+- `normalisedPathKey` — duplicate-detection key for registry paths.
+- `pathsRefSameLocation` — bidirectional symlink-aware equality.
+- `clonesMatch` — sentinel-bounded containment check for `clones[]` resolution.
+
+**Consequences:**
+- Future pieces adding path checks (init fail-fast, assign, unassign, doctor) import from `@bradygaster/squad-sdk/path-utils`.
+- `resolution-v2.ts` re-exports all three helpers for resolver consumers that already import from it.
+- SDK index re-exports `normalisedPathKey` and `pathsRefSameLocation` for general callers.
+
+---
+
 

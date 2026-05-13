@@ -2,6 +2,8 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
+
 ## Learnings
 
 ### 2026-03-14: WSL Transient API Error Investigation (Issue #363)
