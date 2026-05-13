@@ -14,6 +14,8 @@ export { resolveSquad, resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePe
 export type { ResolvedSquadPaths, SquadDirConfig, SquadStateContext } from './resolution.js';
 export type { Registry, RegistryEntry } from './registry.js';
 export type { ResolvedSquad, ResolveOpts, ResolveErrorCode } from './resolution-v2.js';
+export { clonesMatch, collectCwdRemoteUrls, normalizeRemoteUrl } from './resolution-v2.js';
+export { pathsRefSameLocation } from './path-utils.js';
 export * from './config/index.js';
 export * from './agents/onboarding.js';
 export { resolvePersonalAgents, mergeSessionCast } from './agents/personal.js';

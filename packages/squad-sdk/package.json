@@ -225,6 +225,10 @@
     "./resolution-v2": {
       "types": "./dist/resolution-v2.d.ts",
       "import": "./dist/resolution-v2.js"
+    },
+    "./path-utils": {
+      "types": "./dist/path-utils.d.ts",
+      "import": "./dist/path-utils.js"
     }
   },
   "files": [
