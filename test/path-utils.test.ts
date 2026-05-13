@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { clonesMatch, pathsRefSameLocation } from '@bradygaster/squad-sdk/path-utils';
@@ -90,6 +90,22 @@ describe('pathsRefSameLocation()', () => {
     }
     expect(pathsRefSameLocation(dir('real-dir'), symlinkPath)).toBe(true);
   });
+
+  it('PU.6 falls back to literal comparison when realpath target was deleted', () => {
+    scaffold('real-target');
+    const link = dir('broken-link');
+    try {
+      symlinkSync(dir('real-target'), link, 'dir');
+    } catch {
+      return; // platform without symlink privilege — skip
+    }
+    rmSync(dir('real-target'), { recursive: true, force: true });
+    // realpath() on `link` now throws because the target is gone.
+    // pathsRefSameLocation must NOT throw; it falls back to literal compare.
+    expect(() => pathsRefSameLocation(link, link)).not.toThrow();
+    expect(pathsRefSameLocation(link, link)).toBe(true);
+    expect(pathsRefSameLocation(link, dir('something-else'))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -142,18 +158,13 @@ describe('clonesMatch() — subdirectory containment', () => {
 describe('clonesMatch() — case sensitivity', () => {
   it('CM.7 treats paths as case-insensitive on win32 and darwin', () => {
     scaffold('CasedRepo');
-    // We can only test the current-platform behavior here.
-    // On win32/darwin: upper-cased cwd should match lower-cased clone.
-    // On linux: they differ and should not match.
-    const platform = process.platform;
+    // On win32/darwin: upper-cased cwd should match lower-cased clone because normCase
+    // folds both to lowercase before comparison. On linux: case-sensitive, they differ.
     const result = clonesMatch(dir('CasedRepo').toUpperCase(), dir('casedrepo'));
-    if (platform === 'win32' || platform === 'darwin') {
-      // Case-insensitive: upper/lower mismatch should still match exact equality
-      // (the original dir exists and paths are equivalent under norm)
-      expect(typeof result).toBe('boolean'); // We verify it doesn't throw
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      expect(result).toBe(true);   // case-insensitive: differently-cased paths resolve to same location
     } else {
-      // On linux, we just verify it returns a boolean without throwing
-      expect(typeof result).toBe('boolean');
+      expect(result).toBe(false);  // case-sensitive on linux: uppercase/lowercase paths are distinct
     }
   });
 
@@ -210,5 +221,18 @@ describe('clonesMatch() — relative path rejection', () => {
     scaffold('repo');
     const err = catchSquadError(() => clonesMatch(dir('repo'), 'just-a-name'));
     expect(errorCode(err)).toBe('INVALID_CLONE_ENTRY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clonesMatch — separator normalization
+// ---------------------------------------------------------------------------
+
+describe('clonesMatch() — separator normalization', () => {
+  it('CM.13 normalizes trailing separator on cwd before comparing', () => {
+    scaffold('repo');
+    // path.resolve strips trailing separators on both sides before comparison
+    expect(clonesMatch(dir('repo') + sep, dir('repo'))).toBe(true);
+    expect(clonesMatch(dir('repo'), dir('repo') + sep)).toBe(true);
   });
 });

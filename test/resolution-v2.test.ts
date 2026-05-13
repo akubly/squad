@@ -768,6 +768,16 @@ describe('resolveSquad() — clones resolution', () => {
     expect(result).toBeNull();
   });
 
+  it('4.6b entry with clones: [] (empty array) falls through silently', () => {
+    scaffold('.git', 'clone-root', 'squad-home/.squad', 'registry');
+    const registryFile = dir('registry', 'registry.json');
+    // Empty array is distinct from a missing field; both should silently fall through.
+    writeRegistryFull(registryFile, [{ path: dir('squad-home', '.squad'), clones: [] }]);
+
+    const result = resolveSquad({ cwd: dir('clone-root'), env: {}, registryPath: registryFile });
+    expect(result).toBeNull();
+  });
+
   it('4.7 callsign is omitted from result when registry entry has no callsign', () => {
     scaffold('.git', 'clone-root', 'squad-home/.squad', 'registry');
     const registryFile = dir('registry', 'registry.json');
@@ -1031,6 +1041,18 @@ describe('resolveSquad() — platform fallback', () => {
     });
     expect(result).toBeNull();
   });
+
+  it('6.7 falls through when platform .squad path exists as a file rather than a directory', () => {
+    scaffold('.git', 'cwd-dir', 'xdg-data/squad');
+    writeFileSync(dir('xdg-data', 'squad', '.squad'), 'not-a-directory');
+    const result = resolveSquad({
+      cwd: dir('cwd-dir'),
+      env: { XDG_DATA_HOME: dir('xdg-data') },
+      platform: 'linux',
+      homeDir: dir('fake-home'),
+    });
+    expect(result).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1111,27 @@ describe('resolveSquad() — linked-worktree fallback', () => {
     const result = resolveSquad({ cwd: linkedWorktree, env: {} });
     expect(result).toBeNull();
   });
+
+  it('7.3 falls through when main-repo .squad is a file rather than a directory', () => {
+    const mainRepo = dir('main-squad-file');
+    const linkedWorktree = dir('linked-squad-file');
+
+    mkdirSync(mainRepo, { recursive: true });
+    try {
+      execSync(`git init -b main "${mainRepo}"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" config user.email "test@example.com"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" config user.name "Test"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" commit --allow-empty -m init`, { stdio: 'ignore' });
+      // Write .squad as a FILE, not a directory — resolver must treat as no-match.
+      writeFileSync(join(mainRepo, '.squad'), 'not-a-directory');
+      execSync(`git -C "${mainRepo}" worktree add "${linkedWorktree}"`, { stdio: 'ignore' });
+    } catch {
+      return;
+    }
+
+    const result = resolveSquad({ cwd: linkedWorktree, env: {} });
+    expect(result).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1116,7 +1159,7 @@ describe('resolveSquad() — full chain precedence', () => {
       env: {},
       registryPath: registryFile,
     });
-    expect(result?.source).toBe('env');
+    expect(result?.source).toBe('env'); // opts.callsign and SQUAD_CALLSIGN both route through resolveByCallsign
     expect(result?.path).toBe(dir('explicit', '.squad'));
   });
 
@@ -1160,6 +1203,91 @@ describe('resolveSquad() — full chain precedence', () => {
       registryPath: dir('nonexistent', 'registry.json'),
     });
     expect(result).toBeNull();
+  });
+
+  it('9.5 SQUAD_CALLSIGN (step 3) beats clones match (step 4)', () => {
+    // No local .squad/ at git root → step 2 falls through.
+    // SQUAD_CALLSIGN points to team-a → step 3 fires and returns early.
+    // CWD also matches team-b's clone entry → step 4 would have returned team-b,
+    // but step 3 already returned.
+    scaffold('.git', 'squad-a/.squad', 'squad-b/.squad', 'clone-b', 'registry');
+    const registryFile = dir('registry', 'registry.json');
+    writeRegistryFull(registryFile, [
+      { callsign: 'team-a', path: dir('squad-a', '.squad') },
+      { callsign: 'team-b', path: dir('squad-b', '.squad'), clones: [dir('clone-b')] },
+    ]);
+
+    const result = resolveSquad({
+      cwd: dir('clone-b'),
+      env: { SQUAD_CALLSIGN: 'team-a' },
+      registryPath: registryFile,
+    });
+    expect(result?.source).toBe('env');
+    expect(result?.path).toBe(dir('squad-a', '.squad'));
+  });
+
+  it('9.6 origins match (step 5) beats platform fallback (step 6)', () => {
+    // CWD has a remote URL matching a registry origin → step 5 returns.
+    // Platform .squad/ also exists → step 6 would have returned, but step 5 fires first.
+    const repoDir = dir('origins-repo-96');
+    mkdirSync(repoDir, { recursive: true });
+    try {
+      execSync(`git init "${repoDir}"`, { stdio: 'ignore' });
+      execSync(`git -C "${repoDir}" remote add origin https://github.com/contoso/myrepo96.git`, {
+        stdio: 'ignore',
+      });
+    } catch {
+      return; // Skip if git unavailable.
+    }
+
+    scaffold('squad-96/.squad', 'registry-96', 'xdg-96/squad/.squad');
+    const registryFile = dir('registry-96', 'registry.json');
+    writeRegistryFull(registryFile, [
+      {
+        callsign: 'team-96',
+        path: dir('squad-96', '.squad'),
+        origins: ['https://github.com/contoso/myrepo96.git'],
+      },
+    ]);
+
+    const result = resolveSquad({
+      cwd: repoDir,
+      env: { XDG_DATA_HOME: dir('xdg-96') },
+      platform: 'linux',
+      homeDir: dir('fake-home'),
+      registryPath: registryFile,
+    });
+    expect(result?.source).toBe('origins');
+    expect(result?.path).toBe(dir('squad-96', '.squad'));
+  });
+
+  it('9.7 platform fallback (step 6) beats linked-worktree (step 7)', () => {
+    // Set up a linked worktree whose main repo has .squad/ → step 7 would match.
+    // Also set up a platform .squad/ → step 6 fires first.
+    const mainRepo = dir('main-repo-97');
+    const linkedWorktree = dir('linked-worktree-97');
+
+    mkdirSync(mainRepo, { recursive: true });
+    try {
+      execSync(`git init -b main "${mainRepo}"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" config user.email "test@example.com"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" config user.name "Test"`, { stdio: 'ignore' });
+      execSync(`git -C "${mainRepo}" commit --allow-empty -m init`, { stdio: 'ignore' });
+      mkdirSync(join(mainRepo, '.squad'), { recursive: true });
+      execSync(`git -C "${mainRepo}" worktree add "${linkedWorktree}"`, { stdio: 'ignore' });
+    } catch {
+      return; // Skip if git worktree feature unavailable.
+    }
+
+    scaffold('xdg-97/squad/.squad');
+    const result = resolveSquad({
+      cwd: linkedWorktree,
+      env: { XDG_DATA_HOME: dir('xdg-97') },
+      platform: 'linux',
+      homeDir: dir('fake-home'),
+    });
+    expect(result?.source).toBe('platform');
+    expect(result?.path).toBe(dir('xdg-97', 'squad', '.squad'));
   });
 });
 
