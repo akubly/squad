@@ -171,6 +171,28 @@ Each piece's branch is based on its predecessor. When a predecessor is updated:
 
 4. If rebase conflicts are non-trivial, Lead reviews the resolution.
 
+## State Location During Phase B
+
+Each Phase B session accumulates `.squad/` state — agent histories, decision merges, session logs, orchestration entries — on the **feature branch for the piece being worked on**, layered as commits on top of the code commit. The specs/state branch (`akubly/upstream-specs`) holds only the spec corpus and this protocol document; it never carries per-piece session state.
+
+### Why
+
+Phase B sessions are clean-room replays. Their state — including learnings, review verdicts, and the routing record — is fork-internal and must never leak upstream. Keeping it on the feature branch makes the state colocated with the code it describes, and gives Phase C a clean separation point: Phase C strips the `.squad/` commits when forming the upstream PR, leaving only the code surface.
+
+### Mechanics
+
+- The implementer's code commit lands first on the feature branch (`akubly/upstream-{NN}-{slug}`), with the diff narrowed to the spec's parity surface.
+- After implementation and review, Scribe writes session state directly on that feature branch as a separate commit (`chore(squad): ...`). The state commit modifies only `.squad/` paths and never the code.
+- The specs branch is read-only during a Phase B session except when this protocol or a spec doc itself needs amendment.
+
+### Phase B operational rules vs. project decisions
+
+Some rules surface during Phase B that apply only to the replay workflow (such as this state-location rule). These belong in `REPLAY-PROTOCOL.md`, NOT in `.squad/decisions.md`. `.squad/decisions.md` is project memory that can travel with the squad framework; replay-protocol rules are fork-internal and never ship upstream.
+
+### Phase C interaction
+
+Phase C constructs the upstream PR by selecting only the code commit(s) from each feature branch. The `.squad/` state commits remain on the akubly-side branch as historical record but do not appear in the upstream PR diff. The scrub gate verifies the PR-shaped diff, not the full feature branch.
+
 ## Tone & Record Enforcement
 
 Replay agents' outputs — code comments, test descriptions, commit messages, PR descriptions, and any decision/history writes — must follow the same forbidden-content rules as specs:
