@@ -382,3 +382,109 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 
 **Rationale:** Config files (registry.json) and data directories (.squad/) follow different XDG conventions. Conflating them would cause unexpected behavior when users override only one.
 
+---
+
+## Archive: Entries older than 2026-04-13
+
+### 2026-03-25: PR Review Batch — Overlap Resolution
+
+Identified and resolved PR overlaps. Decided to merge #607 (retro enforcement), #603 (Challenger agent), #606 (tiered memory); close #605, #604, #602 as duplicates.
+
+### 2026-03-25: Triage + Work Session Plan
+
+Triaged 14 issues. High-priority items: #610 (broken link), #590 (getPersonalSquadRoot bug), #591 (hiring docs). Tamir PRs deferred pending proposal-first discipline (6 PRs without prior proposals).
+
+### 2026-03-26: CI deletion guard and source tree canary
+
+Added two safety checks to squad-ci.yml: source tree canary + large deletion guard (>50 files). Incident #631 — @copilot deleted 361 files on dev with no CI gate.
+
+### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
+
+Established strict semver (MAJOR.MINOR.PATCH), no prerelease suffixes on dev/main. SDK and CLI versions must stay in sync. Surgeon owns version bumps. CI enforcement via prerelease-version-guard.
+
+### 2026-03-26: Copilot git safety rules
+
+Added mandatory Git Safety section to copilot-instructions.md: prohibits git add ., requires feature branches and PRs, pre-push checklist, red-flag stop conditions. Incident #631.
+
+### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
+
+Updated release-process skill files with v0.9.4 learnings. Five distinct issues fixed: root package.json drift, CHANGELOG missing version entry, lockfile check rejection, GITHUB_TOKEN downstream workflows, prebuild bump workspace breaking.
+
+---
+
+## Decision: Resolver piece reviews require chain-precedence coverage
+
+**Date:** 2026-05-13  
+**Author:** Flight  
+**Status:** Accepted
+
+### Context
+
+Piece 03 introduces five new resolver chain steps (clones, origins, platform, worktree, init-guard). The spec mandates a "full chain precedence test" covering all 8 steps in sequence. The implementation proves precedence through pairwise tests (9.1–9.4 plus existing priority tests) rather than a single end-to-end test.
+
+### Decision
+
+Pairwise precedence tests are acceptable when the resolver is sequential (no branching between steps). A single 8-step test would be ideal documentation but is not a blocking requirement — the transitive property holds given sequential code structure. Future resolver pieces that introduce conditional branching between steps MUST include a single comprehensive chain test.
+
+### Consequences
+
+- Pieces 04+ may add steps without a full-chain rewrite, provided pairwise ordering is proven.
+- If the resolver gains conditional logic (e.g., skip origins when clones matched), a full-chain integration test becomes mandatory.
+
+---
+
+## Decision: Resolver test coverage pattern for platform-specific behavior
+
+**Date:** 2026-05-13  
+**Author:** FIDO  
+**Context:** Phase B piece 03 adversarial review
+
+### Observation
+
+When a path-comparison function uses `process.platform` directly (no platform parameter injection), tests for platform-specific branches can only run on the matching host. The risk is that a test written for win32/darwin falls into the pattern of asserting `typeof result === 'boolean'` as a placeholder — which always passes but catches nothing.
+
+### Recommendation
+
+Any test that cannot fully execute on the current platform (because the code reads `process.platform` at runtime) must do one of:
+1. **Conditional real assertion**: `if (process.platform === 'win32') expect(result).toBe(true)` — not `expect(typeof result).toBe('boolean')`.
+2. **Skip clearly**: `if (process.platform !== 'linux') return;` with a comment explaining why.
+3. **Inject platform**: Refactor the function to accept `platform?: NodeJS.Platform` so tests can override it and run everywhere.
+
+Placeholder assertions that pass trivially are worse than no test — they give false confidence.
+
+### Scope
+
+Applies to any future SDK or CLI function that branches on `process.platform` without a platform injection parameter.
+
+---
+
+## Security heuristic: SDK git-invocation pattern
+
+**Date:** 2026-05-13
+**Author:** RETRO
+**Context:** Piece 03 — clones/origins resolver + init-mode guard (commit a20daf43)
+
+### Decision
+
+For SDK utilities that invoke git as a subprocess, the canonical safe pattern is:
+
+```ts
+execFileSync('git', ['<subcommand>', ...staticArgs], {
+  cwd,
+  stdio: ['ignore', 'pipe', 'ignore'],
+});
+```
+
+Requirements:
+1. **`execFileSync` with array args** — never `execSync` with a shell string.
+2. **`stdio: ['ignore', 'pipe', 'ignore']`** — stderr suppressed; no git diagnostic info leaks.
+3. **Entire call wrapped in `try/catch`** — git unavailability or non-repo cwd returns a safe empty value, not a throw.
+4. **`shell` option omitted or explicitly `false`** — never `shell: true`.
+
+For path-containment checks, the sentinel-bounded pattern (`startsWith(prefix + path.sep)`) must be used instead of plain `startsWith(prefix)` to prevent sibling-prefix false positives. The `path.sep` boundary is mandatory on both literal and realpath comparison branches.
+
+Public exports that accept `cwd` and invoke git should document that callers are responsible for supplying a valid directory path; the function's `try/catch` makes invalid input safe but not validated.
+
+---
+
+

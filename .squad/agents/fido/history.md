@@ -10,6 +10,10 @@ Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPE
 
 📌 **Team update (2026-03-25T15:23Z — Triage Session & PR Review Batch):** FIDO reviewed 10 open PRs for quality and merge readiness. Identified 3 duplicate/overlap pairs consolidating 6 PRs into 4: #607 (retro enforcement, comprehensive) approved for merge, #605 closed as duplicate (less comprehensive). #603 (Challenger agent, correct paths) approved for merge, #604 closed as duplicate (wrong file paths). #606 (tiered memory superset, 3-tier model) approved for merge, #602 closed as duplicate (narrower 2-tier scope). Merge-ready PRs identified: #611 (blocked on #610), #592 (joniba wiring guide, high-quality). Draft #567 not ready. Impact: reduces PR count from 10 to 7, eliminates file conflicts, preserves unique value. All other PRs (#611, #608, #592, #567) can proceed independently. Decisions merged to decisions.md and decisions inbox deleted.
 
+## Archive: Work sessions prior to 2026-04-13 (30+ days old)
+
+PR triage batches and community contributions from March 10–April 4. Milestones: PR #331 test assertion sync (EXPECTED_SCENARIOS/FEATURES), issue triage session, agent name extraction refactoring, init scaffolding completeness (#579), personal squad init discovery (#576), publish policy CI gate (#557). All test suites green; quality gate patterns established.
+
 ## Learnings
 
 ### Test Assertion Sync Discipline
@@ -151,6 +155,10 @@ Added `test/init-scaffolding.test.ts` — 15 tests covering three gaps exposed b
 2. **No-remote resilience** — Confirms init succeeds without errors when: git repo has no remote configured, brand-new `git init` repo, or no git at all. Uses `execFileSync` to create isolated git repos in temp dirs.
 
 3. **Doctor validation after init** — Runs `runDoctor()` against a freshly-initialized directory and asserts zero failures, specifically that `casting/registry.json exists` check passes. Also tests negative cases (missing file → fail, corrupt JSON → fail).
+
+### Phase B Piece 03 Adversarial Review (2026-05-13)
+
+Reviewed clones/origins resolver + init-mode guard (94/94 green). Found one MAJOR gap: CM.7 case-sensitivity test asserts only `typeof result === 'boolean'` on both branches — passes regardless of return value. Cannot detect regression where case-insensitive matching silently returns `false` on win32/darwin. Found MINOR gaps: chain precedence tests cover steps 1>2, 2>4, 4>6 but miss 3>4 (SQUAD_CALLSIGN vs clones), 5>6 (origins vs platform), 6>7 (platform vs worktree). Trailing slash normalization and `clones:[]` empty array untested (code handles both, path.resolve and length guard). Piece-02 regression confirmed clean: `matchedOrigin: null` on `source='local'` still asserted via toMatchObject. VERDICT: APPROVE.
 
 Pattern: Tests follow existing `test/cli/init.test.ts` and `test/cli/doctor.test.ts` conventions — vitest, `randomBytes` temp dirs in cwd, imports from compiled dist via package exports (`@bradygaster/squad-cli/core/init`, `@bradygaster/squad-cli/commands/doctor`, `@bradygaster/squad-sdk`).
 
