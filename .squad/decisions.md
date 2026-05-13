@@ -304,3 +304,33 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 **What:** registry.ts kept free of resolver logic; later pieces consume it deterministically.
 **Why:** Resolver lives in subsequent pieces, separation keeps the parity surface tight.
 
+---
+
+### 2026-05-12: Module naming policy — no `-vN` in permanent module names
+**By:** Flight (Lead)
+**Date:** 2026-05-12
+**Status:** PROPOSED — captured from piece 02 adversarial review
+**What:** Permanent SDK module filenames and package subpaths MUST NOT carry a version suffix (`-v2`, `-v3`, …). When a module supersedes another, the stack MUST include an explicit rename/retire piece. The new module takes the canonical name; the old one is removed in the same release window. Versioning lives in `package.json` (semver) and changesets, not in filenames.
+**Why:** Piece 02 introduces `packages/squad-sdk/src/resolution-v2.ts` exposed at the `./resolution-v2` subpath. The 20-piece stack has no scheduled rename, leaving the suffix permanent or forcing a second breaking rename later. Establishing the policy at piece 02 — the first SDK consumer surface — prevents the pattern from propagating.
+**Action for current stack:** Defer the rename to a later piece (suggested after piece 11a). Piece 02 keeps `resolution-v2` per spec; the rename happens once the old `resolution.ts` is fully retired.
+
+---
+
+### 2026-05-12: SDK error model — typed reason codes on SquadError
+**By:** Flight (Lead) + FIDO (Quality Owner) — convergent finding
+**Date:** 2026-05-12
+**Status:** ACCEPTED — applied in piece 02 remediation
+**What:** Any `SquadError` thrown from an SDK boundary that downstream code is expected to branch on MUST carry a stable `code` field (e.g. `EMPTY_CALLSIGN`, `REGISTRY_MISSING`, `UNKNOWN_CALLSIGN`, `STALE_PATH`). Codes are documented in the SDK barrel as a union type so consumers get type-checked branches. Message strings remain free-form for humans; codes are the contract for programs.
+**Why:** Piece 02 originally collapsed four failure modes into a single `SquadError` with category `CONFIGURATION`. Downstream CLI pieces 05+ need to render different remediation per failure mode without regex-matching messages.
+**Implemented in:** commit `05bd332f` (piece 02 remediation) — `ResolveErrorCode` union now exported from the SDK barrel.
+
+---
+
+### 2026-05-12: Callsign input sanitization at resolver boundary
+**By:** RETRO (Security)
+**Date:** 2026-05-12
+**Status:** ACCEPTED — applied in piece 02 remediation
+**What:** Callsigns provided via `opts.callsign` or `SQUAD_CALLSIGN` env var must be validated against a restricted character set (`^[A-Za-z0-9_-]+$`) BEFORE registry lookup. `fs.lstatSync` is preferred over `fs.statSync` when checking a registry entry's stored path so symlinks to nonexistent targets fail cleanly instead of being followed.
+**Why:** Defense-in-depth at the trust boundary between unprivileged inputs (env vars, flag values) and registry-driven file-system access. The registry validator (piece 01) protects stored entries; the resolver protects the input side.
+**Implemented in:** commit `05bd332f` (piece 02 remediation).
+

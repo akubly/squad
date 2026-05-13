@@ -14,3 +14,17 @@ RETRO assigned:
 Pattern: Critical production bug identified. Race condition in history-shadow requires atomicity guarantees from StorageProvider abstraction (CONTROL/EECOM).
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. RETRO owns #479 mitigation strategy. Production bug severity high; blocks stable history-shadow operation. Depends on StorageProvider PRD completion (#481). Coordinated rollout required.
+
+### Piece 02 adversarial review (2026-05-12T23:06:58-07:00)
+
+**Verdict:** CLEAR (no blocking issues, 2 hardening recommendations accepted)
+
+**Hardening recommendations implemented in commit `05bd332f`:**
+1. **Callsign character-set validation** — Restrict to `^[A-Za-z0-9_-]+$` at resolver boundary (both `opts.callsign` and `SQUAD_CALLSIGN` env var), max length 64.
+2. **Symlink defense** — Use `fs.lstatSync` (not `fs.statSync`) when checking registry entry stored paths. Prevents symlinks to nonexistent targets from silently being followed.
+
+**Risk assessment:** Low today (strict equality validation prevents injection). Future-proofing: if callsigns are used in file paths or URLs downstream, character validation acts as first-line defense.
+
+**Cleared threat vectors:** Registry traversal, env-var trust boundary, symlink following, JSON injection, TOCTOU races — all non-exploitable from unprivileged inputs given current design. Validation at resolver boundary completes the security model begun in piece 01 registry validation.
+
+

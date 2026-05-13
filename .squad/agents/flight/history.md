@@ -185,3 +185,23 @@ Decision written to `.squad/decisions/inbox/flight-release-hardening-plan.md`.
 **Pattern:** Tamir is a high-output contributor (6 PRs in 2 weeks) but needs proposal-first discipline. Joniba and diberry deliver MSFT-level quality.
 
 Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
+
+### Piece 02 adversarial review (2026-05-12T23:06:58-07:00)
+
+**Verdict:** APPROVE WITH CONDITIONS (2 architectural concerns, 3 should-fix items; all decisions captured)
+
+**Architectural concerns requiring policy decisions:**
+
+1. **Module naming — `-v2` in permanent SDK module names** — Piece 02 introduces `resolution-v2.ts` exposed at the `./resolution-v2` subpath. The 20-piece stack has no scheduled rename. Decision: Establish team policy that permanent SDK filenames MUST NOT carry version suffixes. Defer the rename to a later piece (suggested after piece 11a) when the old `resolution.ts` is fully retired. Policy documented in decisions.md.
+
+2. **Error model opacity** — Piece 02 originally threw `SquadError` with category `CONFIGURATION` for four distinct failure modes. Downstream CLI pieces (05+) need typed reason codes for remediation branching. Decision: Implement typed error codes on `SquadError` metadata (EMPTY_CALLSIGN, REGISTRY_MISSING, UNKNOWN_CALLSIGN, STALE_PATH). Export `ResolveErrorCode` union from SDK barrel. Implemented in remediation commit `05bd332f`.
+
+**Should-fix items — deferred or in-flight:**
+
+1. **Closed `source` union** — Piece 02 leaves resolver source type open (string | SourceType union). Proposal: close to specific named types in pieces 08a–c during new-SDK migration. Deferred.
+2. **`matchedOrigin: string | null` permanence** — Currently `null` when origin cannot be determined. Proposal: formalize contract (when is it null? what does null mean for downstream?). Deferred to piece 03 spec clarity.
+3. **Barrel co-tenancy with old `resolveSquad`** — SDK barrel exports both `resolveSquad` (piece 01) and new `resolveSquad` (piece 02). No collision today; eventual rename hides the distinction. Deferred to pieces 08a–c migration.
+
+**Test count:** 17 → 28 (11 new tests added in remediation). All green. FIDO conditional approval gates on acceptance of architectural decisions (error model + naming policy).
+
+

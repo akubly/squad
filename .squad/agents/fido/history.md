@@ -223,3 +223,20 @@ Reviewed 9 community PRs (8 from tamirdresher, 1 from eric-vanartsdalen). Key fi
 
 **Learning:** Community contributors consistently struggle with two things: (a) scoped npm package names in changesets, and (b) monorepo file placement. Both are preventable with better contributor docs.
 
+### Piece 02 adversarial review (2026-05-12T23:06:58-07:00)
+
+**Verdict:** CONDITIONAL (2 blocking findings, 5 should-fix items all addressed in remediation commit `05bd332f`)
+
+**Blocking issues identified:**
+1. **Test isolation failure** — Tests 2.4 and 2.5 inherit `process.env.SQUAD_CALLSIGN` when `opts.env` not set. Env not pinned, exposing test state leakage.
+2. **Empty callsign gap** — `opts.callsign = ''` path entirely untested.
+
+**Should-fix items (all resolved in remediation):**
+- Tautological priority test (test input identical to expectation)
+- Three-way priority case unexercised in test suite
+- Registry path priority partially tested (missing platform-default + env-var coverage)
+- Error categorization opaque (`CONFIGURATION` category doesn't discriminate four distinct failure modes)
+- Conditional priority logic clarity (test naming and assertions could be stronger)
+
+**Test remediation summary:** Commit `05bd332f` added 11 new tests (17 → 28 total), pinned `opts.env` across all test cases, closed both blocking gaps, and implemented typed error codes (`ResolveErrorCode` union) for downstream CLI discriminability. All tests green. FIDO approval conditional on acceptance of architectural decisions (error model, -v2 naming).
+
