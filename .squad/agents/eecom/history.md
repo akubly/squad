@@ -2,7 +2,21 @@
 
 > Environmental, Electrical, and Consumables Manager
 
+## Summary
+
+EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick rebases, and Phase B replay coordination. Core patterns: (1) Registry module as schema+disk-I/O boundary, resolver logic deferred to subsequent pieces. (2) Template sync via `sync-templates.mjs` covers `.squad-templates/` but NOT `.copilot/skills/` — manual propagation required for init-mode across packages. (3) Cherry-picks from insider branches to dev require dropping insider-only module references. (4) Casting engine integration augments LLM proposals with curated names and personalities from recognized universes (Usual Suspects, Ocean's Eleven). (5) Schema validation uses `SquadError` from adapter/errors.ts with `ErrorSeverity.ERROR` and `ErrorCategory.VALIDATION`. (6) Loop command resolution must derive `teamRoot` from `.squad/` location, not worktree root, to handle nested scenarios.
+
 ## Learnings
+
+### Registry schema validator (2026-05-12T13:55:42-07:00)
+
+**Helpers:** `SquadError` lives in `packages/squad-sdk/src/adapter/errors.ts` with constructor `(message, severity, category, context, recoverable, originalError)`. Registry validation uses `ErrorSeverity.ERROR` and `ErrorCategory.VALIDATION`.
+
+**Path keys:** No exported path-key helper is present in SDK source. The registry module uses a module-local normalized key from `path.resolve()` and `path.normalize()`, with Windows case folding for platform path uniqueness.
+
+**User registry path:** `resolveSquadHome(false)` in `packages/squad-sdk/src/resolution.ts` is the user-scope root resolver. `loadRegistryFromDisk()` joins that root with `registry.json` when no path is supplied.
+
+**Vitest pattern:** Tests import TypeScript source through `.js` specifiers and use project-local scratch directories under `test/` with `afterEach` cleanup.
 
 ### Template Brady contamination fix (#977) (2026-05-01)
 
@@ -325,5 +339,7 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 5. `resolution.test.ts` - Added 3 tests.
 
 **Pattern:** `resolveGlobalSquadPath()` returns the container; `ensurePersonalSquadDir()` creates the subdirectory the rest of the system looks for.
-📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
+📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like 
+esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
+
 

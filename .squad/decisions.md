@@ -240,3 +240,67 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 - #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision
 - #581 (ADO PRD) — P2, blocked until #341 (SDK-first parity) ships
 
+---
+
+### 2026-03-26: CI deletion guard and source tree canary
+**By:** Booster (CI/CD)
+**What:** Added two safety checks to squad-ci.yml: (1) source tree canary verifying critical files exist, (2) large deletion guard failing PRs that delete >50 files without 'large-deletion-approved' label. Branch protection on dev requested (may need manual setup).
+**Why:** Incident #631 — @copilot deleted 361 files on dev with no CI gate catching it.
+
+---
+
+### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
+**By:** Booster (CI/CD Engineer)
+**Status:** Implemented
+**Requested by:** Brady
+
+Updated both release-process skill files with critical learnings from the v0.9.4 release session. The v0.9.4 release was delayed by three distinct issues, each fixed by a separate PR.
+
+**Files Updated:**
+1. `.squad/skills/release-process/SKILL.md` (team-level skill)
+2. `.copilot/skills/release-process/SKILL.md` (copilot-level skill)
+3. `.squad/agents/booster/history.md` (learnings log)
+
+**Issues and Fixes:**
+
+| Issue | Root Cause | Fix PR | Skill Section |
+|-------|-----------|--------|---------------|
+| Root package.json version drift | squad-release.yml reads from root, not sub-packages | #1043 | Known Gotchas + v0.9.4 Incident Learnings |
+| CHANGELOG missing `## [$VERSION]` | Workflow validates version entry exists | #1042 | Known Gotchas + Release Checklist |
+| Lockfile integrity check rejects workspace packages | Check didn't filter for registry-only packages | #1044 | Known Gotchas + Common Failure Modes |
+| GITHUB_TOKEN can't trigger downstream workflows | GitHub security feature prevents event propagation | N/A (design) | GITHUB_TOKEN section + Manual Publish |
+| Prebuild bump breaks workspace linking | bump-build.mjs mutates versions breaking exact match | N/A (known) | Local Development section |
+
+---
+
+### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
+**By:** Flight (Lead)
+**Requested by:** Dina
+**Status:** DECIDED
+**Confidence:** Medium (confirmed by PR #640 incident, PR #116 prerelease leak, CI gate implementation)
+
+**Decision:**
+1. All packages use strict semver (`MAJOR.MINOR.PATCH`). No prerelease suffixes on `dev` or `main`.
+2. Prerelease versions are ephemeral. `bump-build.mjs` creates `-build.N` for local testing only — never committed.
+3. SDK and CLI versions must stay in sync. Divergence silently breaks npm workspace resolution.
+4. Surgeon owns version bumps. Other agents must not modify `version` fields in `package.json` unless fixing a prerelease leak.
+5. CI enforcement via `prerelease-version-guard` blocks PRs with prerelease versions. `skip-version-check` label is Surgeon-only.
+
+**Why:** The repo had no documented versioning policy. PR #640 showed prerelease version `0.9.1-build.4` silently broke workspace resolution. PR #116 showed Surgeon lacked guidance on clean release versions.
+
+Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
+
+---
+
+### 2026-03-26: Copilot git safety rules
+**By:** RETRO (Security)
+**What:** Added mandatory Git Safety section to copilot-instructions.md: prohibits `git add .`, requires feature branches and PRs, adds pre-push checklist, defines red-flag stop conditions.
+**Why:** Incident #631 — @copilot used destructive staging on an incomplete working tree, deleting 361 files.
+
+---
+
+### 2026-05-12: registry module is a schema + disk-I/O boundary
+**By:** EECOM (Piece 01 Registry Validator)
+**What:** registry.ts kept free of resolver logic; later pieces consume it deterministically.
+**Why:** Resolver lives in subsequent pieces, separation keeps the parity surface tight.
+
