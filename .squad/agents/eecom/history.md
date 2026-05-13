@@ -8,6 +8,24 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
+### clones/origins resolver + init-mode guard — piece 03 (2026-05-13)
+
+**Fixture isolation in TMP dirs under an outer git repo:** All TMP dirs created under `D:\git\squad-replay` are inside the squad-replay git repo which has its own `.git` + `.squad/`. Without a `.git` marker inside TMP, `findGitRoot` walks up past TMP to the squad-replay root and returns `source: 'local'` pointing to the real `.squad/` — causing step 2 (worktree-local) to fire before steps 4–7. Fix: always scaffold a `.git` file/directory inside TMP when the test needs TMP to be the git root with no squad present.
+
+**Platform fallback uses XDG_DATA_HOME, not XDG_CONFIG_HOME:** Registry path resolution uses `XDG_CONFIG_HOME` → `~/.config/squad/registry.json`. Platform fallback for `.squad/` uses `XDG_DATA_HOME` → `~/.local/share/squad/.squad`. Different env vars, different directories.
+
+**Registry load strategy differs by step:** `resolveByCallsign` (steps 1, 3) throws on missing registry. Steps 4 (clones) and 5 (origins) silently fall through on missing OR malformed registry — wrapped in `try/catch` with `fs.existsSync` guard.
+
+**Sentinel-bounded containment in clonesMatch:** `clone + path.sep` is the containment boundary, not just `clone`. This prevents `D:\git\repo` from matching `D:\git\repo-tools`. Relative clone entries throw `INVALID_CLONE_ENTRY` — they cannot be reliably resolved without cwd context that is already consumed.
+
+**URL normalization canonical forms:** ADO: `dev.azure.com/{org}/{project}/_git/{repo}`. GitHub: `github.com/{org}/{repo}`. Unknown URLs: lowercase entire input. Trailing `.git` stripped only from recognized forms. `matchedOrigin` always returns the ORIGINAL registry string, not the canonical form.
+
+**collectCwdRemoteUrls deduplication is by canonical URL:** The function deduplicates by normalized form but returns the original raw URL strings. Only lines ending with ` (fetch)` are parsed.
+
+**Linked-worktree detection:** `gitRoot/.git` is a FILE whose content starts with `gitdir: `. Then `git worktree list --porcelain` parses blank-line-separated records. Returns `.squad/` path from the FIRST worktree that has one.
+
+**INVALID_CLONE_ENTRY in path-utils.ts:** The literal string `'INVALID_CLONE_ENTRY'` is used in the `SquadError` constructor directly (avoids a circular import with `resolution-v2.ts`). The type union is declared in `resolution-v2.ts`.
+
 ### Registry schema validator (2026-05-12T13:55:42-07:00)
 
 **Helpers:** `SquadError` lives in `packages/squad-sdk/src/adapter/errors.ts` with constructor `(message, severity, category, context, recoverable, originalError)`. Registry validation uses `ErrorSeverity.ERROR` and `ErrorCategory.VALIDATION`.
@@ -17,6 +35,10 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 **User registry path:** `resolveSquadHome(false)` in `packages/squad-sdk/src/resolution.ts` is the user-scope root resolver. `loadRegistryFromDisk()` joins that root with `registry.json` when no path is supplied.
 
 **Vitest pattern:** Tests import TypeScript source through `.js` specifiers and use project-local scratch directories under `test/` with `afterEach` cleanup.
+
+## Archive (entries before 2026-04-01)
+
+Summarized learnings from Q4 2025 and Q1 2026: SDK init flow deep-dive (phase-based quality improvements), adoption tracking (privacy-first metrics), casting engine integration (LLM augmentation with curated universes), cross-platform filename fixes (colons in timestamps), cherry-pick rebasing patterns, loop command refactors (teamRoot derivation, streaming output, template dedup), file race condition defense (async mutex + atomicity), signal handling in child processes, ESM runtime patching for @github/copilot-sdk, CLI entry-point architecture (lazy imports, dynamic routing), packaging strategy (npm pack + postinstall hooks), release readiness audits (smoke test gates), decision archival (count-based fallback for large files), init scaffolding fixes (casting dir creation, git stderr suppression), personal squad root resolution, rate limit recovery UX, Node.js version gating for node:sqlite, version subcommand patterns, privacy scrub messaging. All learnings from these entries inform current SDK + CLI operations; full details preserved in git history.
 
 ### Template Brady contamination fix (#977) (2026-05-01)
 
