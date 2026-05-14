@@ -100,3 +100,26 @@ Both types are re-exported from the SDK barrel (`src/index.ts`).
 ### Piece 02 Adversarial Review — Team Verdict (2026-05-13T06:07:00Z)
 
 📌 **Team update:** FIDO, RETRO, and Flight completed adversarial reviews of piece 02 (commit 68b4f379) before Phase C. **Verdict: CONDITIONAL (blocking issues) + CLEAR security + APPROVE WITH CONDITIONS (architecture).** FIDO identified 2 blocking test-isolation and coverage gaps (tests 2.4–2.5 inherit `process.env` when `opts.env` not set; `opts.callsign = ''` path untested) plus 5 should-fix gaps. RETRO recommends callsign character-set validation (non-breaking) with low current risk. Flight proposes two architectural decisions: (1) module-naming policy against `-vN` suffixes (rename `resolution-v2.ts` → `resolver.ts` in dedicated piece or document exception), (2) typed error codes on `SquadError` for downstream CLI discriminability. No breaking changes, no security blocking. Brady awaiting remediation routing — CONTROL not locked out. See `.squad/decisions.md` for full findings.
+
+### Piece 05 Revision — CLI Command Stubs (2026-05-20T01:50:00Z)
+
+**Scope:** Replaced EECOM's rejected commit `0488acaa` with clean revision `366dd6c8` addressing all ~25 blocking items from FIDO/INCO adversarial review.
+
+**Key patterns learned:**
+
+1. **Dual-module coexistence:** Two separate doctor modules exist: `src/cli/commands/doctor.ts` (legacy, `DoctorCheck[]`) and `src/commands/doctor.ts` (piece-05, `RunDoctorResult`). Package exports map them to distinct subpaths. Tests must use the correct import path.
+
+2. **Help text regression surface:** Acceptance tests (`test/acceptance/features/*.feature`) assert specific description strings in `squad help` output. When trimming help text, every command listed must keep its full description matching the feature file expectations.
+
+3. **Resource contention flakes:** Under full-suite load, 6+ tests fail from timeouts and ENOTEMPTY errors (resolution-v2, state-backend, init-scaffolding, journey-error-handling). All pass solo. These are NOT caused by piece-05 changes — they're a known flake class from temp-dir cleanup races.
+
+4. **Shared helper extraction:** `_registry-path.ts` centralizes registry path resolution with unified precedence: explicit > env override > process.env > platform default. The `_` prefix signals internal-only (no subpath export).
+
+5. **Severity typing without casts:** Using `let severity: Severity = 'info'` with conditional reassignment avoids EECOM's `{ severity: 'info' as Severity }` box pattern that required unsafe `as` casts.
+
+**Verification gates:**
+- 83 in-scope tests: ALL PASS (32 original + 16 legacy doctor + 35 new)
+- 4 regression tests: ALL PASS (speed-gates, ux-gates, e2e-shell, init-scaffolding)
+- 29 acceptance tests: ALL PASS (including consult/extract help text)
+- Build: CLEAN
+- Full suite: 15 failures, all pre-existing flakes (pass solo)
