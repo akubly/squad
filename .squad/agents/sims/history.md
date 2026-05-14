@@ -8,6 +8,37 @@ Sims owns end-to-end test coverage, integration test harnesses, cross-component 
 
 ## Learnings
 
+### Piece 08b Revision — Resolver Guard Harmonization (2026-05-14)
+
+**Role:** Revision author (successor to EECOM, locked out per Reviewer Rejection Protocol)
+
+#### Gap #3 Ruling — URL/Clone/Host-Verify Deferred
+
+The three assign-to-copilot failure modes FIDO flagged (URL-without-clone-destination, clone failure, host verification failure) were deferred. Spec wording uses "preserve" — which presupposes prior existence. Since `assign-to-copilot` is introduced as new work in 08b, there is nothing to preserve. These are future feature work, not resolver-migration scope. Documented in `.squad/decisions/inbox/sims-08b-revision.md`.
+
+#### Flight Nit Harmonization — Dispatch-Level Guard with Threading
+
+Chose **dispatch-level guard** as the canonical pattern for all three commands (consistent with 08a pattern for read-only commands):
+
+- `consult` and `link`: inline boolean guard (no stored result — runner is self-contained)
+- `assign-to-copilot`: guard stores result and threads it into `RunAssignOpts.resolved`
+
+Key insight: whether to thread the result depends on whether the runner needs the struct. If the runner re-resolves from the same inputs, that's fine and intentional (gate-only semantics). If the runner needs `resolved.path` or `resolved.callsign`, thread the result to avoid any guard/runner divergence.
+
+#### FIDO Gap #1 — Consult Success Path Test
+
+The consult setup success test required both a real git init on consumerRepo (for `setupConsultMode` to write `.git/info/exclude`) AND a personal squad via `squad init --global`. Both are achievable within the test fixture pattern using `execSync` for git init and `runCli` for init. Pattern: set up XDG env vars pointing to a test-local global config dir.
+
+#### FIDO Gap #2 — Spec Requires ALL Named Side Effects
+
+The spec lists `config.json`, `.gitignore`, and `.git/info/exclude` as side-effect locations. Testing only `config.json` absence leaves the other two unchecked. Checklist going forward: for every failure test, enumerate ALL file locations the command can write and assert none of them changed.
+
+#### Reusable Pattern: Resolver Guard Threading
+
+Extracted to `.squad/skills/resolver-guard-threading/SKILL.md`. Key components: dispatch-level guard shape, runner threading shape, testing checklist (failure path + success path + threading proof), and path validation before file writes.
+
+---
+
 ### Piece 08b — User-Action Command Migration (2026-05-14)
 
 **Revision owner assigned:** Sims (Integration / E2E)
