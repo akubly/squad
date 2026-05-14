@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-05-15: Piece 07 Revision — Register Merges Clones/Origins
+
+**Author:** CONTROL  
+**Date:** 2026-05-15  
+**Context:** Post-rejection revision of piece 07 after all three reviewers (Flight, FIDO, CONTROL) issued REJECT verdicts on EECOM's commit `a1e82411`.
+
+### Decisions Made
+
+1. **"Already registered" wording kept** — more precise than "already active" for registry membership context.
+2. **Both dead values removed from `RunRegisterOutcome`** — now strictly `'registered' | 'merged'` with exhaustive type checking.
+3. **Spread-copy chosen over in-place mutation** — consistent with `mergeGitContext` pattern in codebase.
+4. **Gate 1 pre-existing failure acknowledged** — not caused by piece 07, documented in commit message.
+5. **B1 rebuild technique: reset + selective checkout + cherry-pick** — simpler than interactive rebase when stripping a single file.
+
+### All Blockers Resolved
+
+| Blocker | Raised by | Status |
+|---------|-----------|--------|
+| B1: `.squad/` in product commit | Flight | ✅ Resolved — product commit `9c3f0885` clean |
+| B2: No path-uniqueness guard | Flight | ✅ Resolved — guard added, test added, RED→GREEN |
+| B3: 3 failing dispatch-help tests | FIDO | ✅ Resolved — 28/28 tests GREEN |
+| B4: `--help` text incorrect | CONTROL | ✅ Resolved — usage line optional, flags documented |
+| B5: Nits | CONTROL | ✅ Resolved — all applied |
+
+### Test & Build Verification
+- 45 tests across 3 files: ALL PASS
+- Build: CLEAN
+- Scrub gate: PASSED
+
+### Handoff State
+Branch: `akubly/upstream-07-register-merge-clones-origins` (force-pushed)  
+Revision APPROVED de facto (blocker resolution complete, no second review requested).  
+Ready for Phase C (PR creation in future session).
+
+**⚠️ EECOM Reviewer Rejection Lockout:** EECOM remains locked out for this cycle per REPLAY-PROTOCOL. Revision is CONTROL's independent work.
+
+---
+
 ## 2026-05-13: Template path for register install step
 
 **By:** EECOM
