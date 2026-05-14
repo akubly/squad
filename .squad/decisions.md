@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-05-14: Piece 08a Accepted — Final
+**By:** akubly (Brady) — via Copilot coordinator
+**Subject:** akubly/upstream-08a-migrate-readonly-commands @ revised piece 0e4f301e
+**What:** Piece 08a is complete. Post-revision delta triage by FIDO confirmed the 7-test full-suite delta was all flakes (3 flakes passed 3/3 on individual rerun; 0 real regressions; 2 tests actually fixed by the revision). User accepted the revision as final without further re-review.
+**Why:** All four concrete findings from the original review (CAPCOM's SDK barrel routing + dispatch unification; FIDO's --team-root parity + boundary test) were addressed by CAPCOM under strict lockout. Migration tests improved from 5/5 to 8/8 PASS. Build clean. Scrub gate baseline unchanged. Phase C will open the PR in a separate session.
+**Lockout status:** CONTROL remains locked out for piece 08a (artifact-scoped; does not affect their work on other pieces).
+
+---
+
 ## 2026-05-14: Piece 08a Revision Complete — CAPCOM, Awaiting User Re-verification
 
 **By:** CAPCOM (SDK Expert) — reviewer rejection lockout, independent revision  
