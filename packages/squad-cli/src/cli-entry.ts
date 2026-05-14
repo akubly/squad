@@ -1009,8 +1009,7 @@ async function main(): Promise<void> {
     const showStatus = args.includes('--status');
     if (!showStatus) {
       // Resolution is the precondition for setup and dry-run modes.
-      const resolved = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
-      if (!resolved) {
+      if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
         fatal(
           'No squad found.\n' +
             '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
@@ -1039,8 +1038,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'link') {
-    const resolved = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
-    if (!resolved) {
+    if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
       fatal(
         'No squad found.\n' +
           '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
@@ -1174,7 +1172,16 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'assign-to-copilot' || cmd === 'assign') {
-    const { runAssignToCopilot } = await import('./commands/assign.js');
+    // Dispatch-level guard: consistent pattern with consult and link.
+    const guardResult = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    if (!guardResult) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad register --callsign <name>" to register a squad first,\n' +
+          '   or pass --callsign to specify the target squad.',
+      );
+      return;
+    }
     const callsignIdx = args.indexOf('--callsign');
     const callsign = callsignIdx !== -1 ? args[callsignIdx + 1] : undefined;
     const registryPathIdx = args.indexOf('--registry-path');
@@ -1183,6 +1190,11 @@ async function main(): Promise<void> {
     const noInstallAgent = args.includes('--no-install-agent');
     const homeIdx = args.indexOf('--home');
     const home = homeIdx !== -1 ? args[homeIdx + 1] : undefined;
+    if (home !== undefined && (!path.isAbsolute(home) || home.replace(/\\/g, '/').split('/').includes('..'))) {
+      fatal(`--home must be an absolute path without ".." traversal, got: "${home}"`);
+      return;
+    }
+    const { runAssignToCopilot } = await import('./commands/assign.js');
     try {
       await runAssignToCopilot({
         cwd: getSquadStartDir(),
@@ -1192,6 +1204,7 @@ async function main(): Promise<void> {
         dryRun,
         noInstallAgent,
         home,
+        resolved: guardResult,
       });
     } catch (err) {
       const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;

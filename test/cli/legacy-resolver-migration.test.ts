@@ -4,9 +4,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { resolveSquad } from '@bradygaster/squad-sdk';
 
@@ -254,6 +254,12 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
     expect(result.exitCode).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
     expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+    // Spec: ignore/exclude entries must not be written on failure.
+    expect(existsSync(join(TEST_ROOT, '.gitignore'))).toBe(false);
+    const gitExcludePath = join(TEST_ROOT, '.git', 'info', 'exclude');
+    if (existsSync(gitExcludePath)) {
+      expect(readFileSync(gitExcludePath, 'utf8')).not.toContain('.squad/');
+    }
   });
 
   it('consult --check does not create .squad/config.json when no squad is found', async () => {
@@ -266,6 +272,12 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
     expect(result.exitCode).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
     expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+    // Spec: ignore/exclude entries must not be written on failure.
+    expect(existsSync(join(TEST_ROOT, '.gitignore'))).toBe(false);
+    const gitExcludePath = join(TEST_ROOT, '.git', 'info', 'exclude');
+    if (existsSync(gitExcludePath)) {
+      expect(readFileSync(gitExcludePath, 'utf8')).not.toContain('.squad/');
+    }
   });
 
   it('consult --status from consumer repo still reports local project state', async () => {
@@ -292,6 +304,8 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
     expect(result.exitCode).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
     expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+    // Spec: .gitignore must not be appended on failure.
+    expect(existsSync(join(TEST_ROOT, '.gitignore'))).toBe(false);
   });
 
   it('link creates .squad/config.json after resolving consumer checkout through registry', async () => {
@@ -322,6 +336,9 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toMatch(/already assigned|assigned/i);
+    // The runner output includes the resolved squad path, proving the dispatch
+    // guard result was threaded through rather than re-resolved independently.
+    expect(result.stdout).toContain(fixture.hostSquad);
   });
 
   it('assign-to-copilot does not mutate registry when callsign is not found', async () => {
@@ -348,5 +365,43 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('Dry-run');
+  });
+
+  // Gap #1: consult guarded setup path going GREEN
+
+  it('consult setup creates .squad/config.json when resolver succeeds and personal squad exists', async () => {
+    const fixture = await createFixture();
+
+    // Initialize consumerRepo as a real git repo so setupConsultMode can write .git/info/exclude.
+    execSync('git init', { cwd: fixture.consumerRepo, stdio: 'ignore' });
+    execSync('git config user.email "t@t.com"', { cwd: fixture.consumerRepo, stdio: 'ignore' });
+    execSync('git config user.name "T"', { cwd: fixture.consumerRepo, stdio: 'ignore' });
+
+    // Create personal squad at a test-local XDG location.
+    const globalConfig = join(TEST_ROOT, 'global-config');
+    await mkdir(globalConfig, { recursive: true });
+    const initResult = await runCli(['init', '--global'], fixture.consumerRepo, {
+      XDG_CONFIG_HOME: globalConfig,
+      APPDATA: globalConfig,
+      LOCALAPPDATA: globalConfig,
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+    expect(initResult.exitCode).toBe(0);
+
+    // consumerRepo is a registered clone; resolver guard passes and personal squad exists.
+    const result = await runCli(['consult'], fixture.consumerRepo, {
+      XDG_CONFIG_HOME: globalConfig,
+      APPDATA: globalConfig,
+      LOCALAPPDATA: globalConfig,
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Consult mode activated');
+    expect(existsSync(join(fixture.consumerRepo, '.squad', 'config.json'))).toBe(true);
+    // setupConsultMode adds .squad/ to .git/info/exclude so the project dir stays untracked.
+    const gitExcludePath = join(fixture.consumerRepo, '.git', 'info', 'exclude');
+    expect(existsSync(gitExcludePath)).toBe(true);
+    expect(readFileSync(gitExcludePath, 'utf8')).toContain('.squad/');
   });
 });

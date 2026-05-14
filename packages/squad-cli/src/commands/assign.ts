@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveSquad, upsertEntry } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getTemplatesDir } from '../cli/core/templates.js';
@@ -34,6 +35,12 @@ export interface RunAssignOpts {
   home?: string;
   /** Skip coordinator agent install. */
   noInstallAgent?: boolean;
+  /**
+   * Pre-resolved squad result threaded from the dispatch-level guard.
+   * When provided the internal resolver call is skipped, ensuring guard and
+   * runner operate on the same resolution context.
+   */
+  resolved?: ResolvedSquad;
 }
 
 /**
@@ -45,11 +52,23 @@ export interface RunAssignOpts {
  * without writing duplicate entries.
  */
 export async function runAssignToCopilot(opts: RunAssignOpts): Promise<void> {
+  // Validate paths before any file-write use (RETRO: path traversal guard).
+  if (!path.isAbsolute(opts.cwd)) {
+    fatal(`cwd must be an absolute path, got: "${opts.cwd}"`);
+    return;
+  }
+  if (opts.home !== undefined && (!path.isAbsolute(opts.home) || opts.home.replace(/\\/g, '/').split('/').includes('..'))) {
+    fatal(`--home must be an absolute path without ".." traversal, got: "${opts.home}"`);
+    return;
+  }
+
   const env = opts.env ?? process.env;
   const registryPath = opts.registryPath ?? (env['SQUAD_REGISTRY_PATH'] as string | undefined);
 
-  // Resolution is the precondition — no side effects before this succeeds.
-  const resolved = resolveSquad({
+  // Use the pre-resolved result from the dispatch guard when available.
+  // Falling back to an internal resolve keeps the function usable directly
+  // from tests that do not go through the CLI dispatch layer.
+  const resolved = opts.resolved ?? resolveSquad({
     cwd: opts.cwd,
     env,
     callsign: opts.callsign,
@@ -65,7 +84,8 @@ export async function runAssignToCopilot(opts: RunAssignOpts): Promise<void> {
     return;
   }
 
-  const targetCallsign = resolved.callsign ?? opts.callsign;
+  // Explicit callsign takes precedence; fall back to what the resolver inferred.
+  const targetCallsign = opts.callsign ?? resolved.callsign;
   if (!targetCallsign) {
     fatal(
       'Could not determine squad callsign from resolution result.\n' +
