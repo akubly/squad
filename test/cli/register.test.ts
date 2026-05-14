@@ -52,7 +52,7 @@ describe('runRegister: entry write', () => {
   });
 
   it('writes a valid registry entry for an existing .squad/ path and returns registered callsign and path', async () => {
-    const result = await runRegister({ callsign: 'test-squad', path: squadDir, registryPath: tempRegistry() });
+    const result = await runRegister({ callsign: 'test-squad', path: squadDir, registryPath: tempRegistry(), installAgent: false });
     expect(result.registered.callsign).toBe('test-squad');
     expect(result.registered.path).toBe(squadDir);
     expect(existsSync(tempRegistry())).toBe(true);
@@ -63,7 +63,7 @@ describe('runRegister: entry write', () => {
   });
 
   it('accepts project root path and resolves the .squad/ subdirectory', async () => {
-    const result = await runRegister({ callsign: 'project-squad', path: TEST_ROOT, registryPath: tempRegistry() });
+    const result = await runRegister({ callsign: 'project-squad', path: TEST_ROOT, registryPath: tempRegistry(), installAgent: false });
     expect(result.registered.path).toBe(squadDir);
   });
 
@@ -77,7 +77,7 @@ describe('runRegister: entry write', () => {
     );
     const anotherSquad = join(TEST_ROOT, 'another', '.squad');
     await mkdir(anotherSquad, { recursive: true });
-    await runRegister({ callsign: 'new-squad', path: anotherSquad, registryPath: tempRegistry() });
+    await runRegister({ callsign: 'new-squad', path: anotherSquad, registryPath: tempRegistry(), installAgent: false });
     const reg = JSON.parse(readFileSync(tempRegistry(), 'utf-8'));
     const existingEntry = reg.squads.find((e: { callsign: string }) => e.callsign === 'existing');
     expect(existingEntry?.origins).toEqual(['https://github.com/org/repo']);

@@ -10,7 +10,17 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
-### Piece 05 — Full review cycle complete (2026-05-13)
+### Piece 06 — Register installs coordinator agent file (2026-05-13)
+
+**Template-path divergence:** The spec's file manifest lists `packages/squad-cli/templates/squad.agent.md` as the canonical template, but the existing repo ships the 94 KB coordinator template at `packages/squad-cli/templates/squad.agent.md.template` (used by `init`/`upgrade` via the template manifest). Rather than duplicating the file, the install helper in `register.ts` tries the unsuffixed path first (`squad.agent.md`) and falls back to `squad.agent.md.template`. This preserves the spec's functional intent — stamped coordinator file at `<home>/.copilot/agents/squad.agent.md` — without duplicating the large template source.
+
+**Home-override seam:** `RunRegisterOpts.home` provides the override. `os.homedir()` is the default. Tests pass an isolated temp directory as `home`, so the real user home is never touched. The seam is local to the `runRegister` call site; it is not threaded through the install helper signature — instead `runRegister` resolves `home` and passes it directly to `installCoordinatorAgent(home)`.
+
+**Best-effort failure shape:** The entire install block (template lookup, `mkdirSync`, `copyFileSync`, `stampVersion`) is wrapped in a single try/catch inside `installCoordinatorAgent`. On any error, `console.warn` emits the target path and the underlying error message, and `runRegister` returns normally. The registry write is already committed at that point and is not rolled back.
+
+**Build-before-test:** The vitest test suite imports from compiled `dist/` output via package.json exports (e.g., `./commands/register` → `dist/commands/register.js`). Changes to TypeScript source must be compiled before tests pick them up. Workflow: implement → `npm run build` → `npx vitest run`.
+
+
 
 Piece 05 review cycle complete; revision authored by CONTROL after FIDO/INCO rejection. Final commit 366dd6c8. Phase B done.
 

@@ -246,7 +246,9 @@ async function main(): Promise<void> {
       console.log(`Options:`);
       console.log(`  --callsign <name>  Name in registry (required)`);
       console.log(`  --path <dir>       Project directory (required)`);
-      console.log(`  --registry-path    Alternate registry file\n`);
+      console.log(`  --registry-path    Alternate registry file`);
+      console.log(`  --no-install-agent Skip installing ~/.copilot/agents/squad.agent.md`);
+      console.log(`  --home <dir>       Override home dir for agent install\n`);
       return;
     }
     if (cmd === 'list') {
@@ -872,6 +874,9 @@ async function main(): Promise<void> {
     const squadPath = (pathIdx !== -1 && args[pathIdx + 1]) ? args[pathIdx + 1]! : '';
     const registryPathIdx = args.indexOf('--registry-path');
     const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
+    const installAgent = !args.includes('--no-install-agent');
+    const homeIdx = args.indexOf('--home');
+    const home = (homeIdx !== -1 && args[homeIdx + 1]) ? args[homeIdx + 1] : undefined;
 
     if (!callsign) {
       fatal(
@@ -889,7 +894,7 @@ async function main(): Promise<void> {
     }
 
     try {
-      const result = await runRegister({ callsign, path: squadPath, registryPath });
+      const result = await runRegister({ callsign, path: squadPath, registryPath, installAgent, home });
       const ok = noColor ? 'OK' : `${GREEN}✓${RESET}`;
       switch (result.outcome) {
         case 'registered':
@@ -905,6 +910,9 @@ async function main(): Promise<void> {
           const _exhaustive: never = result.outcome;
           throw new Error(`Unexpected register outcome: ${_exhaustive}`);
         }
+      }
+      if (result.agentInstalledAt) {
+        console.log(`Installed coordinator agent: ${result.agentInstalledAt}`);
       }
     } catch (err) {
       const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
