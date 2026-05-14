@@ -186,3 +186,21 @@ Updated usage line from `--path <dir> (required)` to `[--path <dir>]`. Added `--
 - `dispatch-help.test.ts`: 28/28 (all 3 previously-failing B3 tests now GREEN)
 
 **Git shape:** Two product commits on top of piece 06 base: `9c3f0885` (clean product, zero .squad/ paths) then `9ac6cd81` (B2-B5 revision). Scribe state commits sandwiched between: `257421fd` + `3b891805`.
+
+### Piece 08a — Read-only command resolver migration (2026-05-14T13:16:21.972-07:00)
+
+**Scope:** Migrated read-only command paths to the structured squad resolver for registered clone checkouts.
+
+**Files changed:**
+- `packages/squad-cli/src/cli-entry.ts` — `status` now uses structured resolution and reports registry-backed reasons.
+- `packages/squad-cli/src/cli/commands/cross-squad.ts` — `discover` resolves the active squad through the structured resolver.
+- `packages/squad-cli/src/cli/commands/config.ts` — `config model` resolves the active squad through the structured resolver.
+- `test/cli/legacy-resolver-migration.test.ts` — added fixture coverage for clone-backed resolution and read-only command dispatch.
+- `.changeset/migrate-readonly-commands.md` — patch changeset for CLI behavior.
+
+**Working-tree decision:** Initial uncommitted version/template/generated-skill drift was preserved in a local stash named `pre-08a-stale-working-tree-drift` before branching. The drift was unrelated to piece 08a and was not carried into the branch.
+
+**Validation:**
+- RED check: new migration tests failed on `status` and `discover` before implementation.
+- GREEN check: `npm run build` passed; `npm test -- test/cli/legacy-resolver-migration.test.ts` passed 5/5.
+- Scrub gate: gates 2, 4, 5, and 6 passed. Gate 1 reported existing tracked strip-listed paths; gate 3 reported existing references requiring review. No new gate output was introduced by the piece 08a files.

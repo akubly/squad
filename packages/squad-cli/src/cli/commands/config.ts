@@ -12,27 +12,18 @@
 import { join } from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
 import {
+  resolveSquad as resolveSquadV2,
   readModelPreference,
   writeModelPreference,
   readAgentModelOverrides,
   writeAgentModelOverrides,
   MODEL_CATALOG,
-} from '@bradygaster/squad-sdk/config';
+} from '@bradygaster/squad-sdk';
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 
 function resolveSquadDir(cwd: string): string | null {
-  let dir = cwd;
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, '.squad');
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    const parent = join(dir, '..');
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
 }
 
 function listAgents(squadDir: string): string[] {

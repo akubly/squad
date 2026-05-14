@@ -90,8 +90,8 @@ function _handleTopLevelSignal(signal: 'SIGINT' | 'SIGTERM'): void {
 process.on('SIGINT', () => _handleTopLevelSignal('SIGINT'));
 process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 
-import { FSStorageProvider, resolveSquadState } from '@bradygaster/squad-sdk';
-import type { SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
 import path from 'node:path';
 import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
@@ -115,6 +115,31 @@ const VERSION = getPackageVersion();
  */
 function getSquadStartDir(): string {
   return process.env['SQUAD_TEAM_ROOT'] || process.cwd();
+}
+
+function resolveSquadDir(cwd: string): string | null {
+  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
+}
+
+function formatResolverReason(source: ResolvedSquad['source']): string {
+  switch (source) {
+    case 'local':
+      return 'Found .squad/ in repository tree';
+    case 'env':
+      return 'Resolved from selected registry callsign';
+    case 'clones':
+      return 'Resolved from registered clone path';
+    case 'origins':
+      return 'Resolved from registered Git origin';
+    case 'platform':
+      return 'Resolved from platform squad path';
+    case 'worktree':
+      return 'Resolved from linked worktree';
+    default: {
+      const _exhaustive: never = source;
+      return _exhaustive;
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -767,7 +792,9 @@ async function main(): Promise<void> {
 
   if (cmd === 'status') {
     const sdk = await lazySquadSdk();
-    const repoSquad = sdk.resolveSquad(getSquadStartDir());
+    const startDir = getSquadStartDir();
+    const resolvedSquad = resolveSquadV2({ cwd: startDir, env: process.env });
+    const repoSquad = resolvedSquad?.path ?? null;
     const globalPath = sdk.resolveGlobalSquadPath();
     const globalSquadDir = path.join(globalPath, '.squad');
     const storage = new FSStorageProvider();
@@ -775,10 +802,13 @@ async function main(): Promise<void> {
 
     console.log(`\n${BOLD}Squad Status${RESET}\n`);
 
-    if (repoSquad) {
+    if (resolvedSquad) {
       console.log(`  Active squad: ${BOLD}repo${RESET}`);
-      console.log(`  Path:         ${repoSquad}`);
-      console.log(`  Reason:       Found .squad/ in repository tree`);
+      console.log(`  Path:         ${resolvedSquad.path}`);
+      console.log(`  Reason:       ${formatResolverReason(resolvedSquad.source)}`);
+      if (resolvedSquad.callsign) {
+        console.log(`  Callsign:     ${resolvedSquad.callsign}`);
+      }
     } else if (globalExists) {
       console.log(`  Active squad: ${BOLD}personal (global)${RESET}`);
       console.log(`  Path:         ${globalSquadDir}`);
@@ -1101,13 +1131,13 @@ async function main(): Promise<void> {
 
   if (cmd === 'discover') {
     const { discoverCommand } = await import('./cli/commands/cross-squad.js');
-    await discoverCommand();
+    await discoverCommand(getSquadStartDir());
     return;
   }
 
   if (cmd === 'delegate') {
     const { delegateCommand } = await import('./cli/commands/cross-squad.js');
-    await delegateCommand(args.slice(1));
+    await delegateCommand(args.slice(1), getSquadStartDir());
     return;
   }
 
