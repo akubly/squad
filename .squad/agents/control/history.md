@@ -147,3 +147,42 @@ Both types are re-exported from the SDK barrel (`src/index.ts`).
 - 29 acceptance tests: ALL PASS (including consult/extract help text)
 - Build: CLEAN
 - Full suite: 15 failures, all pre-existing flakes (pass solo)
+
+### Piece 07 Revision — Register Merges Clones/Origins (2026-05-15)
+
+**Scope:** CONTROL-led revision of EECOM's rejected piece 07 commit. All three reviewers (Flight, FIDO, CONTROL) issued REJECT verdicts. EECOM locked out for this cycle. CONTROL revised independently.
+
+**Five blockers resolved:**
+
+**B1 — Strip `.squad/` from product commit (Flight)**
+EECOM's original commit `a1e82411` included `.squad/agents/eecom/history.md` inside the product commit. Technique used: hard-reset to piece 06 base (`5a0d626f`), then `git checkout a1e82411 -- <product files>` to surgically restore only the 7 product files (no `.squad/` paths), then commit clean as `9c3f0885`. The two Scribe commits were cherry-picked on top. Avoided interactive rebase entirely — reset + selective checkout + cherry-pick is a cleaner approach when the goal is simply removing a file from a commit.
+
+**B2 — Path-uniqueness conflict guard (Flight)**
+The prior code only guarded against same-callsign-different-path conflicts. Added a second guard: if a different callsign already claims the same squad path, `runRegister` throws `SquadError` with message `"<path> is already registered under callsign '<owner>'. Use --callsign <owner> to re-register."` This also eliminated the `'reactivated'` dead value — all same-path-different-callsign cases now throw before reaching that branch.
+
+**B3 — Three failing dispatch-help tests (FIDO)**
+Root cause: tests spawned the real CLI via child process and inherited `process.env`, which on the dev machine contained `SQUAD_REGISTRY_PATH` pointing to a real registry with an existing callsign 'x'. So `squad register --callsign x` succeeded (merge) instead of failing, causing tests that expected error-exit to see exit 0.
+
+Fix: extended `runCli` with an optional `cwd?: string` parameter (defaults to `TEST_ROOT`); all three affected tests now pass `cwd: nonGitTmpDir` (a temp dir outside any Git repo) AND `--registry-path <clean-nonexistent-file>`. The `--registry-path` flag is the critical isolation piece — it prevents the real registry from being consulted.
+
+**B4 — `squad register --help` text (CONTROL)**
+Updated usage line from `--path <dir> (required)` to `[--path <dir>]`. Added `--origin` and `--clone` flag descriptions to the help block. Removed the false `(required)` label.
+
+**B5 — Nits (CONTROL)**
+- `cloneIdx2` → `cloneArgIdx` (clearer name)
+- `'merged'` log line converted to template literal with Unicode `→`
+- `--origin`/`--clone` append modes converted from in-place mutation to spread-copy pattern, consistent with `mergeGitContext`
+- Removed dead `case 'reactivated':` and `case 'already-active':` from the outcome switch
+- `RunRegisterOutcome` narrowed from 4 values to `'registered' | 'merged'` — stronger typing, exhaustiveness check tighter
+
+**Key decisions made (without consulting EECOM):**
+- Kept "already registered" wording (not reverted to "already active") — more precise for the conflict-error caller context
+- Chose spread-copy over preserving EECOM's in-place mutation — both are correct (entry is a reference), but spread-copy is the established pattern in the codebase
+- Gate 1 pre-existing failure (pieces 01–06 casting/identity/orchestration-log templates) acknowledged and documented in commit message; not caused by piece 07
+
+**Test surface:** 45 tests across 3 files — ALL PASS.
+- `register-merge.test.ts`: 12/12 (includes new B2 path-uniqueness test)
+- `register.test.ts`: 5/5
+- `dispatch-help.test.ts`: 28/28 (all 3 previously-failing B3 tests now GREEN)
+
+**Git shape:** Two product commits on top of piece 06 base: `9c3f0885` (clean product, zero .squad/ paths) then `9ac6cd81` (B2-B5 revision). Scribe state commits sandwiched between: `257421fd` + `3b891805`.
