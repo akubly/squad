@@ -31,9 +31,13 @@ describe('runRegister: required flags', () => {
     ).rejects.toThrow(/callsign/i);
   });
 
-  it('fails with usage text when path is empty', async () => {
+  it('fails with usage text when path is omitted and no inference is possible', async () => {
+    // Initialize a git repo in TEST_ROOT so getGitRoot returns TEST_ROOT,
+    // but create no .squad directories so inference fails.
+    const { spawnSync } = await import('child_process');
+    spawnSync('git', ['init'], { cwd: TEST_ROOT, stdio: 'ignore' });
     await expect(
-      runRegister({ callsign: 'test', path: '', registryPath: tempRegistry() }),
+      runRegister({ callsign: 'test-no-path', cwd: TEST_ROOT, registryPath: tempRegistry() }),
     ).rejects.toThrow(/path/i);
   });
 });
@@ -83,3 +87,4 @@ describe('runRegister: entry write', () => {
     expect(existingEntry?.origins).toEqual(['https://github.com/org/repo']);
   });
 });
+

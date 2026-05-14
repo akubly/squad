@@ -18,6 +18,7 @@ import {
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { resolveRegistryFilePath } from './_registry-path.js';
+import { getGitRoot } from '../lib/git-root.js';
 
 export interface RunInitOpts {
   targetDir?: string;
@@ -79,7 +80,16 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
     return {};
   }
 
-  const callsign = opts?.callsign ?? path.basename(targetDir);
+  // Prefer the Git repository name as the default callsign when no explicit
+  // callsign is given and the target directory IS the Git root. This ensures
+  // the callsign reflects the repository name rather than an arbitrary path
+  // segment. Uses the shared Git-root helper from lib/git-root.
+  const gitRoot = getGitRoot(cwd);
+  const callsignBase =
+    opts?.callsign == null && gitRoot && normalisedPathKey(targetDir) === normalisedPathKey(gitRoot)
+      ? gitRoot
+      : targetDir;
+  const callsign = opts?.callsign ?? path.basename(callsignBase);
   const registryFilePath = resolveRegistryFilePath({ explicit: opts?.registryPath });
   if (!registryFilePath) {
     return {};
@@ -128,3 +138,4 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
 
   return { registered: { callsign, path: squadDir } };
 }
+

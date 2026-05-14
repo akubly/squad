@@ -885,16 +885,21 @@ async function main(): Promise<void> {
       );
       return;
     }
-    if (!squadPath) {
-      fatal(
-        '--path is required\n' +
-        'Try: squad register --callsign <name> --path <path>',
-      );
-      return;
-    }
+    const originIdx = args.indexOf('--origin');
+    const originUrl = (originIdx !== -1 && args[originIdx + 1]) ? args[originIdx + 1] : undefined;
+    const cloneIdx2 = args.indexOf('--clone');
+    const clonePath = (cloneIdx2 !== -1 && args[cloneIdx2 + 1]) ? args[cloneIdx2 + 1] : undefined;
 
     try {
-      const result = await runRegister({ callsign, path: squadPath, registryPath, installAgent, home });
+      const result = await runRegister({
+        callsign,
+        path: squadPath || undefined,
+        registryPath,
+        installAgent,
+        home,
+        origin: originUrl,
+        clone: clonePath,
+      });
       const ok = noColor ? 'OK' : `${GREEN}✓${RESET}`;
       switch (result.outcome) {
         case 'registered':
@@ -905,6 +910,9 @@ async function main(): Promise<void> {
           break;
         case 'already-active':
           console.log(`${ok} Already registered: ${result.registered.callsign} → ${result.registered.path}`);
+          break;
+        case 'merged':
+          console.log(ok + ' Updated: ' + result.registered.callsign + ' -> ' + result.registered.path);
           break;
         default: {
           const _exhaustive: never = result.outcome;
@@ -1131,6 +1139,7 @@ main().catch(err => {
   }
   process.exit(1);
 });
+
 
 
 
