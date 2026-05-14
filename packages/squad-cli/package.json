@@ -1,6 +1,6 @@
 {
   "name": "@bradygaster/squad-cli",
-  "version": "0.9.6",
+  "version": "0.9.6-build.5",
   "description": "Squad CLI — Command-line interface for the Squad multi-agent runtime",
   "type": "module",
   "bin": {
@@ -105,7 +105,23 @@
       "types": "./dist/cli/commands/import.d.ts",
       "import": "./dist/cli/commands/import.js"
     },
+    "./commands/init": {
+      "types": "./dist/commands/init.d.ts",
+      "import": "./dist/commands/init.js"
+    },
+    "./commands/register": {
+      "types": "./dist/commands/register.d.ts",
+      "import": "./dist/commands/register.js"
+    },
+    "./commands/list": {
+      "types": "./dist/commands/list.d.ts",
+      "import": "./dist/commands/list.js"
+    },
     "./commands/doctor": {
+      "types": "./dist/commands/doctor.d.ts",
+      "import": "./dist/commands/doctor.js"
+    },
+    "./cli/commands/doctor": {
       "types": "./dist/cli/commands/doctor.d.ts",
       "import": "./dist/cli/commands/doctor.js"
     },
