@@ -418,3 +418,62 @@ Added `templatesDir?: string` to `RunRegisterOpts` as the injection point for te
 The production symlink-safety fix ships on all platforms. Only the test is conditionally skipped on Windows when `symlinkSync` is unavailable (no Developer Mode). This ensures Windows users get the protection; CI on Linux/macOS exercises the test.
 
 ---
+
+## 2026-05-14: Piece 07 Adversarial Review — Register Merge / Clones-Origins (REJECT 3/3)
+
+**Review Round:** Phase B piece 07 adversarial review (post-implementation)  
+**Commit:** `a1e82411` — `akubly/upstream-07-register-merge-clones-origins`  
+**Author:** EECOM  
+**Verdict:** REJECT — 3 independent rejections; EECOM locked out per Reviewer Rejection Protocol  
+**Assigned Revision:** CONTROL
+
+### Summary
+
+Three reviewers conducted independent adversarial reviews of piece 07. All three returned REJECT verdicts. The blocking issues span three categories:
+
+1. **State Location** (Flight) — Product commit leaked `.squad/` path changes
+2. **Test Discipline** (FIDO) — 3 failing tests in `test/cli/dispatch-help.test.ts` following API changes
+3. **Public API Surface** (CONTROL) — Help text contracts incorrect for new `--path` optional behavior and missing `--origin`/`--clone` flags
+
+### Blocker Details
+
+#### Flight — State Leak into Product Commit
+
+**Finding:** Commit `a1e82411` includes `.squad/agents/eecom/history.md` alongside code changes.
+
+**Why it matters:** REPLAY-PROTOCOL §State Location specifies that Phase B code commits must be layer-separated from state commits. Mixing state into code commits contaminates Phase C extraction, which cherry-picks code-only commits for upstream PR.
+
+**Enforcement:** Any `.squad/` path in a product commit is automatic REJECT, regardless of code quality.
+
+#### FIDO — Test Discipline Regression
+
+**Finding:** Three tests in `test/cli/dispatch-help.test.ts` fail after piece 07's API changes to `register` command.
+
+**Root causes:**
+- **dispatch-help.test.ts:130–134** — `--path` made optional; test expected non-zero exit when omitted from repo with `.squad/` directory
+- **dispatch-help.test.ts:327–344** — Error message contract changed from `'already active'` to `'already registered at ...'`; test still expects old text
+- **dispatch-help.test.ts:463–467** — Same root cause as first failure
+
+**Verdict:** Test discipline rule violation — "Tests and API updates must move in the same commit." All three are in the same test file and were not updated to match the new register API.
+
+#### CONTROL — Public API Surface Contract
+
+**Finding:** Two help-text defects in `packages/squad-cli/src/cli-entry.ts`:
+
+1. **BLOCKER-1** (lines 245, 248) — `--path` shown as `(required)` when it is now optional
+2. **BLOCKER-2** (lines 243–252) — `--origin` and `--clone` flags completely absent from help text despite being new public CLI flags
+
+**Severity:** False contracts in help text prevent users from discovering new flags and incorrectly describe required/optional status.
+
+### Lockout Enforcement
+
+Per Reviewer Rejection Protocol: **EECOM is locked out of the piece 07 revision cycle.** EECOM authored the rejected artifact. CONTROL (self-nominated, accepted) is assigned the revision.
+
+### Revision Scope (for CONTROL)
+
+1. Strip `.squad/agents/eecom/history.md` from the product commit
+2. Fix dispatch-help.test.ts assertions for the new optional `--path` and updated error message
+3. Fix cli-entry.ts help text: make `--path` show optional, add `--origin` and `--clone` docs
+4. Confirm `npm test` passes (or document remaining failures per Piece 05 regression waiver)
+
+---

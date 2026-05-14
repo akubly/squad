@@ -10,6 +10,22 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
+### Piece 07 — Register merges clones[] and origins[] (2026-05-14)
+
+**Git root detection on Windows:** `git rev-parse --show-toplevel` returns forward-slash paths on Windows (e.g. `C:/git/repo`). The new `lib/git-root.ts` helper wraps the call with `path.normalize()` to convert to OS-native separators. This is critical because `upsertEntry` validates clone paths and the SDK's path-comparison logic is platform-aware.
+
+**Test isolation: git root walking.** Test temp dirs created inside a git repo will have `getGitRoot(tempDir)` walk up and find the outer repo's `.git`. On this codebase, `D:\git\squad-replay` has both `.git` and `.squad/`, so inference succeeds unexpectedly. Fix: run `spawnSync('git', ['init', tempDir])` to create a local `.git` stop-point, so `getGitRoot` returns the temp dir itself, not the outer repo.
+
+**Optional `--path` and inference chain:** When `path` is omitted, `inferSquadDir()` walks `getGitRoot(cwd)` looking for `<gitRoot>/<cwd-basename>/.squad` then `<gitRoot>/.squad`. If neither exists, it throws with a "Pass --path" message. Tests for the "no path, no .squad" case need a git-init'd temp dir AND no `.squad` subdirectory present.
+
+**`'merged'` outcome must be in the exhaustiveness switch:** The TypeScript switch in `cli-entry.ts` had a `never` branch. Adding `'merged'` to the `RunRegisterOutcome` type required adding `case 'merged':` before the `default: never` branch, or the build fails with an exhaustiveness error.
+
+**Scrub gate gate 1:** `git ls-files` scans the entire tracked tree, so strip-listed files from pieces 01-06 (casting, identity, orchestration-log templates) show as pre-existing failures. Per protocol, the scrub gate targets the PR-shaped diff (Phase C), not the full branch. Gate 1 failures inherited from prior pieces are not piece-07 regressions.
+
+### Piece 07 Adversarial Review Outcome (2026-05-14)
+
+**Lockout:** EECOM is locked out of the piece 07 revision cycle. The adversarial review returned REJECT 3/3 from Flight, FIDO, and CONTROL on independent blockers (state leak, test discipline, API surface). Per Reviewer Rejection Protocol, the author of a rejected artifact is locked out of the immediate revision. CONTROL assigned for revision.
+
 ### Piece 06 — Register installs coordinator agent file (2026-05-13)
 
 **Template-path divergence:** The spec's file manifest lists `packages/squad-cli/templates/squad.agent.md` as the canonical template, but the existing repo ships the 94 KB coordinator template at `packages/squad-cli/templates/squad.agent.md.template` (used by `init`/`upgrade` via the template manifest). Rather than duplicating the file, the install helper in `register.ts` tries the unsuffixed path first (`squad.agent.md`) and falls back to `squad.agent.md.template`. This preserves the spec's functional intent — stamped coordinator file at `<home>/.copilot/agents/squad.agent.md` — without duplicating the large template source.
