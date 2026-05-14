@@ -469,6 +469,31 @@ Piece 05 wires the requested commands, but the user-facing behavior is not safe 
 
 ---
 
+### 2026-05-14: Piece 08a test-count delta triage — FIDO Quality Gate
+
+**By:** FIDO (Quality Owner) — targeted investigation, not full re-review
+
+**Subject:** akubly/upstream-08a-migrate-readonly-commands baseline fcb0cf1a vs revision 0e4f301e
+
+**Method:** Full-suite run on both SHAs from reset/clean worktrees, Vitest JSON reporter, failure-set diff by `{test file} :: {full test name}`, then per-test re-run 3× on revision for newly failing IDs. Also confirmed SDK source delta is limited to `packages/squad-sdk/src/index.ts` barrel overload/re-export behavior.
+
+**New failures introduced by revision:** 3
+- `test/human-journeys.test.ts`: flake; `Journey 1: I just installed this (squad init) shows ceremony output — not raw technical logs` failed in full-suite with `STACK_TRACE_ERROR`, passed individually 3/3.
+- `test/human-journeys.test.ts`: flake; `Journey 1: I just installed this (squad init) tells the human what to do next` failed in full-suite with `STACK_TRACE_ERROR`, passed individually 3/3.
+- `test/init-scaffolding.test.ts`: flake; `no-remote resilience (#579) runInit succeeds in a git repo with no remote` failed in full-suite with Windows cleanup `ENOTEMPTY` under `.test-init-scaffold-*\.squad`, passed individually 3/3.
+
+**Tests fixed by revision (passing now, failing before):** 2
+- `test/state-backend.test.ts`: `GitNotesBackend exists reflects write state`
+- `test/template-sync.test.ts`: `sync-templates.mjs script execution exits with code 0 (no syntax errors, no crashes)`
+
+**Pre-existing baseline failures (both):** 9 failed-test IDs. Note: this clean rerun did not reproduce the reported 6308/6432 pass count; observed baseline `6310/6429 passed, 11 failed, 61 skipped, 47 todo` and revision `6312/6432 passed, 12 failed, 61 skipped, 47 todo`.
+
+**Severity:** all-flakes
+
+**Recommendation:** proceed to re-review. I found no deterministic regression attributable to CAPCOM's SDK barrel export. Keep the full-suite flakes visible for follow-up, but do not cycle CAPCOM solely for this delta.
+
+---
+
 ### FIDO Quality Gate — REJECT
 
 **By:** FIDO  
