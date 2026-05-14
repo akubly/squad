@@ -101,7 +101,31 @@ Both types are re-exported from the SDK barrel (`src/index.ts`).
 
 📌 **Team update:** FIDO, RETRO, and Flight completed adversarial reviews of piece 02 (commit 68b4f379) before Phase C. **Verdict: CONDITIONAL (blocking issues) + CLEAR security + APPROVE WITH CONDITIONS (architecture).** FIDO identified 2 blocking test-isolation and coverage gaps (tests 2.4–2.5 inherit `process.env` when `opts.env` not set; `opts.callsign = ''` path untested) plus 5 should-fix gaps. RETRO recommends callsign character-set validation (non-breaking) with low current risk. Flight proposes two architectural decisions: (1) module-naming policy against `-vN` suffixes (rename `resolution-v2.ts` → `resolver.ts` in dedicated piece or document exception), (2) typed error codes on `SquadError` for downstream CLI discriminability. No breaking changes, no security blocking. Brady awaiting remediation routing — CONTROL not locked out. See `.squad/decisions.md` for full findings.
 
-### Piece 05 Revision — CLI Command Stubs (2026-05-20T01:50:00Z)
+### Piece 06 Revision — Register Installs Agent (2026-05-14T10:51:52-07:00)
+
+**Scope:** Quality refinement of the register-installs-agent feature — addressed all five findings
+(1 BLOCKER, 3 MAJOR, 2 MINOR) from the Flight + FIDO adversarial reviews.
+
+**Key patterns learned:**
+
+1. **Symlink-safe file copy:** Before `copyFileSync`, call `lstatSync` (not `statSync` — avoids following symlinks) on the target path. If `stat.isSymbolicLink()`, call `unlinkSync` first. Wrap the lstat in a try/catch that re-throws unless the code is `ENOENT` (target not yet existing is fine). Pattern: check-unlink-copy, not copy-clobber.
+
+2. **CLI-boundary output pattern:** Install helpers should return the resulting path (or `undefined`) rather than calling `console.log` internally. The CLI dispatch layer owns all user-facing output. Add an optional `agentInstalledAt?: string` field to the result type; the CLI emits the log only when that field is present. This pattern keeps helpers testable and output-controllable.
+
+3. **EISDIR for portable write-failure tests:** `chmod 0o444` does not prevent writes on Windows. Pre-creating the target path as a *directory* causes `copyFileSync(src, dirPath)` to fail with EISDIR/ENOTDIR on all platforms, making the test portable without any OS guards.
+
+4. **Warning assertion specificity:** A broad regex like `/\.copilot|warn/i` passes trivially on any warning message. Split into two assertions: one for the target path pattern (`/\.copilot[\\\/]agents[\\\/]squad\.agent\.md/`), one for the error class (`/EISDIR|ENOTDIR|EACCES|could not/i`). Both must match.
+
+5. **CLI dispatch testability:** Exported `main` with an `argv` parameter is the clean approach for unit-level CLI tests, but requires guarding the auto-invocation at the bottom of cli-entry.ts. The simpler alternative — spawning `node dist/cli-entry.js` as a child process — avoids entry-point contamination and tests the real CLI surface. Adding a `--home` flag to the register dispatch exposes the `home` seam without modifying `os.homedir()` globally.
+
+6. **Primary/fallback template coverage:** The `templatesDir?: string` injection point on `RunRegisterOpts` lets tests stage a fake templates directory containing only `squad.agent.md` (primary) or an empty directory (neither path), covering branches that the real templates directory cannot exercise.
+
+**Git mechanics:** Used Option A (interactive rebase with automated `GIT_SEQUENCE_EDITOR` bat script). The rebase paused at the EECOM code commit; code changes were applied, amend committed, then `git rebase --continue` replayed the Scribe state commit on top. Stash was used to isolate build-artifact noise from the amend stage.
+
+**Test counts:** 16 pass / 1 skipped (symlink on Windows without Developer Mode).
+
+**EECOM lockout respected:** Did not read `.squad/agents/eecom/history.md` for implementation guidance. Reviewed only the committed code and reviewer findings.
+
 
 **Scope:** Replaced EECOM's rejected commit `0488acaa` with clean revision `366dd6c8` addressing all ~25 blocking items from FIDO/INCO adversarial review.
 
