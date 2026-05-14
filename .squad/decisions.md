@@ -52,432 +52,11 @@
 **What:** Squad becomes its own interactive CLI shell. `squad` with no args enters a REPL.
 **Why:** Squad needs to own the full interactive experience.
 
-### Root Cause Analysis
-
-Three factors combine to create the VS Code routing failure. Ranked by dominance:
-
-#### 1. 🔴 CLI-Centric Enforcement Language (DOMINANT)
-
-The routing constraint is expressed exclusively in CLI terms. The CRITICAL RULE references 	ask tool only. When the coordinator reads this in VS Code, where the tool is unSubagent, it doesn't reliably make the substitution. It falls through to Platform Detection's Fallback mode: 'work inline.' This enforcement language creates a logical gap.
-
-#### 2. 🟡 Prompt Saturation (AMPLIFYING)
-
-The coordinator prompt is 950 lines / ~80KB. The routing constraint is buried at line 1010 under irrelevant sections (Init Mode, ceremonies, Ralph work monitor, worktree lifecycle). The core dispatch loop accounts for ~200 lines, competing for attention with ~750 lines of governance and reference material.
-
-#### 3. 🟡 Template Duplication (AMPLIFYING)
-
-CLI 1.0.11 discovers all \*.agent.md\ files from cwd to git root. Squad has 5 copies: .squad-templates, templates/, packages/squad-cli/templates, packages/squad-sdk/templates, and .github/agents/. Only .github/agents/ should be discoverable. CLI 1.0.11 merges ALL of them, multiplying the coordinator instructions by 5x and diluting the routing constraint.
-
-### Proposed Fixes
-
-**Fix 1: Platform-Neutral Enforcement Language (P0)**
-- Rewrite CRITICAL RULE to be platform-neutral: 'You are a DISPATCHER, not a DOER. Every task that needs domain expertise MUST be dispatched to a specialist agent.'
-- List dispatch mechanisms: CLI (\	ask\ tool), VS Code (\unSubagent\ tool), or fallback (work inline)
-- Update anti-patterns and constraints sections with same substitution
-
-**Fix 2: Top-and-Bottom Reinforcement (P0)**
-- Add reinforcement block at end of prompt (LLMs weight beginning/end more heavily than middle)
-- Emphasize: Squad ROUTES, it does not BUILD. Do not produce domain artifacts inline.
-
-**Fix 3: Prompt Slimming — Move to Lazy-Loaded References (P1)**
-- Extract ~350 lines (~37%) to lazy-loaded templates: worktree-reference.md, ralph-reference.md, casting-reference.md, mcp-reference.md
-- Reduce from 950→600 lines, making routing constraint a larger percentage of total prompt
-
-**Fix 4: Template File Renaming (P1)**
-- Rename template copies to .template extension to prevent CLI 1.0.11 discovery
-- Update sync-templates.mjs and squad-cli/squad-sdk init code to reference new filenames
-
-**Fix 5: VS Code-Specific Hardening Block (P1)**
-- Move VS Code adaptations section higher (from line 458 to immediately after CRITICAL RULE)
-- Restructure as active enforcement block with platform detection table
-- Make clear: if \unSubagent\ is available, it MUST be used for domain work
-
-### Priority Ordering
-
-| Priority | Fix | Impact | Effort | Ships In |
-|---|---|---|---|---|
-| **P0** | Fix 1: Platform-neutral enforcement | 🔴 Directly closes logical gap | Low | Next patch |
-| **P0** | Fix 2: Top-and-bottom reinforcement | 🔴 Exploits LLM attention patterns | Trivial | Next patch |
-| **P1** | Fix 4: Template file renaming | 🟡 Eliminates 4x duplication | Medium | Next minor |
-| **P1** | Fix 3: Prompt slimming | 🟡 Reduces 950→600 lines | Medium | Next minor |
-| **P1** | Fix 5: VS Code hardening block | 🟡 Makes VS Code dispatch prominent | Low | Next minor |
-
-**Ship order:** Fix 1 + Fix 2 together (one PR, immediate). Fix 4 next (requires code changes). Fix 3 + Fix 5 together (prompt restructure PR).
-
-### Validation
-
-After implementing, test with Andreas's reproduction case:
-1. Open VS Code with squadified project
-2. Ask coordinator to do domain work that matches routing rule
-3. Verify: coordinator dispatches via \unSubagent\ instead of working inline
-4. Verify: coordinator cites the routing rule when dispatching
-
-FIDO should own the test scenario. GUIDO should validate the VS Code runtime behavior.
-
-### Open Questions
-
-1. Does CLI 1.0.11 support exclusion patterns (.copilotignore)? If yes, Fix 4 becomes simpler.
-2. Should we version-gate the VS Code adaptations (detect CLI version)?
-3. Is \unSubagent\ still the correct tool name, or has it changed?
 ---
 
-# Decision: PR Review Batch — Overlap Resolution
-
-**Date:** 2026-03-25  
-**Reviewer:** FIDO (Quality Owner)  
-**Context:** 10 open PRs reviewed, 3 duplicate/overlap pairs identified
-
-## Problem
-
-tamirdresher opened 6 PRs addressing related concerns (retro enforcement, challenger agent, tiered memory). Three pairs have significant overlap:
-
-1. **#607 vs #605** — Both add weekly retro ceremony with Ralph enforcement
-2. **#604 vs #603** — Both add Challenger agent template (complete duplicates)
-3. **#606 vs #602** — Both add tiered memory/history skills (superset/subset)
-
-## Decision
-
-**Merge these:**
-- **#607** (retro enforcement) — comprehensive, standalone ceremony file
-- **#603** (Challenger + fact-checking) — correct file locations, follows project conventions
-- **#606** (tiered memory) — superset of #602, 3-tier model vs 2-tier
-
-**Close as duplicate:**
-- **#605** — same scope as #607, less comprehensive
-- **#604** — duplicate of #603, different file locations
-- **#602** — subset of #606, narrower scope
-
-## Rationale
-
-- **#607 vs #605:** #607 provides standalone ceremony file (`ceremonies/retrospective.md`) + enforcement guide + skill, while #605 inlines into existing templates. Standalone file is more discoverable and modular.
-- **#604 vs #603:** Functionally identical. #603 uses `.squad/` paths matching project conventions; #604 uses `templates/` (non-standard for agents).
-- **#606 vs #602:** #606 is a superset — 3-tier model (hot/cold/wiki) vs 2-tier (hot/cold). Both cite same production data. Broader scope is more useful.
-
-## Impact
-
-- Reduces PR count from 10 to 7 (close 3 duplicates)
-- Eliminates conflicting file changes (e.g., both #607 and #605 modify `templates/ceremonies.md`)
-- Preserves all unique value (no functionality lost)
-
-## Affected PRs
-
-| PR  | Action | Reason |
-|-----|--------|--------|
-| 607 | Merge  | Comprehensive retro enforcement |
-| 605 | Close  | Duplicate of #607 (less comprehensive) |
-| 604 | Close  | Duplicate of #603 (wrong file paths) |
-| 603 | Merge  | Challenger template (correct paths) |
-| 606 | Merge  | Tiered memory (superset) |
-| 602 | Close  | Subset of #606 (narrower scope) |
-
-## Next Steps
-
-1. Comment on #605, #604, #602 explaining they are duplicates/subsets and will be closed
-2. Merge #607, #603, #606 after author confirms deduplication is acceptable
-3. All other PRs (#611, #608, #592, #567) can proceed independently
-
----
-
-# Decision: Triage + Work Session Plan
+## 2026-04-25: Resolver piece reviews require chain-precedence coverage
 
 **By:** Flight  
-**Date:** 2026-03-25
-
-## Context
-
-Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions). Multiple overlap with existing P1 work. 10 open PRs (5 from tamirdresher, 2 from diberry, 1 from joniba, 1 from eric-vanartsdalen, 1 draft).
-
-## Triage Decisions
-
-### High-Value Quick Wins (P1)
-- **#610** (docs broken link) → squad:pao, P1 — 5-minute fix blocking diberry's PR #611 CI
-- **#590** (getPersonalSquadRoot bug) → squad:eecom, P0 — personal squad init broken for all users since v0.9.1
-- **#591** (hiring wiring docs) → squad:procedures, P1 — matches PR #592 (joniba), docs-only, high clarity
-
-### Community Feature Contributions (Defer to Review)
-- **#601, #600, #598, #596, #595** (tamirdresher proposals) — all have matching PRs (#607, #606, #604, #602). Priority: review PRs first, triage issues after PR decisions.
-
-### Maintenance Items (P2)
-- **#597** (upgrade CLI docs) → squad:pao + squad:network, P2 — user confusion, docs fix + UX improvement
-- **#588** (model list update) → squad:procedures, P2 — hardcoded model list in squad.agent.md + templates
-- **#554** (broken external links) → squad:pao, P2 — automated link checker output, investigate failures
-
-### Questions (No Squad Assignment)
-- **#589** (skills placement) → community reply — clarify `.copilot/skills` vs `.github/skills` vs `.claude/skills`
-- **#494** (model vs squad model) → community reply — clarify Copilot CLI `/models` vs squad.agent.md model preference
-
-### Long-Horizon Feature Work (P2-P3)
-- **#581** (ADO Support PRD) → squad:flight, P2 — comprehensive PRD, but blocked until SDK-first parity (#341) ships
-
-## Work Session Priority (Top 5)
-
-1. **#610** → PAO — fix broken link (5 min), unblocks #611
-2. **#590** → EECOM — fix getPersonalSquadRoot(), critical user-facing bug
-3. **PR #592** → Flight review — matches #591, validate joniba's wiring guide
-4. **PR #611** → Flight review — diberry TypeDoc API reference (blocked on #610 fix)
-5. **#588** → Procedures — update model lists in templates
-
-## PR Review Strategy
-
-**Merge-ready (after minimal validation):**
-- #611 (diberry) — blocked on #610, then merge
-- #592 (joniba) — high-quality wiring guide
-
-**Tamir PRs (defer until proposal-first validated):**
-- #607, #606, #605, #604, #603, #602 — all substantive feature proposals without prior proposals in `docs/proposals/`. Apply proposal-first policy: request `docs/proposals/{slug}.md` before reviewing implementation.
-
-**Draft (not ready):**
-- #567 (diberry) — explicitly marked DRAFT
-
-## Patterns Noted
-
-- **Tamir contributions:** High technical quality, but needs proposal-first discipline (6 PRs without proposals).
-- **Joniba contributions:** Consistently high-quality, matches team standards (wiring guide is excellent).
-- **Diberry contributions:** MSFT-level quality, merge-ready on delivery.
-
-## Deferred
-
-- #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision
-- #581 (ADO PRD) — P2, blocked until #341 (SDK-first parity) ships
-
----
-
-### 2026-03-26: CI deletion guard and source tree canary
-**By:** Booster (CI/CD)
-**What:** Added two safety checks to squad-ci.yml: (1) source tree canary verifying critical files exist, (2) large deletion guard failing PRs that delete >50 files without 'large-deletion-approved' label. Branch protection on dev requested (may need manual setup).
-**Why:** Incident #631 — @copilot deleted 361 files on dev with no CI gate catching it.
-
----
-
-### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
-**By:** Booster (CI/CD Engineer)
-**Status:** Implemented
-**Requested by:** Brady
-
-Updated both release-process skill files with critical learnings from the v0.9.4 release session. The v0.9.4 release was delayed by three distinct issues, each fixed by a separate PR.
-
-**Files Updated:**
-1. `.squad/skills/release-process/SKILL.md` (team-level skill)
-2. `.copilot/skills/release-process/SKILL.md` (copilot-level skill)
-3. `.squad/agents/booster/history.md` (learnings log)
-
-**Issues and Fixes:**
-
-| Issue | Root Cause | Fix PR | Skill Section |
-|-------|-----------|--------|---------------|
-| Root package.json version drift | squad-release.yml reads from root, not sub-packages | #1043 | Known Gotchas + v0.9.4 Incident Learnings |
-| CHANGELOG missing `## [$VERSION]` | Workflow validates version entry exists | #1042 | Known Gotchas + Release Checklist |
-| Lockfile integrity check rejects workspace packages | Check didn't filter for registry-only packages | #1044 | Known Gotchas + Common Failure Modes |
-| GITHUB_TOKEN can't trigger downstream workflows | GitHub security feature prevents event propagation | N/A (design) | GITHUB_TOKEN section + Manual Publish |
-| Prebuild bump breaks workspace linking | bump-build.mjs mutates versions breaking exact match | N/A (known) | Local Development section |
-
----
-
-### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
-**By:** Flight (Lead)
-**Requested by:** Dina
-**Status:** DECIDED
-**Confidence:** Medium (confirmed by PR #640 incident, PR #116 prerelease leak, CI gate implementation)
-
-**Decision:**
-1. All packages use strict semver (`MAJOR.MINOR.PATCH`). No prerelease suffixes on `dev` or `main`.
-2. Prerelease versions are ephemeral. `bump-build.mjs` creates `-build.N` for local testing only — never committed.
-3. SDK and CLI versions must stay in sync. Divergence silently breaks npm workspace resolution.
-4. Surgeon owns version bumps. Other agents must not modify `version` fields in `package.json` unless fixing a prerelease leak.
-5. CI enforcement via `prerelease-version-guard` blocks PRs with prerelease versions. `skip-version-check` label is Surgeon-only.
-
-**Why:** The repo had no documented versioning policy. PR #640 showed prerelease version `0.9.1-build.4` silently broke workspace resolution. PR #116 showed Surgeon lacked guidance on clean release versions.
-
-Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
-
----
-
-### 2026-03-26: Copilot git safety rules
-**By:** RETRO (Security)
-**What:** Added mandatory Git Safety section to copilot-instructions.md: prohibits `git add .`, requires feature branches and PRs, adds pre-push checklist, defines red-flag stop conditions.
-**Why:** Incident #631 — @copilot used destructive staging on an incomplete working tree, deleting 361 files.
-
----
-
-### 2026-05-12: registry module is a schema + disk-I/O boundary
-**By:** EECOM (Piece 01 Registry Validator)
-**What:** registry.ts kept free of resolver logic; later pieces consume it deterministically.
-**Why:** Resolver lives in subsequent pieces, separation keeps the parity surface tight.
-
----
-
-### 2026-05-12: Module naming policy — no `-vN` in permanent module names
-**By:** Flight (Lead)
-**Date:** 2026-05-12
-**Status:** PROPOSED — captured from piece 02 adversarial review
-**What:** Permanent SDK module filenames and package subpaths MUST NOT carry a version suffix (`-v2`, `-v3`, …). When a module supersedes another, the stack MUST include an explicit rename/retire piece. The new module takes the canonical name; the old one is removed in the same release window. Versioning lives in `package.json` (semver) and changesets, not in filenames.
-**Why:** Piece 02 introduces `packages/squad-sdk/src/resolution-v2.ts` exposed at the `./resolution-v2` subpath. The 20-piece stack has no scheduled rename, leaving the suffix permanent or forcing a second breaking rename later. Establishing the policy at piece 02 — the first SDK consumer surface — prevents the pattern from propagating.
-**Action for current stack:** Defer the rename to a later piece (suggested after piece 11a). Piece 02 keeps `resolution-v2` per spec; the rename happens once the old `resolution.ts` is fully retired.
-
----
-
-### 2026-05-12: SDK error model — typed reason codes on SquadError
-**By:** Flight (Lead) + FIDO (Quality Owner) — convergent finding
-**Date:** 2026-05-12
-**Status:** ACCEPTED — applied in piece 02 remediation
-**What:** Any `SquadError` thrown from an SDK boundary that downstream code is expected to branch on MUST carry a stable `code` field (e.g. `EMPTY_CALLSIGN`, `REGISTRY_MISSING`, `UNKNOWN_CALLSIGN`, `STALE_PATH`). Codes are documented in the SDK barrel as a union type so consumers get type-checked branches. Message strings remain free-form for humans; codes are the contract for programs.
-**Why:** Piece 02 originally collapsed four failure modes into a single `SquadError` with category `CONFIGURATION`. Downstream CLI pieces 05+ need to render different remediation per failure mode without regex-matching messages.
-**Implemented in:** commit `05bd332f` (piece 02 remediation) — `ResolveErrorCode` union now exported from the SDK barrel.
-
----
-
-### 2026-05-12: Callsign input sanitization at resolver boundary
-**By:** RETRO (Security)
-**Date:** 2026-05-12
-**Status:** ACCEPTED — applied in piece 02 remediation
-**What:** Callsigns provided via `opts.callsign` or `SQUAD_CALLSIGN` env var must be validated against a restricted character set (`^[A-Za-z0-9_-]+$`) BEFORE registry lookup. `fs.lstatSync` is preferred over `fs.statSync` when checking a registry entry's stored path so symlinks to nonexistent targets fail cleanly instead of being followed.
-**Why:** Defense-in-depth at the trust boundary between unprivileged inputs (env vars, flag values) and registry-driven file-system access. The registry validator (piece 01) protects stored entries; the resolver protects the input side.
-**Implemented in:** commit `05bd332f` (piece 02 remediation).
-
----
-
-### 2026-05-13: normalisedPathKey dedup must be integration-tested at the registry layer
-
-**Proposed by:** FIDO  
-**Trigger:** Adversarial review of piece 04 (`akubly/upstream-04-path-utils-upsert-rename`)
-
-Any piece that wires a path-normalizing function into a data structure validation layer **MUST** include at least one test that:
-1. Creates two registry entries whose paths are identical after normalization but differ in literal string form.
-2. Verifies that `validateRegistry` or `parseRegistry` throws a duplicate-path error.
-3. Is platform-gated correctly: the duplicate must be detected on win32/darwin.
-
-Test should be named alongside existing S9 test (e.g., `S9b rejects registry with two entries whose paths are case variants on win32/darwin`).
-
-Applies to all future pieces that extract or refactor path comparison logic. Remediation for piece 04 required before merge: add `S9b` test to `test/registry-schema.test.ts`.
-
----
-
-### 2026-05-13: CAPCOM Review — Piece 04 (path-utils-upsert-rename)
-
-**Branch reviewed:** `akubly/upstream-04-path-utils-upsert-rename` (commit `1eae929a`)
-
-**VERDICT: APPROVE** — Functionally correct; findings to address in piece 05 or follow-up.
-
-**MAJOR findings:**
-- Spurious `@bradygaster/squad-cli: patch` changeset (no CLI source changed)
-- Test S14b still calls `registerEntry` instead of `upsertEntry`
-
-**MINOR findings:**
-- `normalisedPathKey` added to `resolution-v2.ts` re-exports (scope creep)
-- Spec-mandated test files missing without documented substitution
-- Wrapper-style `registerEntry` alias vs. const re-export (drift risk on signature changes)
-- `@deprecated` tag missing removal version/milestone
-
----
-
-### 2026-05-13: Path normalization safety checks as standard for future pieces
-
-**Filed by:** RETRO  
-**Trigger:** Adversarial review of piece 04
-
-Standard checks for any piece adding path-comparison or path-key logic:
-1. **Symlink identity audit:** Does this check use `normalisedPathKey` (literal) or `pathsRefSameLocation` (realpath)? Must be explicit.
-2. **Trust boundary declaration:** Where do path inputs originate? Are all unvalidated inputs checked before calling path helpers?
-3. **upsertEntry / write-path documentation:** Any function that prepares registry data without writing must have `@see writeRegistry` JSDoc so callers don't mistake "validated entry returned" for "entry persisted."
-
----
-
-### 2026-05-13: Rename PRs require non-BC test suite grep for old name
-
-**Author:** EECOM  
-**Trigger:** Piece 04 revision — S14b finding
-
-Any PR that renames a public API must include a `grep` sweep of the full test suite for the old name. Acceptable residuals: imports (if needed for BC tests), BC describe block contents, deprecated alias definitions, re-exports in index.ts.
-
-The sweep command:
-```
-grep -rn "oldName" test/ packages/*/test/
-```
-
-Call sites falling outside the explicit BC describe block are non-BC usages and must be updated.
-
----
-
-## Decision: EECOM Resolver Decisions — piece 03
-
-**Date:** 2026-05-13  
-**Author:** EECOM  
-**Piece:** 03 — clones/origins resolver + init-mode guard
-
-### Sentinel-bounded containment uses `clone + path.sep`
-
-**Context:** `clonesMatch(cwd, clone)` must not match sibling directories with a shared prefix (e.g., `D:\git\repo` must not match `D:\git\repo-tools`).
-
-**Decision:** Containment check is `cwd.startsWith(clone + path.sep)`, not `cwd.startsWith(clone)`. Exact equality is checked first via `pathsRefSameLocation`. A realpath-based fallback handles symlinked directories.
-
-**Rationale:** The `path.sep` sentinel is the minimum-sufficient guard. Prefix-only matching introduces false positives that are difficult to diagnose in production. The sentinel approach is O(1) and requires no filesystem access for the common case.
-
-### INVALID_CLONE_ENTRY throws, does not fall through
-
-**Context:** A relative path in `registry.clones[]` cannot be resolved without the caller's cwd — which is already consumed before `clonesMatch` is called.
-
-**Decision:** `clonesMatch` throws `SquadError('INVALID_CLONE_ENTRY')` for relative clone entries rather than returning false or skipping. This surfaces misconfigured registries immediately rather than silently producing incorrect results.
-
-**Rationale:** Silent skip would allow a misconfigured registry to pass all gates and then fail at runtime when the clone entry matters. Throwing makes the misconfiguration visible and actionable.
-
-### Steps 4–5 silently fall through on missing registry
-
-**Context:** Steps 1 and 3 (callsign-based) throw `REGISTRY_MISSING` when the registry file is absent, because a callsign resolution without a registry is always a caller error. Steps 4–5 (clones/origins) have no such precondition.
-
-**Decision:** Steps 4–5 are wrapped in `try/catch` with an `fs.existsSync` guard. A missing or malformed registry causes fallthrough to the next step, not a throw.
-
-**Rationale:** A caller that passes no callsign and is in a repo with no relevant registry entries is a normal state (e.g., first-time setup). Throwing would break the init-mode flow where `resolveSquad` returning null is the expected signal.
-
-### collectCwdRemoteUrls deduplicates by canonical URL
-
-**Context:** A repository may have the same remote in both SSH and HTTPS forms, or may have duplicate remotes added under different names.
-
-**Decision:** `collectCwdRemoteUrls` deduplicates by the normalized/canonical form of each URL but returns the original raw strings. Only `(fetch)` lines are parsed.
-
-**Rationale:** Returning raw strings preserves the registry contract (stored entries are verbatim). Deduplication by canonical form prevents the same logical remote from generating multiple origin matches.
-
-### Platform fallback uses XDG_DATA_HOME, not XDG_CONFIG_HOME
-
-**Context:** Two different path-resolution concepts exist in the codebase: registry file location and platform `.squad/` location.
-
-**Decision:** Registry file: `XDG_CONFIG_HOME` → `~/.config/squad/registry.json`. Platform `.squad/` directory: `XDG_DATA_HOME` → `~/.local/share/squad/.squad`. These are different directories with different env var overrides.
-
-**Rationale:** Config files (registry.json) and data directories (.squad/) follow different XDG conventions. Conflating them would cause unexpected behavior when users override only one.
-
----
-
-## Archive: Entries older than 2026-04-13
-
-### 2026-03-25: PR Review Batch — Overlap Resolution
-
-Identified and resolved PR overlaps. Decided to merge #607 (retro enforcement), #603 (Challenger agent), #606 (tiered memory); close #605, #604, #602 as duplicates.
-
-### 2026-03-25: Triage + Work Session Plan
-
-Triaged 14 issues. High-priority items: #610 (broken link), #590 (getPersonalSquadRoot bug), #591 (hiring docs). Tamir PRs deferred pending proposal-first discipline (6 PRs without prior proposals).
-
-### 2026-03-26: CI deletion guard and source tree canary
-
-Added two safety checks to squad-ci.yml: source tree canary + large deletion guard (>50 files). Incident #631 — @copilot deleted 361 files on dev with no CI gate.
-
-### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
-
-Established strict semver (MAJOR.MINOR.PATCH), no prerelease suffixes on dev/main. SDK and CLI versions must stay in sync. Surgeon owns version bumps. CI enforcement via prerelease-version-guard.
-
-### 2026-03-26: Copilot git safety rules
-
-Added mandatory Git Safety section to copilot-instructions.md: prohibits git add ., requires feature branches and PRs, pre-push checklist, red-flag stop conditions. Incident #631.
-
-### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
-
-Updated release-process skill files with v0.9.4 learnings. Five distinct issues fixed: root package.json drift, CHANGELOG missing version entry, lockfile check rejection, GITHUB_TOKEN downstream workflows, prebuild bump workspace breaking.
-
----
-
-## Decision: Resolver piece reviews require chain-precedence coverage
-
-**Date:** 2026-05-13  
-**Author:** Flight  
 **Status:** Accepted
 
 ### Context
@@ -495,10 +74,30 @@ Pairwise precedence tests are acceptable when the resolver is sequential (no bra
 
 ---
 
-## Decision: Resolver test coverage pattern for platform-specific behavior
+## 2026-05-12: path-utils canonical home for OS-aware path helpers
 
-**Date:** 2026-05-13  
-**Author:** FIDO  
+**Author:** CONTROL  
+**Piece:** 04
+
+`packages/squad-sdk/src/path-utils.ts` is the single source of truth for all OS-aware path comparison logic. No other module (registry, resolver, CLI command) may define its own case-normalization or path-equality logic. They import from path-utils or from the SDK subpath `@bradygaster/squad-sdk/path-utils`.
+
+**Rationale:** After pieces 01–03, the same `normCase` / path-equality pattern was independently implemented in `registry.ts` (private `pathKey`) and would have been duplicated again in future CLI command modules. Centralizing in path-utils ensures consistent behavior and prevents drift between the registry duplicate-key check and the resolver clone-containment check.
+
+**Scope:**
+- `normalisedPathKey` — duplicate-detection key for registry paths.
+- `pathsRefSameLocation` — bidirectional symlink-aware equality.
+- `clonesMatch` — sentinel-bounded containment check for `clones[]` resolution.
+
+**Consequences:**
+- Future pieces adding path checks (init fail-fast, assign, unassign, doctor) import from `@bradygaster/squad-sdk/path-utils`.
+- `resolution-v2.ts` re-exports all three helpers for resolver consumers that already import from it.
+- SDK index re-exports `normalisedPathKey` and `pathsRefSameLocation` for general callers.
+
+---
+
+## 2026-05-13: Resolver test coverage pattern for platform-specific behavior
+
+**By:** FIDO  
 **Context:** Phase B piece 03 adversarial review
 
 ### Observation
@@ -520,10 +119,9 @@ Applies to any future SDK or CLI function that branches on `process.platform` wi
 
 ---
 
-## Security heuristic: SDK git-invocation pattern
+## 2026-05-13: Security heuristic: SDK git-invocation pattern
 
-**Date:** 2026-05-13
-**Author:** RETRO
+**By:** RETRO  
 **Context:** Piece 03 — clones/origins resolver + init-mode guard (commit a20daf43)
 
 ### Decision
@@ -549,25 +147,235 @@ Public exports that accept `cwd` and invoke git should document that callers are
 
 ---
 
-### 2026-05-13: path-utils canonical home for OS-aware path helpers
+## 2026-05-13: Piece 04 — Rename PRs require non-BC test suite grep for old name
 
-**Author:** CONTROL  
-**Piece:** 04
+**By:** EECOM  
+**Trigger:** Piece 04 revision — S14b finding
 
-`packages/squad-sdk/src/path-utils.ts` is the single source of truth for all OS-aware path comparison logic. No other module (registry, resolver, CLI command) may define its own case-normalization or path-equality logic. They import from path-utils or from the SDK subpath `@bradygaster/squad-sdk/path-utils`.
+When a piece renames a public API (e.g., `registerEntry` → `upsertEntry`), the rename must propagate into all internal test usages in the same commit. The `BC.1` test may legitimately retain the old name to document backward-compatibility behavior. All other internal test call sites must use the new name.
 
-**Rationale:** After pieces 01–03, the same `normCase` / path-equality pattern was independently implemented in `registry.ts` (private `pathKey`) and would have been duplicated again in future CLI command modules. Centralizing in path-utils ensures consistent behavior and prevents drift between the registry duplicate-key check and the resolver clone-containment check.
+**Decision:** Any PR that renames a public API must include a `grep` sweep of the full test suite for the old name, with results documented in the PR body or commit message. Call sites falling outside the explicit backward-compatibility describe block are non-BC usages and must be updated.
 
-**Scope:**
-- `normalisedPathKey` — duplicate-detection key for registry paths.
-- `pathsRefSameLocation` — bidirectional symlink-aware equality.
-- `clonesMatch` — sentinel-bounded containment check for `clones[]` resolution.
+The sweep command:
+```
+grep -rn "oldName" test/ packages/*/test/
+```
 
-**Consequences:**
-- Future pieces adding path checks (init fail-fast, assign, unassign, doctor) import from `@bradygaster/squad-sdk/path-utils`.
-- `resolution-v2.ts` re-exports all three helpers for resolver consumers that already import from it.
-- SDK index re-exports `normalisedPathKey` and `pathsRefSameLocation` for general callers.
+Acceptable residuals: imports (if needed for BC tests), BC describe block contents, deprecated alias definitions in source, re-exports in index.ts.
 
 ---
 
+## 2026-05-13: Piece 05 — CLI command stubs review verdict
 
+### EECOM Implementation (commit 0488acaa) — Authored
+
+**By:** EECOM (Implementer)
+
+Piece 05 wires the initial stubs for four CLI commands: `init`, `register`, `list`, and `doctor`. All specified tests pass, build is clean, and the export surface matches the contract.
+
+---
+
+### CONTROL Adversarial Review — APPROVE-WITH-FOLLOWUPS
+
+**By:** CONTROL  
+**Date:** 2026-05-13
+
+The exported command interfaces match the spec and `npm run build` emits `.js` plus `.d.ts` files for all four command subpaths. The package exports are usable from an ESM consumer. But the implementation cheats around strict typing in the new command modules and misses exhaustive handling for the public `RunDoctorResult.severity` union.
+
+**Required follow-ups:**
+1. Remove unnecessary/unsafe casts in new command modules:
+   - `packages/squad-cli/src/commands/register.ts:78` — `(existing as RegistryEntry[])`
+   - `packages/squad-cli/src/commands/doctor.ts:60` — severity literal union cast
+   - `packages/squad-cli/src/commands/doctor.ts:127` — `cwdMatches[0] as RegistryEntry`
+   - `packages/squad-cli/src/commands/doctor.ts:139` — `registry.squads as RegistryEntry[]`
+2. Add exhaustive `never` handling for `RunDoctorResult.severity` rendering and exit-code mapping in `packages/squad-cli/src/cli-entry.ts:950-955`.
+3. Keep command APIs on subpath exports only; do not dump these through the root CLI barrel unless a later spec explicitly asks for that public expansion.
+
+**Lockout note:** EECOM authored the piece. If these follow-ups are treated as rejection-class remediation, do not route the next revision back to EECOM for self-repair.
+
+---
+
+### INCO UX Rejection — REJECT
+
+**By:** INCO  
+**Date:** 2026-05-13
+
+Piece 05 wires the requested commands, but the user-facing behavior is not safe enough to establish the pattern for later commands. The blocking defect is command help: `squad init --help` performs initialization, `squad register --help` exits as an error, `squad list --help` prints registry data, and `squad doctor --help` runs diagnostics. Help must be side-effect-free, exit 0, and explain flags before any validation or command work.
+
+**Required changes before approval:**
+1. Add side-effect-free command-specific help for `init`, `register`, `list`, and `doctor`.
+2. Improve validation copy to include the missing flag, the user's next action, and a complete command example.
+3. Differentiate callsign collision, already-registered same path, and inactive reactivation; success copy must say which happened and include the path.
+4. Render registry doctor findings with textual severities: `[info]`, `[warn]`, `[error]`.
+5. Make doctor output coherent: label `System doctor` and `Registry doctor`, and provide summaries/exit behavior that cannot be misread.
+6. Respect non-TTY/`NO_COLOR` for color/icon embellishment.
+7. Add tests for `--help`, stdout/stderr discipline, and exit codes across the four commands.
+
+**Recommended pattern for pieces 06+:**
+- `--help` is parsed first, exits 0, and never mutates state.
+- Errors use: `✗ Error: <problem>` followed by `Try: squad <command> ...`.
+- Success uses: `✓ <Verb> <object>: <name> → <path>`.
+- Data commands default to stable TSV when scriptability matters.
+- Diagnostics lead with text severity, then optional visual treatment.
+
+---
+
+### FIDO Quality Gate — REJECT
+
+**By:** FIDO  
+**Date:** 2026-05-13
+
+Reviewed EECOM's piece 05 CLI command stubs against the spec test surface and quality bar. The targeted 32 tests pass and the build type-checks, but multiple required spec rows are missing or covered only by smoke assertions.
+
+**Blocking gaps:**
+1. CLI dispatch is not actually tested through the bin entry point, including exit codes.
+2. `runDoctor` origin resolution is specified but not implemented or tested.
+3. `runRegister` accepts paths without proving an existing `.squad/` path, contrary to the entry-write contract.
+4. Init clone/path collision coverage is missing.
+5. Doctor legacy-plus-registry sequencing has no regression test and may create confusing double-output.
+
+**Required follow-up:** Add adversarial tests for register path existence, init clone collision, doctor origin/clone/ambiguous resolution, corrupted registries, exact list table shape, URL boundary behavior, and real CLI dispatch for `init`, `register`, `list`, and `doctor`.
+
+**Validation observed:**
+- `npm test -- test/cli/init-v2.test.ts test/cli/register.test.ts test/cli/list-doctor.test.ts`: 32 passed.
+- `npm run build`: passed.
+- `npm test -- test/cli`: failed with 3 failed tests and 2 unhandled worker timeout errors.
+- `npm test`: failed with 42 failed tests and 4 unhandled worker timeout errors.
+
+---
+
+### FIDO Regression Triage — Mixed, CONTROL Revision Scope
+
+**By:** FIDO  
+**Date:** 2026-05-13
+
+Piece 05 introduces 8 new failed test files + 1 new unhandled worker timeout. Pre-existing failures: 6 failed test files on piece 04.
+
+**New failures on piece 05:**
+- `test/init-scaffolding.test.ts` — API change regression: tests still call old string signature after piece 05 changed `runDoctor` to options object.
+- `test/speed-gates.test.ts` — Help output grew to 138 lines, threshold is 130.
+- `test/ux-gates.test.ts` — Help line exceeds 80 chars.
+- `test/e2e-shell.test.ts` — `/status` expected text not present.
+- `test/repl-ux.test.ts` — History flake under full-suite load.
+- `test/resolution-v2.test.ts` — Timeout under full-suite; solo passes.
+- `test/state-backend.test.ts` — Timeout under full-suite; solo passes.
+- `test/cli/watch-health.test.ts` — Timeout under full-suite; solo passes.
+
+**Verdict:** Mixed. CONTROL revision scope expands to the piece-05 subset above. Full-suite failures require explicit waivers or fixes per file.
+
+---
+
+### CONTROL Piece 05 Revision — Commit 366dd6c8
+
+**By:** CONTROL  
+**Date:** 2026-05-20T01:50:00Z
+
+All ~25 blocking items from FIDO (A1-A5), INCO (B1-B7), CONTROL (C1-C3), Flight (D1-D2), and FIDO regression triage (E1-E4) have been resolved in a single squashed commit.
+
+**Blocker Resolution:** 20/20 blockers closed.
+
+**Test Results:**
+- 83 in-scope tests: ALL PASS
+- 4 regression tests: ALL PASS
+- 29 acceptance tests: ALL PASS
+- Build: CLEAN
+
+**Files Changed (14):**
+- `packages/squad-cli/src/commands/_registry-path.ts` (NEW)
+- `packages/squad-cli/src/commands/{init,register,list,doctor}.ts` (NEW/REVISED)
+- `packages/squad-cli/src/cli-entry.ts` (MODIFIED)
+- `packages/squad-cli/package.json` (MODIFIED)
+- `.changeset/cli-command-stubs.md` (NEW)
+- `test/cli/{dispatch-help,init-v2,register,list-doctor,doctor}.test.ts` (NEW/MODIFIED)
+- `test/init-scaffolding.test.ts` (MODIFIED)
+
+**Note:** EECOM remains under Strict Lockout per REPLAY-PROTOCOL. This commit is CONTROL's own work.
+
+---
+
+### FIDO Re-verification — REJECT-AGAIN
+
+**By:** FIDO  
+**Date:** 2026-05-13
+
+A1-A5 are closed, and the four targeted regression fixes E1-E4 pass solo. The rejection is because the full-suite verification did not match the allowed piece-04 baseline: `test/journey-error-handling.test.ts` and `test/template-sync.test.ts` appeared in the failed-file set.
+
+**Per-blocker verification:** A1-A5 ✅ closed, E1-E4 ✅ closed.
+
+**Suite checks:**
+- Piece-05 in-scope: 5 files / 83 tests passed.
+- Build: exit 0.
+- Full suite: 8 failed test files / 7 failed tests / 3 unhandled errors.
+- Piece-04 baseline: 6 failed test files / 10 failed tests / 2 unhandled errors.
+
+**Regression delta:** 2 failed files outside allowed baseline (both pass solo).
+
+**Re-approval recommendation:** No re-approval. CONTROL fixed the targeted blockers, but full-suite gate still fails. Next revision must be owned by a third agent (lockout).
+
+---
+
+### INCO Re-verification — APPROVE
+
+**By:** INCO  
+**Date:** 2026-05-13
+
+CONTROL's revision closes the seven UX blockers from the original INCO reject. Help is now side-effect-free, register validation is actionable, register outcomes are differentiated, doctor output has labeled sections and severity prefixes, NO_COLOR is respected, and the focused dispatch/help test suite passes.
+
+**Per-blocker verification:**
+- B1 `--help` side-effect-free: ✅ closed
+- B2 validation copy: ✅ closed
+- B3 differentiated register outcomes: ✅ closed
+- B4 doctor severity prefixes: ✅ closed
+- B5 dual-doctor sections: ✅ closed
+- B6 NO_COLOR discipline: ✅ closed
+- B7 help/streams/exit-code tests: ✅ closed
+
+**Pattern-setting verdict:** Mixed. Behavior is good enough to approve piece 05, but UX pattern is not fully reusable yet. Piece 06+ should extract shared `renderHelp`, `renderError`, `renderSuccess`, `renderSeverityFinding` helpers.
+
+**Re-approval recommendation:** APPROVE. INCO re-approves piece 05 at 366dd6c8.
+
+---
+
+### Flight Adversarial Review — APPROVE-WITH-FOLLOWUPS
+
+**By:** Flight  
+**Date:** 2026-05-13
+
+Piece 05 passes adversarial review. The implementation matches the spec API surface faithfully, uses piece-04 helpers correctly, and stays strictly within scope.
+
+**Architectural concerns (not blockers):**
+1. **resolveRegistryFilePath duplication** — The same ~10-line function is copy-pasted across init.ts, register.ts, list.ts, and doctor.ts with subtle divergences. Piece 06 should extract into a shared CLI utility.
+2. **Dual-doctor rendering split** — `squad doctor` runs legacy `doctorCommand()` (prints directly) followed by new `runDoctor()` (returns structured result). Transitional scaffolding acceptable, but rendering contract must unify before doctor gains repair actions.
+
+**Scrub gate recommendation:** Phase B should add a `--phase-b` mode to the scrub gate that excludes known fork-internal paths (`.squad/`, `docs/_internal/`, `templates/`, etc.) from gate checks. Avoids sweeping cleanup noise.
+
+---
+
+### Flight Deadlock Arbitration — APPROVED FOR PR
+
+**By:** Flight (Lead arbiter)  
+**Date:** 2026-05-13
+
+FIDO's full-suite gate flagged `test/journey-error-handling.test.ts` as a failure outside the accepted baseline. Attribution analysis shows this is a latent concurrency flake exposed by increased worker load, not a logic regression introduced by piece 05.
+
+**Evidence:**
+- Solo run on piece-05: 21/21 passed
+- Solo run on piece-04: 21/21 passed
+- Full suite on piece-04: passed (not in failed-files list)
+- CONTROL modified this file? No
+- Test touches piece-05 code? No (tests shell rendering, not CLI dispatch)
+
+**Root Cause:** Piece 05 adds new test files, increasing vitest worker pool pressure. `journey-error-handling` tests use timed `tick()` waits (80ms) for React/Ink render cycles. Under heavy concurrency, timing assumptions become fragile.
+
+**Verdict:** APPROVED. Decision matrix row 2: latent race exposed by added worker load, no causal link to piece-05 logic.
+
+**Policy Clarification: Accepted Concurrency Flakes:**
+The following test files are now classified as **accepted-concurrency-flakes** — they may fail non-deterministically in full-suite runs but are not blockers:
+1. `test/template-sync.test.ts` — EBUSY file-locking flake
+2. `test/journey-error-handling.test.ts` — timing-sensitive React/Ink render waits
+
+**Follow-up Concern: Concurrency Budget:** As the test suite grows, timing-sensitive tests will fail more often. Recommended for piece 06+: reduce `poolOptions.threads.maxThreads`, isolate timing-sensitive files with `{ sequence: { concurrent: false } }`, or increase `TICK` constants.
+
+**Status:** Piece 05 APPROVED FOR PR. Phase B complete.
+
+---

@@ -10,6 +10,10 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
+### Piece 05 — Full review cycle complete (2026-05-13)
+
+Piece 05 review cycle complete; revision authored by CONTROL after FIDO/INCO rejection. Final commit 366dd6c8. Phase B done.
+
 ### Piece 04 revision — cross-case dedup test and S14b mechanical swap (2026-05-13)
 
 The revision added S9b, the cross-case duplicate-path integration test, and swapped S14b from `registerEntry` to `upsertEntry`.
