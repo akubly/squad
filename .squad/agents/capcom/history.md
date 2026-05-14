@@ -71,3 +71,9 @@ Written full technical analysis to `.squad/identity/sdk-init-technical-analysis.
 
 📌 **Team update (2026-05-13T18:28:28Z — Piece 04 Adversarial Review Complete):** Piece 04 (path-utils-upsert-rename) approved after revision cycle. Deferred architectural findings for piece 05+: spurious @bradygaster/squad-cli changeset bump, normalisedPathKey re-export scope creep on resolution-v2.ts (registry primitive on resolver surface), wrapper-style registerEntry alias drift risk, @deprecated tag missing removal timeline. See `.squad/decisions.md` "### 2026-05-13: CAPCOM Review" for full action items. Future pieces that re-export SDK primitives should apply same scope discipline.
 
+### 2026-05-14T14:38:40.349-07:00: Piece 08a revision — SDK boundary and resolver parity
+
+Revised the read-only resolver migration under reviewer rejection lockout as CAPCOM. The revision kept SDK access through the root barrel by adding an overload-compatible registry-aware `resolveSquad` wrapper in `packages/squad-sdk/src/index.ts`, then rerouted `packages/squad-cli/src/cli-entry.ts`, `packages/squad-cli/src/cli/commands/config.ts`, and `packages/squad-cli/src/cli/commands/cross-squad.ts` away from SDK subpaths.
+
+The revision unified `discover` and `delegate` on v2 resolution, threaded `--team-root` / `SQUAD_TEAM_ROOT` into cross-squad discovery, and strengthened `test/cli/legacy-resolver-migration.test.ts` to cover SDK barrel import, override parity, delegate resolution, and the action-command boundary. `.changeset/migrate-readonly-commands.md` now records both CLI and SDK patch impact.
+

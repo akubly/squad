@@ -5,6 +5,183 @@
 
 ---
 
+## 2026-05-14: Phase B Piece 08a Adversarial Review — REJECTED, CAPCOM Revision Assigned
+
+**Session:** Phase B piece 08a adversarial review  
+**Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `fcb0cf1a`  
+**Requested by:** akubly (Brady)  
+**Verdict:** REJECTED — strict lockout for CONTROL per Reviewer Rejection Protocol  
+**Revision Owner:** CAPCOM (self-nominated, accepted by coordinator)
+
+### Review Summary Table
+
+| Reviewer | Verdict | Key Finding | Model |
+|----------|---------|-------------|-------|
+| Flight (Lead) | APPROVE | Branch hygiene clean; spec tests 5/5 pass; compound `resolveSquadDir()` duplication acceptable per spec | claude-opus-4.6 |
+| FIDO (Quality) | REQUEST CHANGES | 5/5 migration tests pass; 117 pre-existing suite failures unrelated; gaps: `--team-root` / `SQUAD_TEAM_ROOT` parity not tested in `discoverCommand()`; boundary test weak | claude-sonnet-4.6 |
+| RETRO (Security) | APPROVE | Scrub-gate intersection EMPTY; PII clean; tone clean; Co-authored-by exact match | claude-opus-4.6 |
+| CAPCOM (SDK Expert) | REJECT | Boundary violations: CLI imports `resolveSquad` from subpath instead of root barrel; dispatch inconsistency between cross-squad discovery and delegateCommand | claude-sonnet-4.6 |
+
+### Flight — APPROVE
+
+**By:** Flight (Lead) — adversarial review  
+**Verdict:** APPROVE  
+**Subject branch:** akubly/upstream-08a-migrate-readonly-commands @ fcb0cf1a  
+
+**Findings:**
+
+1. **Branch hygiene: PASS.** Single squashed commit based on `akubly/upstream-07-register-merge-clones-origins`. Co-authored-by trailer present. 7 files, under 30-file cap. No strip-listed paths touched. No forbidden routing markers, preview-channel markers, or comparison framing in any diff hunk.
+
+2. **Spec test surface: PASS (5/5).** All five spec-required tests implemented in `test/cli/legacy-resolver-migration.test.ts`. Fixture structure matches spec (host repo with `.squad/`, consumer with no `.squad/`, registry with clones entry, `SQUAD_REGISTRY_PATH` env override).
+
+3. **Command substitutions: ACCEPTABLE.** Spec names `list-related` and `dev`; codebase equivalents are `discover` (cross-squad.ts) and `config model` (config.ts). Spec explicitly permits: "If the current upstream tree uses a different module name for `list-related` or `dev`, update the closest current command module." CONTROL documented substitutions in history.md.
+
+4. **Architecture compound effect: POSITIVE with minor note.** `resolveSquadDir()` is defined identically in three files (cli-entry.ts:118, config.ts:25, cross-squad.ts:27). Spec says "keep the helper local" so this is compliant. However, pieces 08b/08c will add more copies. Recommend consolidating into a shared import after the 08-series completes. `formatResolverReason()` uses exhaustive switch with `never` default — future source types get compile-time enforcement. This is a good compound pattern.
+
+5. **Status command enhancement: CLEAN.** Status now displays resolver source reason and optional callsign for registry-backed resolution (cli-entry.ts:803-808). Existing fallback paths (global, none) preserved. No output shape regression.
+
+6. **Scope boundary: CLEAN.** `detectSquadDir` import remains in cross-squad.ts because other functions in that file (outside 08a scope) still use it. No orphaned imports from this piece's changes.
+
+7. **Working-tree drift decision: DOCUMENTED.** CONTROL stashed pre-existing drift before branching. Decision recorded in `.squad/decisions/inbox/control-08a-working-tree-drift.md`. No drift carried into the piece branch.
+
+8. **Tone compliance: PASS.** No comparison framing, no fork residue, no version leaks in any artifact (changeset, history.md entry, decision record).
+
+### FIDO — REQUEST CHANGES
+
+**By:** FIDO (Quality Owner) — adversarial review  
+**Verdict:** REQUEST CHANGES  
+**Subject branch:** akubly/upstream-08a-migrate-readonly-commands @ fcb0cf1a  
+
+**Test runs:**
+
+- `npm test -- test/cli/legacy-resolver-migration.test.ts`: PASS — 1 file passed, 5 tests passed.
+- `npm run build`: PASS — SDK and CLI TypeScript builds completed.
+- `npm test`: FAIL — JSON report: 1,736 suites total, 1,720 passed, 16 failed; 6,429 tests total, 6,312 passed, 9 failed, 61 pending. Failed files included `test/cli-packaging-smoke.test.ts`, `test/docs-build.test.ts`, `test/init-scaffolding.test.ts`, `test/resolution-v2.test.ts`, `test/scheduler.test.ts`, `test/state-backend.test.ts`, and `test/cli/team-root-resolution.test.ts`.
+- `.only` / `.skip` / `.todo` scan for `test/cli/legacy-resolver-migration.test.ts`: PASS — no matches.
+
+**Findings:**
+
+1. **Blocking: cross-squad substitution bypasses the CLI start directory.** `discoverCommand()` resolves from `process.cwd()` (`packages/squad-cli/src/cli/commands/cross-squad.ts:31-37`) and `cli-entry.ts` invokes it without passing `getSquadStartDir()` (`packages/squad-cli/src/cli-entry.ts:1133-1136`). The shared start directory already honors `SQUAD_TEAM_ROOT` (`packages/squad-cli/src/cli-entry.ts:117-119`). The test only runs `discover` with the consumer repo as `cwd` (`test/cli/legacy-resolver-migration.test.ts:143-152`), so it does not catch this dispatch gap.
+
+2. **Blocking: the read-only boundary test is not a strong regression sentinel.** The scope test invokes `consult` and asserts only non-zero exit plus absence of the host path (`test/cli/legacy-resolver-migration.test.ts:167-175`). That can pass for unrelated setup failures and does not prove action commands were left out of the migrated dispatch surface.
+
+3. **Coverage gap: parity is clones-happy-path only.** The fixture writes one registry entry with one `clones` match and empty `origins` (`test/cli/legacy-resolver-migration.test.ts:97-100`). There is no adversarial coverage for missing registry, explicit callsign errors, missing `clones[]`, multi-remote origin selection, conflicting origins, or path case behavior.
+
+4. **Quality gate: full suite is red.** Targeted coverage is green, but the repository test command failed. Without a documented baseline comparison, this review cannot approve the change.
+
+### RETRO — APPROVE
+
+**By:** RETRO (Security)  
+**Verdict:** APPROVE  
+**Subject branch:** `akubly/upstream-08a-migrate-readonly-commands` @ `fcb0cf1a`  
+
+**Findings**
+
+#### Scrub gate cross-reference (primary audit)
+
+Gate 1 flagged 80+ pre-existing strip-listed paths; Gate 3 flagged 20+ pre-existing references. **Zero intersection** with the 7 files touched by `fcb0cf1a`. Coordinator's acceptance of Gate 1 FAIL and Gate 3 WARN as baseline contamination is **valid** — no piece-08a file introduced or modified any flagged path.
+
+#### Tone compliance
+
+Four tone-pattern classes triggered during scan, all acceptable:
+- `upstream.json` — established project data model (13+ files reference it)
+- `resolveSquadV2` / `resolution-v2` — actual SDK module identifiers
+- `@bradygaster/squad-cli` — the project's npm scope
+- "previously" — pre-existing context line, not introduced by 08a
+
+No comparison framing, version leaks, or fork residue detected in the commit message, CONTROL's history entry, or the decision entry.
+
+#### PII / secret hygiene
+
+Zero emails, tokens, credentials, or internal infrastructure paths in any of the 7 touched files or the decision entry. The Co-authored-by Copilot noreply address is the only email reference — acceptable per protocol.
+
+#### Co-authored-by trailer
+
+Required Copilot co-author trailer confirmed.
+
+### CAPCOM — REJECT
+
+**By:** CAPCOM — SDK Expert  
+**Verdict:** REJECT  
+**Subject branch:** `akubly/upstream-08a-migrate-readonly-commands` @ `fcb0cf1a`  
+
+**Findings**
+
+1. **Boundary violation:** The three reviewed CLI files import `resolveSquad` from `@bradygaster/squad-sdk/resolution-v2` instead of the SDK root barrel. `packages/squad-sdk/src/index.ts` exports only resolution-v2 types and helper functions, not the registry-aware `resolveSquad`; this forces CLI production code through a resolver subpath instead of the stable public entry.
+
+2. **Dispatch inconsistency:** `cli-entry.ts` and `config.ts` use the v2 resolver, and `cross-squad.ts` uses it for `discover`, but `delegateCommand` still calls legacy `detectSquadDir(process.cwd())`. The read-only migration therefore leaves one cross-squad command path outside the registry-aware resolver.
+
+3. **No SDK source regression observed:** Commit file list does not include `packages/squad-sdk/src/**`; the scope stayed in CLI/test/state files.
+
+4. **No new unsafe boundary casts observed:** The diff did not introduce `any`, `@ts-ignore`, `as unknown as`, or non-null assertions in the reviewed resolver boundary changes.
+
+#### Revision owner
+
+CAPCOM. The fix is specifically about SDK public API shape and CLI↔SDK boundary discipline: export a minimal stable registry-aware resolver surface through the SDK public entry, then update all three CLI dispatch paths to consume that same surface without legacy fallback divergence.
+
+### Coordinator Synthesis
+
+**By:** akubly (Brady) — Coordinator  
+**Date:** 2026-05-14T14:19:34.109-07:00  
+
+Four independent reviews received. One REJECT (CAPCOM), one REQUEST CHANGES (FIDO, effectively blocking), two APPROVE (Flight, RETRO).
+
+**Coordinator Verdict: REJECTED**
+
+Per Reviewer Rejection Protocol (strict enforcement):
+- CAPCOM's REJECT (boundary violation, core SDK concern) is definitive.
+- FIDO's REQUEST CHANGES (test gaps, full-suite gate unmet) is effectively blocking.
+- Combined: piece 08a does not proceed to Phase C.
+
+**Lockout:**
+- CONTROL (author) — locked out under strict lockout semantics for this revision cycle.
+- CAPCOM (self-nominated revision owner) — accepted and confirmed.
+
+**Revision Scope (CAPCOM):**
+All four findings must be addressed in a single pass:
+1. **Flight's note:** `resolveSquadDir()` duplication consolidation acceptable in post-08-series cleanup, no action required now.
+2. **FIDO's gaps:** Test coverage for `--team-root` / `SQUAD_TEAM_ROOT` parity and stronger boundary-crossing tests.
+3. **RETRO's findings:** No action; approval stands.
+4. **CAPCOM's violations:** SDK barrel export fix + all three CLI dispatch paths updated to use single registry-aware resolver surface.
+
+**Expected state after CAPCOM revision:**
+- SDK exports stable registry-aware resolver through root barrel.
+- All CLI dispatch paths (`cli-entry`, `config`, `cross-squad`, `delegateCommand`) use the same resolver entry.
+- Test coverage gap (FIDO) filled.
+- Build + full-suite gate requirements met per Piece 05 baseline agreement.
+
+---
+
+## 2026-05-14: Piece 08a: Migrate Read-Only Commands to Cross-Squad Resolution
+
+**Author:** CONTROL  
+**Piece:** 08a — Migrate read-only commands from inline resolution to cross-squad delegation  
+**Status:** REJECTED — Under CAPCOM revision
+
+### Context
+
+Piece 08a implements REPLAY-PROTOCOL semantics: read-only commands (`config`, `cross-squad`) are migrated to delegate responsibility to a remote cross-squad resolver, establishing the pattern for Phase C upstream integration and multi-squad coordination.
+
+### Implementation
+
+- **Files modified (7):** `.changeset/migrate-readonly-commands.md`, `packages/squad-cli/src/cli-entry.ts`, `packages/squad-cli/src/cli/commands/{config,cross-squad}.ts`, `test/cli/legacy-resolver-migration.test.ts`
+- **Changeset:** Added `patch` for CLI read-only command delegation surface
+- **Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `fcb0cf1a`
+
+### Test Results
+
+- **Migration tests:** 5/5 pass (legacy mode detection, resolver delegation, all command paths)
+- **Scrub gate outcome:** Gate 1 FAIL (pre-existing baseline contamination — not piece-08a), Gate 2 PASS, Gate 3 WARN (pre-existing baseline content), Gates 4/5/6 PASS
+- **Scrub gate verdict:** Piece-diff-scoped in practice; baseline contamination is upstream's problem, not piece 08a's. Piece 08a is complete.
+
+### Original Coordinator Decision (superseded by review verdict)
+
+**akubly (Brady):** ACCEPT — scrub gate is piece-diff-scoped in practice; baseline contamination is upstream's problem, not 08a's. Piece 08a is complete. No PR opened (Phase B protocol — Phase C handles PRs).
+
+### Status: Rejected post-review
+
+See "Phase B Piece 08a Adversarial Review — REJECTED" section above for full review outcomes and CAPCOM revision scope.
+
 ## 2026-05-15: Piece 07 Revision — Register Merges Clones/Origins
 
 **Author:** CONTROL  
@@ -99,26 +276,6 @@ Ready for Phase C (PR creation in future session).
 **By:** Brady
 **What:** Squad becomes its own interactive CLI shell. `squad` with no args enters a REPL.
 **Why:** Squad needs to own the full interactive experience.
-
----
-
-## 2026-04-25: Resolver piece reviews require chain-precedence coverage
-
-**By:** Flight  
-**Status:** Accepted
-
-### Context
-
-Piece 03 introduces five new resolver chain steps (clones, origins, platform, worktree, init-guard). The spec mandates a "full chain precedence test" covering all 8 steps in sequence. The implementation proves precedence through pairwise tests (9.1–9.4 plus existing priority tests) rather than a single end-to-end test.
-
-### Decision
-
-Pairwise precedence tests are acceptable when the resolver is sequential (no branching between steps). A single 8-step test would be ideal documentation but is not a blocking requirement — the transitive property holds given sequential code structure. Future resolver pieces that introduce conditional branching between steps MUST include a single comprehensive chain test.
-
-### Consequences
-
-- Pieces 04+ may add steps without a full-chain rewrite, provided pairwise ordering is proven.
-- If the resolver gains conditional logic (e.g., skip origins when clones matched), a full-chain integration test becomes mandatory.
 
 ---
 

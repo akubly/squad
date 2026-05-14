@@ -1,8 +1,29 @@
 # Decisions Archive
 
-> Old decisions (2026-02-21 through 2026-03-25) preserved append-only. Managed by Scribe. For active decisions, see .squad/decisions.md.
+> Old decisions (2026-02-21 through 2026-04-25) preserved append-only. Managed by Scribe. For active decisions, see .squad/decisions.md.
 
 ---
+
+## 2026-04-25: Resolver piece reviews require chain-precedence coverage
+
+**By:** Flight  
+**Status:** Accepted
+
+### Context
+
+Piece 03 introduces five new resolver chain steps (clones, origins, platform, worktree, init-guard). The spec mandates a "full chain precedence test" covering all 8 steps in sequence. The implementation proves precedence through pairwise tests (9.1–9.4 plus existing priority tests) rather than a single end-to-end test.
+
+### Decision
+
+Pairwise precedence tests are acceptable when the resolver is sequential (no branching between steps). A single 8-step test would be ideal documentation but is not a blocking requirement — the transitive property holds given sequential code structure. Future resolver pieces that introduce conditional branching between steps MUST include a single comprehensive chain test.
+
+### Consequences
+
+- Pieces 04+ may add steps without a full-chain rewrite, provided pairwise ordering is proven.
+- If the resolver gains conditional logic (e.g., skip origins when clones matched), a full-chain integration test becomes mandatory.
+
+---
+
 ### 2026-02-21: User directive — no temp/memory files in repo root
 **By:** Brady (via Copilot)
 **What:** NEVER write temp files, issue files, or memory files to the repo root. All squad state/scratch files belong in .squad/ and ONLY .squad/. Root tree of a user's repo is sacred.

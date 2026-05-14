@@ -33,4 +33,16 @@ All git invocations use `execFileSync` with array args, no shell, stderr ignored
 
 **Cleared threat vectors:** Registry traversal, env-var trust boundary, symlink following, JSON injection, TOCTOU races — all non-exploitable from unprivileged inputs given current design. Validation at resolver boundary completes the security model begun in piece 01 registry validation.
 
+### Piece 08a adversarial review (2026-05-14T14:19:34-07:00)
 
+**Verdict:** APPROVE
+
+**Scrub gate cross-reference:** Gate 1 flagged 80+ pre-existing strip-listed paths (orchestration-log, identity, casting, templates, docs/_internal). Gate 3 flagged 20+ pre-existing references in orchestration logs, decisions archive, and prior review entries. Cross-referencing against the 7 files touched by `fcb0cf1a`: **zero intersection**. No piece-08a file appears in any strip list or reference list. Coordinator's acceptance of Gate 1 FAIL + Gate 3 WARN as baseline contamination is valid.
+
+**Tone scan:** Four pattern classes flagged, all acceptable: (1) `upstream.json` — established data model field name used in 13+ files across packages/test, not fork residue; (2) `resolveSquadV2` and `resolution-v2` — actual module identifiers in `@bradygaster/squad-sdk`; (3) `@bradygaster/squad-cli` package namespace — the project's own npm scope; (4) "previously" — appears in pre-existing context line, not in 08a additions.
+
+**PII scan:** Zero emails, zero tokens, zero credential patterns. One false-positive absolute-path hit: a regex assertion `.*repo` in test output matching — not a real path.
+
+**Co-authored-by trailer:** Exact match confirmed: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
+
+**Decision entry review:** `.squad/decisions/inbox/control-08a-working-tree-drift.md` and the merged entry in `.squad/decisions.md` are both clean — no PII, no comparison framing, no version leaks.
