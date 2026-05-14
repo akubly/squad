@@ -170,16 +170,21 @@ describe('CLI: squad consult', { timeout: 30_000 }, () => {
     });
 
     it('requires personal squad to exist', () => {
-      // Override XDG_CONFIG_HOME + APPDATA to point to a non-existent path
-      // This ensures the SDK won't find a personal squad
+      // Override XDG_CONFIG_HOME + APPDATA to point to a non-existent path and
+      // point SQUAD_REGISTRY_PATH to an empty registry so the resolver returns
+      // null. Since 08b, the resolver guard fires before the old personal-squad
+      // check, so the error message is now "No squad found."
       const nonexistent = join(TEST_ROOT, 'nonexistent-config');
+      const emptyRegistry = join(TEST_ROOT, 'empty-registry.json');
+      writeFileSync(emptyRegistry, JSON.stringify({ version: 1, squads: [] }), 'utf8');
       const result = runSquad('consult', TEST_ROOT, {
         XDG_CONFIG_HOME: nonexistent,
         APPDATA: nonexistent,
         LOCALAPPDATA: nonexistent,
+        SQUAD_REGISTRY_PATH: emptyRegistry,
       });
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toMatch(/no personal squad/i);
+      expect(result.stderr).toMatch(/no squad found/i);
     });
   });
 

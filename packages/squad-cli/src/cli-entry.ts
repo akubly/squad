@@ -1006,6 +1006,18 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'consult') {
+    const showStatus = args.includes('--status');
+    if (!showStatus) {
+      // Resolution is the precondition for setup and dry-run modes.
+      const resolved = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+      if (!resolved) {
+        fatal(
+          'No squad found.\n' +
+            '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+        );
+        return;
+      }
+    }
     const { runConsult } = await import('./cli/commands/consult.js');
     await runConsult(getSquadStartDir(), args.slice(1));
     return;
@@ -1027,6 +1039,14 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'link') {
+    const resolved = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    if (!resolved) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+      );
+      return;
+    }
     const { runLink } = await import('./cli/commands/link.js');
     const teamPath = args[1];
     if (!teamPath) {
@@ -1150,6 +1170,34 @@ async function main(): Promise<void> {
   if (cmd === 'config') {
     const { runConfig } = await import('./cli/commands/config.js');
     await runConfig(getSquadStartDir(), args.slice(1));
+    return;
+  }
+
+  if (cmd === 'assign-to-copilot' || cmd === 'assign') {
+    const { runAssignToCopilot } = await import('./commands/assign.js');
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = callsignIdx !== -1 ? args[callsignIdx + 1] : undefined;
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = registryPathIdx !== -1 ? args[registryPathIdx + 1] : undefined;
+    const dryRun = args.includes('--dry-run');
+    const noInstallAgent = args.includes('--no-install-agent');
+    const homeIdx = args.indexOf('--home');
+    const home = homeIdx !== -1 ? args[homeIdx + 1] : undefined;
+    try {
+      await runAssignToCopilot({
+        cwd: getSquadStartDir(),
+        env: process.env,
+        callsign,
+        registryPath,
+        dryRun,
+        noInstallAgent,
+        home,
+      });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
     return;
   }
 

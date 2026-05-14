@@ -225,3 +225,128 @@ describe('read-only CLI command resolver migration', { timeout: 60_000 }, () => 
     expect(result.stdout).not.toContain(fixture.hostSquad);
   });
 });
+
+describe('user-action CLI command resolver migration', { timeout: 60_000 }, () => {
+  beforeEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    await mkdir(TEST_ROOT, { recursive: true });
+    // Create a fake .git directory so findGitRoot stops here and does not walk up to
+    // the outer repo root (D:\git\squad-replay) which has a real .squad/ directory.
+    // Without this, resolveSquad() finds the outer squad and the resolver guard passes
+    // when it should fail for these "no squad found" tests.
+    await mkdir(join(TEST_ROOT, '.git'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  // consult: resolver-failure paths
+
+  it('consult setup does not create local .squad/ when no squad is found', async () => {
+    const fixture = await createFixture();
+
+    // Run from TEST_ROOT which is not in the registry clones list.
+    const result = await runCli(['consult'], TEST_ROOT, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
+    expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+  });
+
+  it('consult --check does not create .squad/config.json when no squad is found', async () => {
+    const fixture = await createFixture();
+
+    const result = await runCli(['consult', '--check'], TEST_ROOT, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
+    expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+  });
+
+  it('consult --status from consumer repo still reports local project state', async () => {
+    const fixture = await createFixture();
+    // No local .squad/ in consumerRepo — --status must NOT fall back to resolved squad.
+    const result = await runCli(['consult', '--status'], fixture.consumerRepo, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Not in consult mode');
+    expect(result.stdout).not.toContain(fixture.hostSquad);
+  });
+
+  // link: resolver-failure and resolver-success paths
+
+  it('link does not create .squad/config.json when no squad is found', async () => {
+    const fixture = await createFixture();
+
+    const result = await runCli(['link', fixture.hostRepo], TEST_ROOT, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/no squad found/i);
+    expect(existsSync(join(TEST_ROOT, '.squad', 'config.json'))).toBe(false);
+  });
+
+  it('link creates .squad/config.json after resolving consumer checkout through registry', async () => {
+    const fixture = await createFixture();
+
+    // consumerRepo is a registered clone of 'host' — resolver succeeds, then link writes config.
+    const result = await runCli(['link', fixture.hostRepo], fixture.consumerRepo, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Linked to team root');
+    const configPath = join(fixture.consumerRepo, '.squad', 'config.json');
+    expect(existsSync(configPath)).toBe(true);
+    const config = JSON.parse(await (await import('node:fs/promises')).readFile(configPath, 'utf8'));
+    expect(config.teamRoot).toBeTruthy();
+  });
+
+  // assign-to-copilot: resolver-success and resolver-failure paths
+
+  it('assign-to-copilot reports already-assigned for registered consumer checkout', async () => {
+    const fixture = await createFixture();
+
+    // consumerRepo is already in the registry clones list for 'host'.
+    const result = await runCli(['assign-to-copilot', '--callsign', 'host', '--no-install-agent'], fixture.consumerRepo, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/already assigned|assigned/i);
+  });
+
+  it('assign-to-copilot does not mutate registry when callsign is not found', async () => {
+    const fixture = await createFixture();
+    const registryBefore = await (await import('node:fs/promises')).readFile(fixture.registryPath, 'utf8');
+
+    const result = await runCli(['assign-to-copilot', '--callsign', 'does-not-exist', '--no-install-agent'], fixture.consumerRepo, {
+      SQUAD_REGISTRY_PATH: fixture.registryPath,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    const registryAfter = await (await import('node:fs/promises')).readFile(fixture.registryPath, 'utf8');
+    expect(registryAfter).toBe(registryBefore);
+  });
+
+  it('assign-to-copilot --dry-run reports intent without writing', async () => {
+    const fixture = await createFixture();
+
+    const result = await runCli(
+      ['assign-to-copilot', '--callsign', 'host', '--dry-run', '--no-install-agent'],
+      fixture.consumerRepo,
+      { SQUAD_REGISTRY_PATH: fixture.registryPath },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Dry-run');
+  });
+});
