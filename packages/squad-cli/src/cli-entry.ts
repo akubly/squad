@@ -242,10 +242,12 @@ async function main(): Promise<void> {
     }
     if (cmd === 'register') {
       console.log(`\n${b}squad register${r} — Register a squad\n`);
-      console.log(`Usage: squad register --callsign <n> --path <p>\n`);
+      console.log(`Usage: squad register --callsign <n> [--path <dir>]\n`);
       console.log(`Options:`);
       console.log(`  --callsign <name>  Name in registry (required)`);
-      console.log(`  --path <dir>       Project directory (required)`);
+      console.log(`  --path <dir>       Project directory (optional; inferred from Git root if omitted)`);
+      console.log(`  --origin <url>     Append a remote URL to an existing entry (deduplicates by canonical form)`);
+      console.log(`  --clone <path>     Append a clone root path to an existing entry (deduplicates by path)`);
       console.log(`  --registry-path    Alternate registry file`);
       console.log(`  --no-install-agent Skip installing ~/.copilot/agents/squad.agent.md`);
       console.log(`  --home <dir>       Override home dir for agent install\n`);
@@ -887,8 +889,8 @@ async function main(): Promise<void> {
     }
     const originIdx = args.indexOf('--origin');
     const originUrl = (originIdx !== -1 && args[originIdx + 1]) ? args[originIdx + 1] : undefined;
-    const cloneIdx2 = args.indexOf('--clone');
-    const clonePath = (cloneIdx2 !== -1 && args[cloneIdx2 + 1]) ? args[cloneIdx2 + 1] : undefined;
+    const cloneArgIdx = args.indexOf('--clone');
+    const clonePath = (cloneArgIdx !== -1 && args[cloneArgIdx + 1]) ? args[cloneArgIdx + 1] : undefined;
 
     try {
       const result = await runRegister({
@@ -905,14 +907,8 @@ async function main(): Promise<void> {
         case 'registered':
           console.log(`${ok} Registered: ${result.registered.callsign} → ${result.registered.path}`);
           break;
-        case 'reactivated':
-          console.log(`${ok} Reactivated: ${result.registered.callsign} → ${result.registered.path}`);
-          break;
-        case 'already-active':
-          console.log(`${ok} Already registered: ${result.registered.callsign} → ${result.registered.path}`);
-          break;
         case 'merged':
-          console.log(ok + ' Updated: ' + result.registered.callsign + ' -> ' + result.registered.path);
+          console.log(`${ok} Updated: ${result.registered.callsign} → ${result.registered.path}`);
           break;
         default: {
           const _exhaustive: never = result.outcome;

@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { spawn } from 'child_process';
 import { resolve } from 'path';
+import { tmpdir } from 'os';
 import { runDoctor } from '@bradygaster/squad-cli/commands/doctor';
 import type { RunDoctorResult } from '@bradygaster/squad-cli/commands/doctor';
 
@@ -33,10 +34,10 @@ interface SpawnResult {
   exitCode: number;
 }
 
-function runCli(args: string[], env?: Record<string, string>): Promise<SpawnResult> {
+function runCli(args: string[], env?: Record<string, string>, cwd?: string): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('node', [CLI_ENTRY, ...args], {
-      cwd: TEST_ROOT,
+      cwd: cwd ?? TEST_ROOT,
       env: { ...process.env, NO_COLOR: '1', NODE_NO_WARNINGS: '1', ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -127,10 +128,21 @@ describe('CLI dispatch reaches command modules', { timeout: 60_000 }, () => {
     expect(result.stderr).toContain('--callsign');
   });
 
-  it('squad register fails with missing --path', async () => {
-    const result = await runCli(['register', '--callsign', 'x']);
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain('--path');
+  it('squad register without --path in a non-git directory exits with error', async () => {
+    const noGitDir = join(tmpdir(), `squad-no-git-${randomBytes(4).toString('hex')}`);
+    await mkdir(noGitDir, { recursive: true });
+    const cleanRegistry = join(noGitDir, 'clean-registry.json');
+    try {
+      const result = await runCli(
+        ['register', '--callsign', 'x', '--registry-path', cleanRegistry],
+        undefined,
+        noGitDir,
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toMatch(/no Git repository|Pass --path/i);
+    } finally {
+      await rm(noGitDir, { recursive: true, force: true });
+    }
   });
 
   it('squad list with missing registry prints guidance', async () => {
@@ -341,7 +353,7 @@ describe('runRegister: outcome differentiation', () => {
         path: join(TEST_ROOT, 'b'),
         registryPath: tempRegistry(),
       }),
-    ).rejects.toThrow(/already active/i);
+    ).rejects.toThrow(/already registered/i);
   });
 });
 
@@ -461,8 +473,19 @@ describe('CLI register: validation copy', { timeout: 60_000 }, () => {
   });
 
   it('missing --path shows which flag and a complete example', async () => {
-    const result = await runCli(['register', '--callsign', 'x']);
-    expect(result.stderr).toContain('--path');
-    expect(result.stderr).toContain('squad register');
+    const noGitDir = join(tmpdir(), `squad-no-git-${randomBytes(4).toString('hex')}`);
+    await mkdir(noGitDir, { recursive: true });
+    const cleanRegistry = join(noGitDir, 'clean-registry.json');
+    try {
+      const result = await runCli(
+        ['register', '--callsign', 'x', '--registry-path', cleanRegistry],
+        undefined,
+        noGitDir,
+      );
+      expect(result.stderr).toContain('--path');
+      expect(result.stderr).toContain('squad register');
+    } finally {
+      await rm(noGitDir, { recursive: true, force: true });
+    }
   });
 });

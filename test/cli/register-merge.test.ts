@@ -359,6 +359,32 @@ describe('register merge: path conflict', () => {
     expect(reg.squads).toHaveLength(1);
     expect(reg.squads[0].path).toBe(join(pathA, '.squad'));
   });
+
+  it('throws a path-uniqueness conflict when a different callsign claims the same squad path', async () => {
+    // Register pathA under callsign 'owner'
+    await runRegister({
+      callsign: 'owner',
+      path: pathA,
+      registryPath: tempRegistry(),
+      installAgent: false,
+    });
+
+    // Attempting to register the SAME path under a DIFFERENT callsign must be rejected
+    await expect(
+      runRegister({
+        callsign: 'interloper',
+        path: pathA,
+        registryPath: tempRegistry(),
+        installAgent: false,
+      }),
+    ).rejects.toThrow(/already registered under callsign 'owner'/i);
+
+    // Registry must be unchanged — still only the original entry
+    const reg = readRegistry();
+    expect(reg.squads).toHaveLength(1);
+    expect(reg.squads[0].callsign).toBe('owner');
+    expect(reg.squads[0].path).toBe(join(pathA, '.squad'));
+  });
 });
 
 describe('register merge: path normalization', () => {

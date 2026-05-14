@@ -40,7 +40,7 @@ export interface RunRegisterOpts {
   clone?: string;            // explicit --clone append: add path to existing entry
 }
 
-export type RunRegisterOutcome = 'registered' | 'reactivated' | 'already-active' | 'merged';
+export type RunRegisterOutcome = 'registered' | 'merged';
 
 export interface RunRegisterResult {
   registered: { callsign: string; path: string };
@@ -141,7 +141,8 @@ function inferSquadDir(callsign: string, gitRoot: string): string {
     throw new Error(
       `Cannot infer squad path for callsign '${callsign}'.\n` +
       `Tried: "${callsignSuffixedPath}" and "${rootSquadPath}".\n` +
-      'Pass --path to register a specific location.',
+      'Pass --path to register a specific location.\n' +
+      'Try: squad register --callsign <name> --path <path>',
     );
   }
 
@@ -201,11 +202,12 @@ export async function runRegister(opts: RunRegisterOpts): Promise<RunRegisterRes
     const alreadyPresent = (entry.origins ?? []).some(
       (o) => normalizeRemoteUrl(o) === canonicalNew,
     );
-    if (!alreadyPresent) {
-      entry.origins = [...(entry.origins ?? []), opts.origin];
-    }
+    const updated: RegistryEntry = alreadyPresent
+      ? entry
+      : { ...entry, origins: [...(entry.origins ?? []), opts.origin] };
+    const filtered = existing.filter((e) => e.callsign !== opts.callsign);
     fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
-    writeRegistry(registryFilePath, { version: 1 as const, squads: existing });
+    writeRegistry(registryFilePath, { version: 1 as const, squads: [...filtered, updated] });
     return { registered: { callsign: opts.callsign, path: entry.path }, outcome: 'merged' };
   }
 
@@ -223,11 +225,12 @@ export async function runRegister(opts: RunRegisterOpts): Promise<RunRegisterRes
     const alreadyPresent = (entry.clones ?? []).some(
       (c) => normalisedPathKey(c) === normalizedNew,
     );
-    if (!alreadyPresent) {
-      entry.clones = [...(entry.clones ?? []), cloneAbs];
-    }
+    const updated: RegistryEntry = alreadyPresent
+      ? entry
+      : { ...entry, clones: [...(entry.clones ?? []), cloneAbs] };
+    const filtered = existing.filter((e) => e.callsign !== opts.callsign);
     fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
-    writeRegistry(registryFilePath, { version: 1 as const, squads: existing });
+    writeRegistry(registryFilePath, { version: 1 as const, squads: [...filtered, updated] });
     return { registered: { callsign: opts.callsign, path: entry.path }, outcome: 'merged' };
   }
 
@@ -250,7 +253,8 @@ export async function runRegister(opts: RunRegisterOpts): Promise<RunRegisterRes
       if (!gitRoot) {
         throw new Error(
           `Unknown callsign '${opts.callsign}'. No existing registration found and no Git repository detected.\n` +
-          'Pass --path to register a specific location.',
+          'Pass --path to register a specific location.\n' +
+          'Try: squad register --callsign <name> --path <path>',
         );
       }
       squadDir = inferSquadDir(opts.callsign, gitRoot);
@@ -282,6 +286,15 @@ export async function runRegister(opts: RunRegisterOpts): Promise<RunRegisterRes
     );
   }
 
+  // Different callsign at the same path: error; preserve registry uniqueness.
+  if (existingEntryForPath && existingEntryForPath.callsign !== opts.callsign) {
+    throw new Error(
+      `Squad path "${squadDir}" is already registered under callsign '${existingEntryForPath.callsign}'.\n` +
+      `Cannot register the same path under a different callsign ('${opts.callsign}'). ` +
+      'Use a different callsign or a different path.',
+    );
+  }
+
   // --- Collect current Git context ---
   const currentClone = getGitRoot(cwd);
   const remoteUrls = collectCwdRemoteUrls(cwd);
@@ -307,8 +320,9 @@ export async function runRegister(opts: RunRegisterOpts): Promise<RunRegisterRes
     return { registered: { callsign: opts.callsign, path: squadDir }, outcome: 'merged' };
   }
 
-  // --- New registration or reactivation ---
-  const outcome: RunRegisterOutcome = existingEntryForPath ? 'reactivated' : 'registered';
+  // --- New registration ---
+  // At this point: no existing callsign entry and no path conflict; this is always a new entry.
+  const outcome: RunRegisterOutcome = 'registered';
 
   const validated = upsertEntry({
     callsign: opts.callsign,
