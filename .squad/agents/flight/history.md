@@ -10,9 +10,17 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
-### Piece 08b Adversarial Review — Guard Location Consistency (2026-05-14)
+### Piece 08b Revision — Sims Folded Flight Nits (2026-05-14)
 
-When a single commit migrates multiple commands to a shared resolver pattern, guard placement must be uniform. Mixing dispatch-level guards (cli-entry.ts) with module-internal guards (assign.ts) creates an ambiguous precedent for successor pieces. The spec's "outermost command boundary" rule should be enforced mechanically: if one command in the commit guards at dispatch, all commands in that commit must guard at dispatch. Dual resolver imports (`resolveSquadV2` vs `resolveSquad`) from different SDK paths in the same commit compound the confusion — always align on one import path per migration wave.
+📌 **Flight nits folded into Sims revision as non-blocking tech debt.**
+
+Flight's APPROVE WITH NITS identified dual resolver imports and inconsistent guard placement across consult/link/assign commands. These were architectural nits (non-blocking for 08b), but valuable for follow-up cleanup.
+
+**Sims resolution:**
+- **Dual imports:** Harmonized to single import source. `resolveSquadV2` alias in `cli-entry.ts` for namespace collision avoidance; direct import `resolveSquad` in `assign.ts` fallback for programmatic callers. Clear pattern documented.
+- **Guard placement:** All three commands now use dispatch-level guards in `cli-entry.ts` as primary protection. `assign.ts` retains internal fallback guard (`opts.resolved ?? resolveSquad(...)`) for non-CLI direct API use. Consistent: dispatch is the authority for CLI invocations; internal resolution is safety net for programmatic callers.
+
+**Pattern established:** Dispatch guards are the primary CLI protection layer. Module-internal guards are fallbacks for non-CLI code paths. Future pieces (08c+) should follow this pattern.
 
 ### Piece 06 Adversarial Review — Dispatch Coverage (2026-05-14)
 

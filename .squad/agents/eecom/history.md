@@ -10,13 +10,13 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
-### Piece 08b — Lockout Triggered (2026-05-14)
+### Piece 08b — Lockout Cycle Closed (2026-05-14)
 
-📌 **EECOM locked out from piece 08b artifact revision per Reviewer Rejection Protocol.**
+📌 **EECOM lockout cycle closed — Sims revision shipped.**
 
-Piece 08b underwent adversarial review. Flight (APPROVE WITH NITS) and RETRO (APPROVE WITH NITS) passed with architectural and security notes, respectively. FIDO issued a REJECT verdict citing 4 blocking test coverage gaps + under-delivered scope (3 assign-to-copilot failure modes not implemented). Per protocol, EECOM as the original author is locked out of the immediate revision cycle. Sims (Integration / E2E) named as successor revision owner. EECOM remains locked until revision completes or lockout is explicitly lifted via coordinator decision.
+EECOM was locked out of the piece 08b revision cycle following FIDO's REJECT verdict on the original piece 08b commit `012d6d16`. Sims (Integration / E2E) accepted the revision owner role and addressed all 4 blocking gaps (consult setup-mode success test, `.gitignore` non-mutation assertions, `resolved` variable threading, assign-to-copilot scope decision). All 31 tests GREEN. Build CLEAN. Scrub gate baseline unchanged. Lockout cycle closure documented in orchestration log `2026-05-14T16-12-01-sims.md` and merged to decisions.md.
 
-Lockout is artifact-scoped (piece 08b only). EECOM's work on other pieces is unaffected.
+EECOM remains available for other pieces and sessions. Artifact-scoped lockout only.
 
 ### Piece 08b — Migrate user-action CLI commands to resolveSquad() (2026-05-14)
 
