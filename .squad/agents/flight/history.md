@@ -10,6 +10,10 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Piece 08b Adversarial Review — Guard Location Consistency (2026-05-14)
+
+When a single commit migrates multiple commands to a shared resolver pattern, guard placement must be uniform. Mixing dispatch-level guards (cli-entry.ts) with module-internal guards (assign.ts) creates an ambiguous precedent for successor pieces. The spec's "outermost command boundary" rule should be enforced mechanically: if one command in the commit guards at dispatch, all commands in that commit must guard at dispatch. Dual resolver imports (`resolveSquadV2` vs `resolveSquad`) from different SDK paths in the same commit compound the confusion — always align on one import path per migration wave.
+
 ### Piece 06 Adversarial Review — Dispatch Coverage (2026-05-14)
 
 Source-sniff tests can mask CLI dispatch coverage gaps; require behavioral assertions for flag handling and real child-process spawning to catch entry-point arg parsing errors.
@@ -142,4 +146,21 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 **Verdict:** APPROVE — 94 tests all green, spec-parity confirmed across all 21 test-surface bullets and all mechanism requirements. Implementation is comprehensive and correct.
 
 **Review heuristic captured:** URL canonicalization audits benefit from verifying both directions: that distinct URL forms for the same repo canonicalize identically, AND that similar-looking URLs for different repos remain distinct. The ADO 4-form equivalence test (N.13) is the gold standard pattern.
+
+### Piece 08b Adversarial Review — Guard Location & Resolver Consistency (2026-05-14)
+
+📌 **Flight verdict: APPROVE WITH NITS**
+
+When a single commit migrates multiple commands to a shared resolver pattern, guard placement must be uniform. Piece 08b mixes dispatch-level guards (`cli-entry.ts` for consult/link) with module-internal guards (`assign.ts` for assign-to-copilot). This creates an ambiguous precedent for 08c+ pieces. The spec's "outermost command boundary" rule should be enforced mechanically: if one command in the commit guards at dispatch, ALL commands must. Dual resolver imports (`resolveSquadV2` vs `resolveSquad` from different SDK paths) compound the confusion.
+
+**Recommendation:** Harmonize resolver import path to single source and move assign's guard to dispatch level before 08c lands. Non-blocking for 08b (side-effect contract holds regardless), but tech debt to clear post-review.
+
+**Additional findings:**
+
+- **Finding 3 (Low):** Dead `resolved` variable at dispatch — computed for guard check but never passed to runners. If runners re-resolve independently, guard+runner can diverge on cwd/env/registry. Acceptable for this piece but weaker pattern than spec envisions.
+- **Finding 4 (Nit):** `assign` short alias added. Net-new or existing? Needs documentation in command surface inventory.
+- **Finding 5 (Correct):** `--status` exemption spec-compliant and tested.
+- **Finding 6 (Correct):** Coordinator install coupling with best-effort escape hatch is correct scope.
+
+**FIDO rejection:** FIDO's REJECT (4 blocking test gaps) overrides approval; Sims assigned as revision owner. Flight nits deferred to post-08b cleanup phase.
 

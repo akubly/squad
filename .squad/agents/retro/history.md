@@ -33,6 +33,24 @@ All git invocations use `execFileSync` with array args, no shell, stderr ignored
 
 **Cleared threat vectors:** Registry traversal, env-var trust boundary, symlink following, JSON injection, TOCTOU races — all non-exploitable from unprivileged inputs given current design. Validation at resolver boundary completes the security model begun in piece 01 registry validation.
 
+### Piece 08b adversarial review (2026-05-14T16:12:01.302-07:00)
+
+**Verdict:** APPROVE WITH NITS (no blocking issues, 4 hardening candidates)
+
+**PII/Secret scan:** CLEAN. Only `@.*\.com` hit is the standard git author/co-authored-by trailer. No tokens, no `ghp_`, no `github_pat_`. Zero committed artifact PII.
+
+**Risk inventory (all LOW):**
+
+1. **`--home` flag accepts arbitrary path without absolute-path or bounds check** — `assign.ts:81-82,129`. `home` from CLI args flows directly into `path.join(home, '.copilot', 'agents', ...)` with no validation. OS permissions generally block escalation and the written content is a fixed internal template; LOW. Mitigation: `path.isAbsolute(home)` guard; optionally reject paths outside `os.homedir()`.
+
+2. **`normalizedCwd` registered as clone without absolute-path guard** — `assign.ts:108`. `path.normalize(opts.cwd)` does not guarantee an absolute result if `opts.cwd` is relative; a relative clone path confuses future resolver comparisons. Echoes piece 03 hardening. Mitigation: `path.isAbsolute(opts.cwd)` check before normalize and write.
+
+3. **`consult --status` deliberately skips resolver guard** — `cli-entry.ts` `showStatus` bypass. Intentional per spec; `--status` is read-only and no registry or project writes occur. The inline comment documents the intent. LOW; no remediation required for approval.
+
+4. **Test fixture env isolation incomplete** — `legacy-resolver-migration.test.ts:44-68`. `runCli` spreads `process.env` but does not suppress `XDG_CONFIG_HOME`/`APPDATA`. The randomBytes suffix makes real-path collision very unlikely; LOW in practice. Mitigation: add `XDG_CONFIG_HOME`/`APPDATA` overrides to the env seam for resolver-guard tests.
+
+**Additional confirmed-clean vectors:** No dry-run output writes to `.squad/` files. `_installCoordinatorAgent` correctly uses `lstatSync` (not `statSync`) to detect and unlink symlinks before copying — consistent with piece 02 symlink hardening pattern. Template source is package-internal (`getTemplatesDir()` walk bounded to 6 levels); no user-controlled template path injection possible. Resolver guard in `assign.ts` fires before all side effects; the two-phase pattern (resolve → side-effects) is correctly implemented.
+
 ### Piece 08a adversarial review (2026-05-14T14:19:34-07:00)
 
 **Verdict:** APPROVE
@@ -46,3 +64,24 @@ All git invocations use `execFileSync` with array args, no shell, stderr ignored
 **Co-authored-by trailer:** Exact match confirmed: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
 
 **Decision entry review:** `.squad/decisions/inbox/control-08a-working-tree-drift.md` and the merged entry in `.squad/decisions.md` are both clean — no PII, no comparison framing, no version leaks.
+
+### Piece 08b Adversarial Review — Security (2026-05-14T16:12:01Z)
+
+📌 **RETRO verdict: APPROVE WITH NITS (no blocking findings, 4 LOW hardening candidates)**
+
+**PII/Secret Scan:** CLEAN. Scan pattern: `email|token|@.*\.com|ghp_|github_pat_`. Only match: standard git author/co-authored-by trailer metadata. No tokens, no committed credential patterns, no email addresses in source or `.squad/` artifacts.
+
+**Risk Inventory (all LOW severity):**
+
+1. **`--home` flag path validation (assign.ts:81-82,129)** — `home` from CLI args flows into `path.join(home, '.copilot', 'agents', ...)` with no absolute-path or bounds check. OS permissions generally block escalation; written content is fixed internal template. Mitigation: Add `path.isAbsolute(home)` guard; optionally reject paths outside `os.homedir()`.
+
+2. **`opts.cwd` normalization without absolute-path guarantee (assign.ts:108)** — `path.normalize(opts.cwd)` doesn't guarantee absolute result if `opts.cwd` is relative. Relative clone paths confuse future resolver comparisons. Echoes piece 03 hardening. Mitigation: `path.isAbsolute(opts.cwd)` check before normalize and registry write.
+
+3. **`consult --status` deliberately bypasses resolver guard (cli-entry.ts)** — Intentional per spec. `--status` is read-only query; no registry or project writes occur. Inline comment documents intent. No remediation required for approval.
+
+4. **Test fixture env isolation incomplete (legacy-resolver-migration.test.ts:44-68)** — `runCli` spreads `process.env` without suppressing `XDG_CONFIG_HOME`/`APPDATA`. Fixture collision via real-path seam unlikely (randomBytes suffix); LOW in practice. Mitigation: add `XDG_CONFIG_HOME`/`APPDATA` env overrides to resolver-guard tests.
+
+**Confirmed-clean vectors:** No dry-run output writes to `.squad/` files. `_installCoordinatorAgent` correctly uses `lstatSync` (not `statSync`) to detect and unlink symlinks — consistent with piece 02 hardening. Template source is package-internal (bounded to 6 levels); no user-controlled template path injection. Resolver guard in `assign.ts` fires before all side effects; two-phase pattern correct.
+
+**FIDO rejection:** FIDO's REJECT (test gaps) overrides approval; Sims assigned as revision owner. RETRO hardening candidates noted for follow-up.
+

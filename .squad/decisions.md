@@ -5,6 +5,136 @@
 
 ---
 
+## 2026-05-14: Phase B Piece 08b Adversarial Review — REJECTED, Sims Revision Assigned
+
+**Session:** Phase B piece 08b adversarial review  
+**Branch:** `akubly/upstream-08b-migrate-user-action-commands` @ commit `012d6d16`  
+**Requested by:** akubly (Brady)  
+**Verdict:** REJECTED — strict lockout for EECOM per Reviewer Rejection Protocol  
+**Revision Owner:** Sims (Integration / E2E)
+
+### Review Summary Table
+
+| Reviewer | Verdict | Key Finding | Model |
+|----------|---------|-------------|-------|
+| Flight (Lead) | APPROVE WITH NITS | Architecture sound; side-effect transactionality correct; dual-resolver import and guard-location inconsistency noted as tech debt, not blocking | claude-opus-4.6 |
+| RETRO (Security) | APPROVE WITH NITS | PII/secrets clean; no CRITICAL/HIGH findings; 4 LOW-severity hardening candidates (path validation on --home, --cwd, test env isolation, --status edge case) | claude-sonnet-4.6 |
+| FIDO (Quality) | REJECT | 4 blocking test gaps: consult setup-mode success path unexercised; `.gitignore` non-mutation unverified for consult+link; 3 assign-to-copilot spec-required failure modes not implemented; dead `resolved` variable not threaded to runners | claude-sonnet-4.6 |
+
+### Flight — APPROVE WITH NITS
+
+**By:** Flight (Lead) — adversarial review  
+**Verdict:** APPROVE WITH NITS  
+**Subject branch:** akubly/upstream-08b-migrate-user-action-commands @ 012d6d16  
+
+**Architectural Assessment:** The implementation correctly gates all three user-action commands behind resolver preconditions before side effects execute. The transactionality contract is honored across all paths.
+
+**Findings:**
+
+1. **Dual Resolver Functions (Medium):** `consult` and `link` use `resolveSquadV2()` from SDK subpath; `assign-to-copilot` uses `resolveSquad()` from SDK top-level. Same logic likely, but caller-visible contracts differ. Maintenance risk for future pieces.
+
+2. **Guard Location Inconsistency (Medium):** `consult` and `link` guards at dispatch in `cli-entry.ts`; `assign` guard inside `assign.ts` module boundary. Pattern inconsistency creates friction for future contributors.
+
+3. **Resolved Data Discarded at Dispatch (Low):** Resolver result used only as boolean gate; not passed to runners. If runners re-resolve, guard+runner can diverge on cwd/env/registry.
+
+4. **`assign` Alias Added (Nit):** Net-new or existing? Document in command surface inventory.
+
+5. **`--status` Exemption (Correct):** Spec-compliant; `--status` is query-only and correctly bypasses resolver.
+
+6. **Coordinator Install Coupling (Correct):** Best-effort with escape hatch is correct scope.
+
+**Recommendation:** Harmonize dual-resolver import and align guard location pattern before 08c lands. Non-blocking.
+
+### RETRO — APPROVE WITH NITS
+
+**By:** RETRO (Security)  
+**Verdict:** APPROVE WITH NITS  
+**Subject branch:** `akubly/upstream-08b-migrate-user-action-commands` @ `012d6d16`
+
+**PII/Secret Scan:** CLEAN — standard git metadata only, no tokens or credentials.
+
+**Risk Inventory (4 LOW items):**
+
+| # | File:Line | Finding | Mitigation |
+|---|-----------|---------|------------|
+| 1 | `assign.ts:81-82,129` | `--home` flag flows into `path.join(home, ...)` without absolute-path validation | Add `path.isAbsolute(home)` guard |
+| 2 | `assign.ts:108` | `path.normalize(opts.cwd)` doesn't guarantee absolute result; relative paths in registry confuse resolver | Add `path.isAbsolute(opts.cwd)` check |
+| 3 | `cli-entry.ts` | `consult --status` bypasses resolver; read-only but verify no write locks | Confirm `runConsult --status` never acquires write lock |
+| 4 | `legacy-resolver-migration.test.ts:44-68` | `runCli` spreads `process.env` without suppressing `XDG_CONFIG_HOME` / `APPDATA` | Add env overrides to resolver-guard tests |
+
+**Confirmed-Clean Vectors:** Credential leakage, symlink defense, template source injection, two-phase guard, test fixture cleanup all verified.
+
+### FIDO — REJECT
+
+**By:** FIDO (Quality Owner) — adversarial review  
+**Verdict:** REJECT  
+**Subject branch:** akubly/upstream-08b-migrate-user-action-commands @ 012d6d16  
+
+**Test Results:** 30/30 tests pass (legacy-resolver-migration 16/16, consult 14/14), but parity audit reveals gaps.
+
+**Blocking Findings:**
+
+1. **Consult setup-mode resolver-success path unexercised:** Spec requires fixture coverage showing resolver succeeds and command reaches normal behavior. Only `--status` test passes; it bypasses the guard by design. Guarded setup-mode path never exercised in success direction.
+
+2. **`.gitignore` non-mutation unverified for consult+link failure paths:** Spec explicitly requires "does not append to .gitignore" and "does not create ignore entries." Both tests check only `config.json`. Regression that writes `.gitignore` before guard exit would be missed.
+
+3. **Three assign-to-copilot spec-required failure modes not implemented:** URL-without-clone-destination, clone failure, and host verification are in the spec test surface. Implementation lacks these features entirely. This is under-delivered scope, not deferred feature.
+
+4. **Dead `resolved` variable in consult and link:** Guard computes `resolved` but doesn't thread it to downstream runner. If runner re-resolves, guard+runner can diverge on cwd/env/registry path. No test covers divergence.
+
+**Additional Gaps:**
+
+- Coordinator-agent install path (`--no-install-agent` escape hatch) untested
+- `assign` short alias untested
+- Symlinked target path in agent install untested
+- `teamRoot` relativity not asserted (could silently store absolute path)
+
+**Named successor: Sims (Integration / E2E)**
+
+Sims should:
+- Add consult setup-mode success test (no flags) from registered consumer repo
+- Extend consult/link failure tests to assert `.gitignore` / `.git/info/exclude` not written
+- Tighten link success test to assert `teamRoot` is relative
+- Raise assign-to-copilot scope decision: do URL, clone, host-verify belong in 08b or later?
+- Add `assign` short alias test
+- Test symlinked agent install path
+
+**EECOM locked out for this cycle.**
+
+### Coordinator Synthesis
+
+**By:** akubly (Brady) — Coordinator  
+**Date:** 2026-05-14T16:12:01.302-07:00
+
+Three independent reviews received. Two APPROVE WITH NITS (Flight, RETRO), one REJECT (FIDO, blocking).
+
+**Coordinator Verdict: REJECTED**
+
+Per Reviewer Rejection Protocol (strict enforcement):
+- FIDO's REJECT (4 blocking test gaps + under-delivered scope) is definitive.
+- Combined: piece 08b does not proceed to Phase C.
+
+**Lockout:**
+- EECOM (author) — locked out under strict lockout semantics for this revision cycle.
+- Sims (self-nominated revision owner) — accepted and confirmed.
+
+**Revision Scope (Sims):**
+All four blocking findings must be addressed:
+1. **Flight's nits:** Dual-resolver harmonization and guard-location pattern consolidation (non-blocking, for post-08b cleanup).
+2. **RETRO's LOW items:** Path validation hardening on --home, --cwd; test env isolation; --status edge-case verification.
+3. **FIDO's blockers:** Consult setup-mode success test, `.gitignore` non-mutation tests, assign-to-copilot scope decision + tests, dead `resolved` variable threading, alias + symlink test coverage.
+
+**Expected state after Sims revision:**
+- Full test coverage for consult/link/assign success paths
+- `.gitignore` / ignore-entry non-mutation verified for failure paths
+- Assign-to-copilot scope clarified (URL, clone, host-verify: in 08b or deferred?)
+- `resolved` threaded to runners or scope reduced to gate-only semantics with documented rationale
+- `assign` alias and symlink paths exercised
+- Security hardening recommendations from RETRO applied
+- Build + full-suite gate requirements met per piece 08b spec
+
+---
+
 ## 2026-05-14: Piece 08a Accepted — Final
 **By:** akubly (Brady) — via Copilot coordinator
 **Subject:** akubly/upstream-08a-migrate-readonly-commands @ revised piece 0e4f301e

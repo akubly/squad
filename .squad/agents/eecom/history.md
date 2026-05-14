@@ -10,6 +10,28 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings
 
+### Piece 08b — Lockout Triggered (2026-05-14)
+
+📌 **EECOM locked out from piece 08b artifact revision per Reviewer Rejection Protocol.**
+
+Piece 08b underwent adversarial review. Flight (APPROVE WITH NITS) and RETRO (APPROVE WITH NITS) passed with architectural and security notes, respectively. FIDO issued a REJECT verdict citing 4 blocking test coverage gaps + under-delivered scope (3 assign-to-copilot failure modes not implemented). Per protocol, EECOM as the original author is locked out of the immediate revision cycle. Sims (Integration / E2E) named as successor revision owner. EECOM remains locked until revision completes or lockout is explicitly lifted via coordinator decision.
+
+Lockout is artifact-scoped (piece 08b only). EECOM's work on other pieces is unaffected.
+
+### Piece 08b — Migrate user-action CLI commands to resolveSquad() (2026-05-14)
+
+**Resolver guard placement:** For existing commands (`consult`, `link`), the guard belongs at the `cli-entry.ts` dispatch layer, NOT inside the command module functions. Guards inside `runConsult`/`runLink` would break existing unit tests that call those functions directly from temp dirs not in any registry.
+
+**New commands take guard inside the module:** `assign-to-copilot` is a new command with no pre-existing callers, so its guard lives inside `runAssignToCopilot()` in `assign.ts`.
+
+**Test isolation for "resolver failure" paths:** Tests running from TEST_ROOT (nested inside the main repo) fail because `findGitRoot(TEST_ROOT)` walks up and finds `D:\git\squad-replay\.squad/`. Fix: create a `.git` directory inside TEST_ROOT in `beforeEach` to stop the walkup. Then the resolver finds no `.squad/` at TEST_ROOT and correctly returns null.
+
+**Existing test message drift:** When adding a resolver guard before `consult`, the error message seen by `consult.test.ts` changes from the old "no personal squad" to the new "No squad found." Update the existing test to expect the new message AND add `SQUAD_REGISTRY_PATH` pointing to an empty registry to ensure the resolver returns null reliably.
+
+**`consult --status` bypass:** The `--status` flag must bypass the resolver guard at dispatch. Only setup and `--check` modes need resolver precondition. `--status` reads local `.squad/config.json` directly — no resolver needed.
+
+**Scrub gate Gate 1 pre-existing:** `git ls-files` scans the full tracked tree. Strip-listed files from prior pieces (docs/_internal/, orchestration-log, etc.) are pre-existing baseline contamination from the development history. Not a piece-08b regression.
+
 ### Piece 07 — Register merges clones[] and origins[] (2026-05-14)
 
 **Git root detection on Windows:** `git rev-parse --show-toplevel` returns forward-slash paths on Windows (e.g. `C:/git/repo`). The new `lib/git-root.ts` helper wraps the call with `path.normalize()` to convert to OS-native separators. This is critical because `upsertEntry` validates clone paths and the SDK's path-comparison logic is platform-aware.
