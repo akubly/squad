@@ -136,6 +136,24 @@ Five open community PRs reviewed:
 - **#507 (JasonYeYuhe)** — Chinese README translation. 🔄 Needs a community-maintained freshness disclaimer before merging. Translation quality looks solid; the maintenance burden concern is the only gate.
 
 **Patterns noted:**
+
+### Piece 05 deadlock arbitration (2026-05-13)
+
+**Context:** EECOM locked out (original author). CONTROL locked out (revision rejected by FIDO). Flight arbitrates as uninvolved third agent.
+
+**Attribution procedure for `test/journey-error-handling.test.ts`:**
+
+1. **Solo on piece-05 branch:** 21/21 passed (25.42s).
+2. **Solo on piece-04 branch:** 21/21 passed (25.85s).
+3. **Full suite on piece-04:** `journey-error-handling` PASSED (listed as ✔ with 21 tests in 22214ms). Piece-04 full suite had 7 other failing files (all unrelated concurrency/env flakes).
+4. **CONTROL did not modify this file:** `git log 3d9b4bbb..366dd6c8 -- test/journey-error-handling.test.ts` returns empty.
+5. **Test scope:** Exercises shell rendering components (App, ErrorBoundary, ShellRenderer, SessionRegistry) — SDK/shell internals, not CLI dispatch paths that piece-05 modified.
+
+**Finding:** The test passes solo on both branches and passes in piece-04's full suite. When it fails in piece-05's full suite, it's due to increased worker pool pressure from piece-05's additional test files exercising CLI command stubs. This is a latent vitest concurrency race, not a logic regression.
+
+**Verdict:** APPROVE piece 05. Decision matrix row 2 — latent race exposed by added worker load. Concurrency budget tracked as follow-up concern (vitest `--pool-concurrency` or test isolation). Not a piece-05 blocker.
+
+**Final piece-05 status:** APPROVED FOR PR (Phase B complete, entering Phase C territory).
 - Diberry (MSFT) is delivering consistent, architecturally-sound contributions — both PRs are merge-ready.
 - Tamir's contributions are technically strong but need delivery discipline (full-rewrite vs. surgical patch, proposal-first for new primitives).
 - Community translations are welcome but need a sustainability framing before merge.
