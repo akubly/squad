@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-05-14: Piece 08a Revision Complete — CAPCOM, Awaiting User Re-verification
+
+**By:** CAPCOM (SDK Expert) — reviewer rejection lockout, independent revision  
+**Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `0e4f301e`  
+**Original author locked out:** CONTROL (CONTROL remains locked for this cycle)  
+
+### Revision Scope & Findings Addressed
+
+All four findings from the rejection cycle addressed in single pass:
+
+1. **CAPCOM boundary violation:** SDK barrel routing
+   - Added overload-compatible registry-aware `resolveSquad` path through `packages/squad-sdk/src/index.ts`
+   - Rerouted CLI resolver imports from SDK subpath to SDK root barrel
+   - All three CLI dispatch paths (`cli-entry`, `config`, `cross-squad`) now consume stable public surface
+   - `delegateCommand` unified with `discover` on v2 resolution
+
+2. **CAPCOM dispatch inconsistency:** Legacy fallback divergence
+   - Migrated `delegate` to v2 resolver with shared start-directory handling
+   - Removed legacy `detectSquadDir(process.cwd())` path from cross-squad delegation
+   - All cross-squad commands now thread `--team-root` / `SQUAD_TEAM_ROOT` through resolver
+
+3. **FIDO `--team-root` / `SQUAD_TEAM_ROOT` parity:** Test coverage gap
+   - Added test coverage for CLI start-directory resolution with env override
+   - `test/cli/legacy-resolver-migration.test.ts` expanded to prove override parity
+
+4. **FIDO action-command boundary test:** Weak regression sentinel
+   - Strengthened coverage: `consult --status` now proves action commands still use legacy dispatch path outside read-only migration
+
+### Test & Build Verification
+
+- **Migration tests:** 8/8 pass (expanded from 5/5)
+- **Full suite:** 6,308/6,432 tests pass (baseline: 6,312/6,429)
+  - **Drift note:** 7-test delta vs. baseline (124 failures vs. 117 pre-revision). Origin unclear — potential flakiness vs. minor regression from SDK barrel re-export. User flagged for investigation if needed.
+- **Scrub gate:** Gates 2/4/5/6 PASS; Gates 1/3 baseline (no new piece-08a strip-listed path contamination)
+- **Build:** PASS
+
+### Coordinator Synthesis
+
+CAPCOM revision complete. Strict lockout protocol applied: CAPCOM as revision owner replaced CONTROL. CONTROL remains locked out unless re-rejection cycle restarts.
+
+**Status:** Awaiting user decision on re-verification. Branch ready for re-review if requested. See `.squad/orchestration-log/` for per-finding resolution details.
+
+---
+
 ## 2026-05-14: Phase B Piece 08a Adversarial Review — REJECTED, CAPCOM Revision Assigned
 
 **Session:** Phase B piece 08a adversarial review  

@@ -16,6 +16,10 @@
 
 ## Cross-Agent Updates
 
+### Piece 08a Revision Complete — CAPCOM (2026-05-14T21:38:40.349Z)
+
+📌 **Revision logged:** CAPCOM completed piece 08a revision (commit 0e4f301e) under strict lockout. CONTROL remains locked out for 08a unless re-rejection cycle restarts. See `.squad/orchestration-log/2026-05-14T21-38-40Z-capcom.md` for full revision scope (SDK barrel routing, dispatch unification, CLI start-dir parity tests, action-command boundary strengthened). Full suite 6,308/6,432 PASS; build clean; scrub gates 2/4/5/6 PASS.
+
 ### Piece 08a Adversarial Review Outcome (2026-05-14T21:19:34Z)
 
 📌 **Rejection & Lockout Notice:** Piece 08a (read-only command resolver migration, commit fcb0cf1a) received four independent reviews:

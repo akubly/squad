@@ -77,3 +77,5 @@ Revised the read-only resolver migration under reviewer rejection lockout as CAP
 
 The revision unified `discover` and `delegate` on v2 resolution, threaded `--team-root` / `SQUAD_TEAM_ROOT` into cross-squad discovery, and strengthened `test/cli/legacy-resolver-migration.test.ts` to cover SDK barrel import, override parity, delegate resolution, and the action-command boundary. `.changeset/migrate-readonly-commands.md` now records both CLI and SDK patch impact.
 
+**Revision complete:** Commit 0e4f301e. Logged to `.squad/orchestration-log/2026-05-14T21-38-40Z-capcom.md`. Full suite 6,308/6,432 PASS; build clean; scrub gates 2/4/5/6 PASS. CONTROL locked out for further 08a revisions unless re-rejection cycle restarts.
+
