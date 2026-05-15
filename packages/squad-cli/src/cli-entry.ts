@@ -92,11 +92,11 @@ process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 
 import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
 import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
+import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
-import { runInit } from './cli/core/init.js';
 import { runCost } from './cli/commands/cost.js';
 import { getPackageVersion } from './cli/core/version.js';
 
@@ -310,72 +310,61 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Registry-aware path: activated when any registry flag is present.
-    const hasTargetDir = args.includes('--target-dir');
-    const hasCallsign = args.includes('--callsign');
+    const { runInit: runRegistryInit } = await import('./commands/init.js');
+    const targetDirIdx = args.indexOf('--target-dir');
+    const targetDirArg = (targetDirIdx !== -1 && args[targetDirIdx + 1]) ? args[targetDirIdx + 1] : undefined;
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
     const hasNoRegister = args.includes('--no-register');
-    const hasRegistryPath = args.includes('--registry-path');
-    const isRegistryAware = hasTargetDir || hasCallsign || hasNoRegister || hasRegistryPath;
-
-    if (isRegistryAware) {
-      const { runInit: runRegistryInit } = await import('./commands/init.js');
-      const targetDirIdx = args.indexOf('--target-dir');
-      const targetDir = (targetDirIdx !== -1 && args[targetDirIdx + 1]) ? args[targetDirIdx + 1] : undefined;
-      const callsignIdx = args.indexOf('--callsign');
-      const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
-      const registryPathIdx = args.indexOf('--registry-path');
-      const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
-      try {
-        const result = await runRegistryInit({ targetDir, callsign, noRegister: hasNoRegister, registryPath, cwd: process.cwd() });
-        const ok = noColor ? 'OK' : `${GREEN}✔${RESET}`;
-        if (result.registered) {
-          console.log(`${ok} Initialized and registered: ${result.registered.callsign} → ${result.registered.path}`);
-        } else if (result.reactivated) {
-          console.log(`${ok} Reactivated: ${result.reactivated.callsign} → ${result.reactivated.path}`);
-        } else {
-          console.log(`${ok} Initialized squad (no registry entry written).`);
-        }
-      } catch (err) {
-        const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
-        console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      }
-      return;
-    }
-
     const modeIdx = args.indexOf('--mode');
     const mode = (modeIdx !== -1 && args[modeIdx + 1]) ? args[modeIdx + 1] : undefined;
+    const remoteTeamPath = mode === 'remote' ? args[modeIdx + 2] : undefined;
 
-    if (mode === 'remote') {
-      const teamPath = args[modeIdx + 2];
-      if (!teamPath) {
-        fatal('Usage: squad init --mode remote <team-repo-path>');
-      }
-      const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
-      const dest = process.cwd();
-      writeRemoteConfig(dest, teamPath);
-      await runInit(dest);
-      return;
+    if (mode === 'remote' && !remoteTeamPath) {
+      fatal('Usage: squad init --mode remote <team-repo-path>');
     }
 
-    const sdkMod = hasGlobal ? await lazySquadSdk() : null;
-    const dest = hasGlobal ? sdkMod!.resolveGlobalSquadPath() : process.cwd();
+    const sdkMod = hasGlobal && !targetDirArg ? await lazySquadSdk() : null;
+    const targetDir = targetDirArg ?? (hasGlobal ? sdkMod!.resolveGlobalSquadPath() : undefined);
+    const resolvedTargetDir = targetDir ? path.resolve(process.cwd(), targetDir) : process.cwd();
     const noWorkflows = args.includes('--no-workflows');
     const sdk = args.includes('--sdk');
     const roles = args.includes('--roles');
     const presetIdx = args.indexOf('--preset');
     const presetName = (presetIdx !== -1 && args[presetIdx + 1]) ? args[presetIdx + 1] : undefined;
-    // Parse --state-backend flag for init
     const sbIdx = args.indexOf('--state-backend');
     const initStateBackend = (sbIdx !== -1 && args[sbIdx + 1]) ? args[sbIdx + 1] : undefined;
-    // Global init: suppress workflows (no GitHub CI in ~/.config/squad/) and bootstrap personal squad
-    runInit(dest, { includeWorkflows: !noWorkflows && !hasGlobal, sdk, roles, isGlobal: hasGlobal, stateBackend: initStateBackend }).then(async () => {
+
+    try {
+      const result = await runRegistryInit({
+        targetDir,
+        callsign,
+        noRegister: hasNoRegister,
+        registryPath,
+        cwd: process.cwd(),
+        includeWorkflows: !noWorkflows && !hasGlobal,
+        sdk,
+        roles,
+        isGlobal: hasGlobal,
+        stateBackend: initStateBackend,
+        remoteTeamPath,
+      });
+      const ok = noColor ? 'OK' : `${GREEN}✔${RESET}`;
+      if (result.registered) {
+        console.log(`${ok} Initialized and registered: ${result.registered.callsign} → ${result.registered.path}`);
+      } else if (result.reactivated) {
+        console.log(`${ok} Reactivated: ${result.reactivated.callsign} → ${result.reactivated.path}`);
+      } else {
+        console.log(`${ok} Initialized squad (no registry entry written).`);
+      }
+
       if (presetName) {
         const { seedBuiltinPresets, applyPreset } = await import('@bradygaster/squad-sdk/presets');
         const { resolvePresetsDir, ensureSquadHome } = await import('@bradygaster/squad-sdk/resolution');
         const nodePath = await import('node:path');
 
-        // Auto-initialize squad home + presets if they don't exist yet
         if (!resolvePresetsDir()) {
           console.log(`\n⚙️  No presets found — setting up squad home...`);
           ensureSquadHome();
@@ -386,7 +375,7 @@ async function main(): Promise<void> {
           seedBuiltinPresets();
         }
 
-        const targetAgentsDir = nodePath.join(dest, '.squad', 'agents');
+        const targetAgentsDir = nodePath.join(resolvedTargetDir, '.squad', 'agents');
         const results = applyPreset(presetName, targetAgentsDir);
         const installed = results.filter(r => r.status === 'installed');
         const skipped = results.filter(r => r.status === 'skipped');
@@ -401,9 +390,12 @@ async function main(): Promise<void> {
           console.error(`❌ Preset '${presetName}' not found. Run 'squad preset list' to see available presets.`);
         }
       }
-    }).catch(err => {
-      fatal(err.message);
-    });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const isConflict = err instanceof ConfigurationError;
+      process.exit(isConflict ? 2 : 1);
+    }
     return;
   }
 
@@ -1127,14 +1119,19 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'init-remote') {
-    const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
     const teamPath = args[1];
     if (!teamPath) {
       fatal('Usage: squad init-remote <team-repo-path>');
     }
-    const dest = process.cwd();
-    writeRemoteConfig(dest, teamPath);
-    await runInit(dest);
+    const { runInit: runRegistryInit } = await import('./commands/init.js');
+    try {
+      await runRegistryInit({ cwd: process.cwd(), remoteTeamPath: teamPath });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const isConflict = err instanceof ConfigurationError;
+      process.exit(isConflict ? 2 : 1);
+    }
     return;
   }
 

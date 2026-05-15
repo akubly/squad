@@ -16,6 +16,15 @@ function tempRegistry(): string {
   return join(TEST_ROOT, 'registry.json');
 }
 
+function expectScaffoldEntries(targetDir: string): void {
+  expect(existsSync(join(targetDir, '.squad'))).toBe(true);
+  expect(existsSync(join(targetDir, '.squad', 'agents'))).toBe(true);
+}
+
+async function seedRegistry(squads: unknown[]): Promise<void> {
+  await writeFile(tempRegistry(), JSON.stringify({ version: 1, squads }, null, 2));
+}
+
 describe('runInit: clean repository scaffold', () => {
   beforeEach(async () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
@@ -25,15 +34,15 @@ describe('runInit: clean repository scaffold', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('creates .squad/ in cwd without registry flags', async () => {
-    const result = await runInit({ cwd: TEST_ROOT });
-    expect(existsSync(join(TEST_ROOT, '.squad'))).toBe(true);
+  it('creates .squad/ in cwd when registration is disabled', async () => {
+    const result = await runInit({ cwd: TEST_ROOT, noRegister: true });
+    expectScaffoldEntries(TEST_ROOT);
     expect(result.registered).toBeUndefined();
     expect(result.reactivated).toBeUndefined();
   });
 
-  it('does not write a registry entry when no registry-aware flags are present', async () => {
-    await runInit({ cwd: TEST_ROOT });
+  it('does not write a registry entry when registration is disabled', async () => {
+    await runInit({ cwd: TEST_ROOT, noRegister: true });
     expect(existsSync(tempRegistry())).toBe(false);
   });
 });
@@ -47,14 +56,15 @@ describe('runInit: existing scaffold', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('does not overwrite existing .squad/team.md', async () => {
+  it('throws ERR_SQUAD_INIT_EXISTING_SCAFFOLD when .squad/team.md already exists', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     const teamMdPath = join(squadDir, 'team.md');
     await writeFile(teamMdPath, '# My Custom Team\n');
 
-    await runInit({ cwd: TEST_ROOT });
+    await expect(runInit({ cwd: TEST_ROOT })).rejects.toThrow(/ERR_SQUAD_INIT_EXISTING_SCAFFOLD/);
 
+    // Sentinel file must be unchanged after the conflict.
     const content = readFileSync(teamMdPath, 'utf-8');
     expect(content).toBe('# My Custom Team\n');
   });
@@ -71,14 +81,14 @@ describe('runInit: target directory', () => {
 
   it('creates intermediate directories and writes .squad/', async () => {
     const targetDir = join(TEST_ROOT, 'nested', 'project');
-    await runInit({ targetDir, cwd: TEST_ROOT });
-    expect(existsSync(join(targetDir, '.squad'))).toBe(true);
+    await runInit({ targetDir, cwd: TEST_ROOT, noRegister: true });
+    expectScaffoldEntries(targetDir);
   });
 
   it('derives callsign from target directory name and writes registry entry when registryPath is given', async () => {
     const targetDir = join(TEST_ROOT, 'my-team');
     const result = await runInit({ targetDir, registryPath: tempRegistry(), cwd: TEST_ROOT });
-    expect(existsSync(join(targetDir, '.squad'))).toBe(true);
+    expectScaffoldEntries(targetDir);
     expect(result.registered).toBeDefined();
     expect(result.registered?.callsign).toBe('my-team');
     expect(existsSync(tempRegistry())).toBe(true);
@@ -107,7 +117,7 @@ describe('runInit: --no-register', () => {
       registryPath: tempRegistry(),
       noRegister: true,
     });
-    expect(existsSync(join(TEST_ROOT, '.squad'))).toBe(true);
+    expectScaffoldEntries(TEST_ROOT);
     expect(existsSync(tempRegistry())).toBe(false);
     expect(result.registered).toBeUndefined();
   });
@@ -128,14 +138,35 @@ describe('runInit: collisions', () => {
     await runInit({ targetDir: targetA, callsign: 'shared', registryPath: tempRegistry(), cwd: TEST_ROOT });
     await expect(
       runInit({ targetDir: targetB, callsign: 'shared', registryPath: tempRegistry(), cwd: TEST_ROOT }),
-    ).rejects.toThrow(/Callsign "shared"/);
+    ).rejects.toThrow(/ERR_SQUAD_INIT_CALLSIGN_EXISTS/);
   });
 
-  it('reactivates an inactive entry when callsign and path match', async () => {
-    await runInit({ cwd: TEST_ROOT, callsign: 'my-squad', registryPath: tempRegistry() });
+  it('returns reactivated for an active entry when callsign and path match', async () => {
+    await seedRegistry([{
+      callsign: 'my-squad',
+      path: join(TEST_ROOT, '.squad'),
+      clones: [],
+      origins: [],
+      status: 'active',
+    }]);
     const result = await runInit({ cwd: TEST_ROOT, callsign: 'my-squad', registryPath: tempRegistry() });
     expect(result.reactivated).toBeDefined();
     expect(result.reactivated?.callsign).toBe('my-squad');
+    expectScaffoldEntries(TEST_ROOT);
+  });
+
+  it('returns reactivated for an inactive entry when callsign and path match', async () => {
+    await seedRegistry([{
+      callsign: 'my-squad',
+      path: join(TEST_ROOT, '.squad'),
+      clones: [],
+      origins: [],
+      status: 'inactive',
+    }]);
+    const result = await runInit({ cwd: TEST_ROOT, callsign: 'my-squad', registryPath: tempRegistry() });
+    expect(result.reactivated).toBeDefined();
+    expect(result.reactivated?.callsign).toBe('my-squad');
+    expectScaffoldEntries(TEST_ROOT);
   });
 });
 

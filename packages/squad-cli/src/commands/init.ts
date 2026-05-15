@@ -2,8 +2,8 @@
  * Registry-aware init command module.
  *
  * Scaffolds a .squad/ directory and optionally registers the squad in the
- * user registry. The scaffold operation is non-destructive: existing files
- * are preserved.
+ * user registry. The command validates for conflicts before writing any file
+ * or registry entry.
  *
  * @module commands/init
  */
@@ -17,8 +17,11 @@ import {
 } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
+import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getGitRoot } from '../lib/git-root.js';
+import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
+import { writeRemoteConfig } from '../cli/commands/init-remote.js';
 
 export interface RunInitOpts {
   targetDir?: string;
@@ -26,6 +29,12 @@ export interface RunInitOpts {
   noRegister?: boolean;
   registryPath?: string;
   cwd?: string;
+  includeWorkflows?: boolean;
+  sdk?: boolean;
+  roles?: boolean;
+  isGlobal?: boolean;
+  stateBackend?: string;
+  remoteTeamPath?: string;
 }
 
 export interface RunInitResult {
@@ -52,90 +61,151 @@ export function isUrlLikeArg(arg: string): boolean {
 /**
  * Scaffold a .squad/ directory and optionally register the squad.
  *
- * - Creates the .squad/ directory structure without overwriting existing files.
- * - When `registryPath` or `callsign` is present and `noRegister` is not set,
- *   writes a registry entry using the user registry helpers.
- * - Derives the callsign from the target directory name when `callsign` is not
- *   explicitly provided.
- * - Reactivates an inactive entry with the same callsign instead of creating
- *   a duplicate.
- * - Throws on callsign collision when an active entry points to a different path.
+ * Performs a fail-fast validation pass before writing any file or registry
+ * entry. Throws `ConfigurationError` (recoverable: false) on:
+ *   - ERR_SQUAD_INIT_EXISTING_SCAFFOLD — sentinel file already present in .squad/
+ *   - ERR_SQUAD_INIT_CALLSIGN_EXISTS   — callsign already active at a different path
+ *   - ERR_SQUAD_INIT_CLONE_PATH_EXISTS — target dir already a registered clone
+ *
+ * Reactivates an inactive entry with the same callsign and path instead of
+ * creating a duplicate.
  */
 export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
   const cwd = opts?.cwd ?? process.cwd();
   const targetDir = opts?.targetDir ? path.resolve(cwd, opts.targetDir) : cwd;
   const squadDir = path.join(targetDir, '.squad');
 
-  // Scaffold .squad/ non-destructively
-  const dirs = [squadDir, path.join(squadDir, 'agents')];
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
+  // Step 1: Scaffold conflict guard — runs before any filesystem or registry write.
+  checkScaffoldConflict(squadDir, targetDir);
 
-  // Skip registration when noRegister is set or no registry-aware flags provided
-  const wantsRegistration = !opts?.noRegister && (opts?.registryPath != null || opts?.callsign != null);
-  if (!wantsRegistration) {
-    return {};
-  }
+  const registryFilePath = opts?.noRegister
+    ? null
+    : resolveRegistryFilePath({ explicit: opts?.registryPath });
+  const wantsRegistration = registryFilePath != null;
 
-  // Prefer the Git repository name as the default callsign when no explicit
-  // callsign is given and the target directory IS the Git root. This ensures
-  // the callsign reflects the repository name rather than an arbitrary path
-  // segment. Uses the shared Git-root helper from lib/git-root.
-  const gitRoot = getGitRoot(cwd);
-  const callsignBase =
-    opts?.callsign == null && gitRoot && normalisedPathKey(targetDir) === normalisedPathKey(gitRoot)
-      ? gitRoot
-      : targetDir;
-  const callsign = opts?.callsign ?? path.basename(callsignBase);
-  const registryFilePath = resolveRegistryFilePath({ explicit: opts?.registryPath });
-  if (!registryFilePath) {
-    return {};
-  }
+  // Step 2: Registry conflict guards (callsign + clone-path). Run before scaffold creation
+  // so that no files are written when a conflict is detected.
+  let pendingResult: RunInitResult | null = null;
+  let pendingWrite: { callsign: string; registryFilePath: string; existing: RegistryEntry[] } | null = null;
 
-  const { registry } = loadRegistryFromDisk({ registryPath: opts?.registryPath });
-  const existing = registry?.squads ?? [];
+  if (wantsRegistration) {
+    const gitRoot = getGitRoot(cwd);
+    const callsignBase =
+      opts?.callsign == null && gitRoot && normalisedPathKey(targetDir) === normalisedPathKey(gitRoot)
+        ? gitRoot
+        : targetDir;
+    const callsign = opts?.callsign ?? path.basename(callsignBase);
+    if (registryFilePath) {
+      const { registry } = loadRegistryFromDisk({ registryPath: registryFilePath });
+      const existing = registry?.squads ?? [];
 
-  // Check for callsign collision
-  const sameCallsign = existing.find((e: RegistryEntry) => e.callsign === callsign);
-  if (sameCallsign) {
-    if (normalisedPathKey(sameCallsign.path) === normalisedPathKey(squadDir)) {
-      // Same callsign, same path → reactivate
-      return { reactivated: { callsign, path: squadDir } };
-    }
-    throw new Error(
-      `Callsign "${callsign}" is already registered at "${sameCallsign.path}". ` +
-      `Use a different callsign with --callsign or update the existing entry.`,
-    );
-  }
-
-  // Check for path collision via clones
-  for (const entry of existing) {
-    for (const clone of entry.clones ?? []) {
-      try {
-        if (clonesMatch(targetDir, clone)) {
-          throw new Error(
-            `Path "${targetDir}" matches an existing clone entry for squad "${entry.callsign ?? entry.path}". ` +
-            `Use "squad register" to update that entry.`,
+      const sameCallsign = existing.find((e: RegistryEntry) => e.callsign === callsign);
+      if (sameCallsign) {
+        if (normalisedPathKey(sameCallsign.path) === normalisedPathKey(squadDir)) {
+          // Same callsign, same path — reactivate (no write needed).
+          pendingResult = { reactivated: { callsign, path: squadDir } };
+        } else {
+          throw new ConfigurationError(
+            `ERR_SQUAD_INIT_CALLSIGN_EXISTS: callsign "${callsign}" is already registered at ${sameCallsign.path}. ` +
+            `Choose a different --callsign or target directory.`,
+            { timestamp: new Date() },
           );
         }
-      } catch (err) {
-        // Re-throw collision errors; swallow invalid-clone-entry errors from clonesMatch
-        if (err instanceof Error && err.message.startsWith('Path "')) {
-          throw err;
+      } else {
+        // Clone-path conflict guard. Uses sentinel-bounded semantics of clonesMatch:
+        // exact clone root and child paths match; sibling prefixes do not.
+        for (const entry of existing) {
+          for (const clone of entry.clones ?? []) {
+            let matched = false;
+            try {
+              matched = clonesMatch(targetDir, clone);
+            } catch {
+              // Invalid clone entry (e.g. relative path) — not a valid match target; skip.
+            }
+            if (matched) {
+              throw new ConfigurationError(
+                `ERR_SQUAD_INIT_CLONE_PATH_EXISTS: this directory is already registered as a clone for callsign "${entry.callsign ?? entry.path}". ` +
+                `Run squad doctor to inspect the registry, or choose a different directory.`,
+                { timestamp: new Date() },
+              );
+            }
+          }
         }
+        pendingWrite = { callsign, registryFilePath, existing };
       }
     }
   }
 
-  const validated = upsertEntry({ callsign, path: squadDir });
-  const newRegistry = { version: 1 as const, squads: [...existing, validated] };
+  // Step 3: All checks passed — create scaffold directory structure.
+  const scaffoldOptions: ScaffoldInitOptions = {};
+  if (opts?.includeWorkflows !== undefined) scaffoldOptions.includeWorkflows = opts.includeWorkflows;
+  if (opts?.sdk !== undefined) scaffoldOptions.sdk = opts.sdk;
+  if (opts?.roles !== undefined) scaffoldOptions.roles = opts.roles;
+  if (opts?.isGlobal !== undefined) scaffoldOptions.isGlobal = opts.isGlobal;
+  if (opts?.stateBackend !== undefined) scaffoldOptions.stateBackend = opts.stateBackend;
+  await scaffoldInit(targetDir, scaffoldOptions);
 
-  fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
-  writeRegistry(registryFilePath, newRegistry);
+  if (opts?.remoteTeamPath) {
+    writeRemoteConfig(targetDir, opts.remoteTeamPath);
+  }
 
-  return { registered: { callsign, path: squadDir } };
+  // Step 4: Write registry entry when registration is requested and no conflict found.
+  if (pendingResult) {
+    return pendingResult;
+  }
+  if (pendingWrite) {
+    const { callsign, registryFilePath, existing } = pendingWrite;
+    const validated = upsertEntry({ callsign, path: squadDir });
+    const newRegistry = { version: 1 as const, squads: [...existing, validated] };
+    fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
+    writeRegistry(registryFilePath, newRegistry);
+    return { registered: { callsign, path: squadDir } };
+  }
+
+  return {};
+}
+
+/**
+ * Throws ERR_SQUAD_INIT_EXISTING_SCAFFOLD when the target directory already
+ * contains a squad scaffold sentinel file. Runs before any filesystem or
+ * registry write.
+ */
+function checkScaffoldConflict(squadDir: string, targetDir: string): void {
+  let squadDirStats: fs.Stats;
+  try {
+    squadDirStats = fs.lstatSync(squadDir);
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  if (squadDirStats.isSymbolicLink()) {
+    throw new ConfigurationError(
+      `ERR_SQUAD_INIT_EXISTING_SCAFFOLD: .squad/ already exists at ${targetDir}. ` +
+      `squad init will not write through a symbolic link. Run squad doctor to inspect registration status, ` +
+      `or choose a different --target-dir.`,
+      { timestamp: new Date() },
+    );
+  }
+
+  if (!squadDirStats.isDirectory()) {
+    return;
+  }
+  const sentinels = ['team.md', 'routing.md', 'decisions.md', 'config.json'];
+  const hasSentinel = sentinels.some(s => fs.existsSync(path.join(squadDir, s)));
+  if (hasSentinel) {
+    throw new ConfigurationError(
+      `ERR_SQUAD_INIT_EXISTING_SCAFFOLD: .squad/ already exists at ${targetDir}. ` +
+      `squad init will not overwrite it. Run squad doctor to inspect registration status, ` +
+      `or choose a different --target-dir.`,
+      { timestamp: new Date() },
+    );
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
 }
 
