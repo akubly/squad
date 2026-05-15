@@ -524,9 +524,8 @@ describe('lifecycle CLI command resolver migration', { timeout: 60_000 }, () => 
       squadDir: fixture.hostSquad,
     } as Parameters<typeof runStart>[1]);
 
-    await new Promise<void>(r => setTimeout(r, 150));
+    await vi.waitFor(() => expect(remoteBridgeCtor).toHaveBeenCalled(), { timeout: 5_000 });
 
-    expect(remoteBridgeCtor).toHaveBeenCalled();
     expect(capturedSquadDir).toBe(fixture.hostSquad);
   });
 
@@ -588,9 +587,8 @@ describe('lifecycle CLI command resolver migration', { timeout: 60_000 }, () => 
       squadDir: fixture.hostSquad,
     } as Parameters<typeof runRC>[1]);
 
-    await new Promise<void>(r => setTimeout(r, 150));
+    await vi.waitFor(() => expect(remoteBridgeCtor).toHaveBeenCalled(), { timeout: 5_000 });
 
-    expect(remoteBridgeCtor).toHaveBeenCalled();
     expect(capturedSquadDir).toBe(fixture.hostSquad);
   });
 });
@@ -626,12 +624,18 @@ describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
     );
     expect(result.timedOut).toBe(false);
     expect(result.stdout + result.stderr).toMatch(/no squad found/i);
+    // Deprecation notice must print exactly once before resolution.
+    expect(result.stdout + result.stderr).toMatch(/deprecated/i);
   });
 
   it('rc does not start bridge when resolution throws', async () => {
     const fixture = await createFixture();
     // Write invalid JSON to the registry so the resolver throws REGISTRY_INVALID.
     await writeFile(fixture.registryPath, '{ not valid json %%', 'utf8');
+    // Create a platform-fallback squad so a silent fallback would select it if the
+    // malformed explicit registry were ignored — proving the fail-closed throw path.
+    const fallbackSquadDir = join(TEST_ROOT, 'fake-appdata', 'squad', '.squad');
+    await mkdir(fallbackSquadDir, { recursive: true });
 
     const result = await runCliShort(
       ['rc'],
@@ -643,9 +647,70 @@ describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
         XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
       },
     );
-    // Before migration: rc starts bridge + spawns copilot → process hangs → timedOut=true.
-    // After migration: resolver throws before runRC is called → exits quickly → timedOut=false.
+    // Resolver must throw REGISTRY_INVALID before runRC is called.
     expect(result.timedOut).toBe(false);
+    expect(result.stdout + result.stderr).toMatch(/registry|malformed|invalid/i);
+  });
+
+  it('start does not start bridge when resolution throws', async () => {
+    const fixture = await createFixture();
+    // Write invalid JSON to the registry so the resolver throws REGISTRY_INVALID.
+    await writeFile(fixture.registryPath, '{ not valid json %%', 'utf8');
+    // Create a platform-fallback squad — proves malformed explicit registry cannot be
+    // silently bypassed to select the fallback squad.
+    const fallbackSquadDir = join(TEST_ROOT, 'fake-appdata', 'squad', '.squad');
+    await mkdir(fallbackSquadDir, { recursive: true });
+
+    const result = await runCliShort(
+      ['start'],
+      fixture.consumerRepo,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout + result.stderr).toMatch(/registry|malformed|invalid/i);
+  });
+
+  it('start does not start bridge when resolved squad path is stale', async () => {
+    const fixture = await createFixture();
+    // Remove the actual squad directory so the registry entry is stale.
+    await rm(fixture.hostSquad, { recursive: true, force: true });
+
+    const result = await runCliShort(
+      ['start'],
+      fixture.consumerRepo,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout + result.stderr).toMatch(/stale|not exist|not a directory|STALE_PATH/i);
+  });
+
+  it('rc does not start bridge when resolved squad path is stale', async () => {
+    const fixture = await createFixture();
+    // Remove the actual squad directory so the registry entry is stale.
+    await rm(fixture.hostSquad, { recursive: true, force: true });
+
+    const result = await runCliShort(
+      ['rc'],
+      fixture.consumerRepo,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout + result.stderr).toMatch(/stale|not exist|not a directory|STALE_PATH/i);
   });
 
   it('rc --path resolves from explicit path', async () => {
@@ -723,12 +788,33 @@ describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
       squadDir: fixture.hostSquad,
     } as Parameters<typeof runStart>[1]);
 
-    await new Promise<void>(r => setTimeout(r, 150));
+    await vi.waitFor(() => expect(mockPtySpawn).toHaveBeenCalled(), { timeout: 5_000 });
 
     expect(capturedSquadDir).toBe(fixture.hostSquad);
     expect(capturedPtyArgs).toContain('--extra-copilot-flag');
 
     vi.restoreAllMocks();
     vi.resetModules();
+  });
+
+  it('start passes copilot flags through dispatch layer', async () => {
+    const fixture = await createFixture();
+    // Run through the full cli-entry dispatch to prove the squadFlags filter does not
+    // consume copilot args that are not squad flags.  The process will fail to spawn
+    // copilot (not installed in CI) but "Copilot flags:" is printed before PTY spawn.
+    const result = await runCliShort(
+      ['start', '--extra-copilot-flag', '--command', 'cmd.exe', '/c', 'exit'],
+      fixture.consumerRepo,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+      8_000,
+    );
+    // "Copilot flags: --extra-copilot-flag" is printed before PTY spawn, proving
+    // the dispatch-layer filter did not strip --extra-copilot-flag.
+    expect(result.stdout + result.stderr).toMatch(/extra-copilot-flag/);
   });
 });

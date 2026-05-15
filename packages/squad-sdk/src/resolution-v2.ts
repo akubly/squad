@@ -360,15 +360,25 @@ export function resolveSquad(opts: ResolveOpts): ResolvedSquad | null {
   }
 
   // Steps 4–5: registry-based matching (clones and origins).
-  // Missing or unreadable registry silently falls through — only the callsign steps throw.
+  // Missing registry silently falls through. Malformed registry throws when an explicit
+  // SQUAD_REGISTRY_PATH (or opts.registryPath) is provided — an explicit registry failure
+  // is always fatal for lifecycle and user-action commands.
   const registryPath = resolveEffectiveRegistryPath(opts);
+  const explicitRegistry = !!(opts.registryPath ?? opts.env?.['SQUAD_REGISTRY_PATH']);
   if (fs.existsSync(registryPath)) {
     let registry: ReturnType<typeof parseRegistry> | null = null;
     try {
       const content = fs.readFileSync(registryPath, 'utf8');
       registry = parseRegistry(content);
-    } catch {
-      // Malformed registry — fall through silently for these steps.
+    } catch (err) {
+      if (explicitRegistry) {
+        const original = err instanceof Error ? err : undefined;
+        throw resolverError(
+          `Registry at "${registryPath}" is malformed: ${original?.message ?? String(err)}`,
+          'REGISTRY_INVALID',
+        );
+      }
+      // Implicit (platform-default) registry — fall through silently for clone/origin steps.
     }
 
     if (registry !== null) {
@@ -394,6 +404,13 @@ export function resolveSquad(opts: ResolveOpts): ResolvedSquad | null {
 
       if (cloneMatches.length === 1) {
         const entry = cloneMatches[0]!;
+        const squadStat = fs.existsSync(entry.path) ? fs.lstatSync(entry.path) : null;
+        if (!squadStat?.isDirectory()) {
+          throw resolverError(
+            `Resolved squad path for clone match does not exist or is not a directory: ${entry.path}`,
+            'STALE_PATH',
+          );
+        }
         const result: ResolvedSquad = { path: entry.path, source: 'clones', matchedOrigin: null };
         if (entry.callsign !== undefined) result.callsign = entry.callsign;
         return result;
@@ -425,6 +442,13 @@ export function resolveSquad(opts: ResolveOpts): ResolvedSquad | null {
 
         if (originMatches.length === 1) {
           const { entry, matchedOrigin } = originMatches[0]!;
+          const squadStat = fs.existsSync(entry.path) ? fs.lstatSync(entry.path) : null;
+          if (!squadStat?.isDirectory()) {
+            throw resolverError(
+              `Resolved squad path for origin match does not exist or is not a directory: ${entry.path}`,
+              'STALE_PATH',
+            );
+          }
           const result: ResolvedSquad = { path: entry.path, source: 'origins', matchedOrigin };
           if (entry.callsign !== undefined) result.callsign = entry.callsign;
           return result;

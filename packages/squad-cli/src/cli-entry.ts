@@ -93,6 +93,7 @@ process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
 import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
 import path from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
 import { runInit } from './cli/core/init.js';
@@ -869,13 +870,21 @@ async function main(): Promise<void> {
   if (cmd === 'start') {
     console.log(`\n${YELLOW}⚠ DEPRECATED:${RESET} "squad start" is deprecated and will be removed in a future release.`);
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
-    const resolvedForStart = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    let resolvedForStart: ResolvedSquad | null = null;
+    try {
+      resolvedForStart = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    } catch (err) {
+      fatal(err instanceof Error ? err.message : String(err));
+    }
     if (!resolvedForStart) {
       fatal(
         'No squad found.\n' +
           '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
       );
       return;
+    }
+    if (!existsSync(resolvedForStart.path) || !statSync(resolvedForStart.path).isDirectory()) {
+      fatal(`Resolved squad path does not exist or is not a directory: ${resolvedForStart.path}`);
     }
     const { runStart } = await import('./cli/commands/start.js');
     const hasTunnel = args.includes('--tunnel');
@@ -1085,13 +1094,21 @@ async function main(): Promise<void> {
     const pathIdx = args.indexOf('--path');
     const rcPath = (pathIdx !== -1 && args[pathIdx + 1]) ? args[pathIdx + 1] : undefined;
     const rcStartDir = rcPath || getSquadStartDir();
-    const resolvedForRc = resolveSquadV2({ cwd: rcStartDir, env: process.env });
+    let resolvedForRc: ResolvedSquad | null = null;
+    try {
+      resolvedForRc = resolveSquadV2({ cwd: rcStartDir, env: process.env });
+    } catch (err) {
+      fatal(err instanceof Error ? err.message : String(err));
+    }
     if (!resolvedForRc) {
       fatal(
         'No squad found.\n' +
           '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
       );
       return;
+    }
+    if (!existsSync(resolvedForRc.path) || !statSync(resolvedForRc.path).isDirectory()) {
+      fatal(`Resolved squad path does not exist or is not a directory: ${resolvedForRc.path}`);
     }
     const { runRC } = await import('./cli/commands/rc.js');
     await runRC(rcStartDir, { tunnel: hasTunnel, port, squadDir: resolvedForRc.path });
