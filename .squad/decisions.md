@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-05-15: Adversarial Review Batch — Piece 08c Lifecycle Command Resolver Migration
+
+**Session:** Phase B piece 08c adversarial review (flight-5, fido-6, retro-2)  
+**Branch:** `akubly/upstream-08c-migrate-lifecycle-commands` @ commit `3c2528d4`  
+**Author:** VOX (General-Purpose Agent)  
+**Spec:** 08c-migrate-lifecycle-commands
+
+### Review Verdicts
+
+| Reviewer | Verdict | Key Finding |
+|----------|---------|-------------|
+| Flight (Lead) | APPROVE | No blockers. Architecture consistent with 08a/08b pattern. Two minor findings (resolver-throw UX, asymmetric test coverage) deferrable. Clean per REPLAY-PROTOCOL. |
+| FIDO (Quality) | APPROVE_WITH_FOLLOWUPS | All 6 spec tests GREEN (23/23). Two assertion weaknesses (resolver-throw surfacing, dispatch-layer passthrough verification) + one missing symmetric test warrant followup hardening but not blockers. Pre-existing snapshot drift confirmed unrelated. |
+| RETRO (Security) | REJECT | **Blocker:** Lifecycle commands do not fail-closed when registry-based resolution returns stale/invalid squad path. Resolver returns clone/origin registry paths without existence check. Missing fall-back-squad fixture for malformed-registry test. Revision required. |
+
+### Recommended Action
+
+**GNC reassigned as revision owner** per Reviewer Rejection Protocol. VOX and EECOM locked out. GNC to:
+1. Add existence check to resolver (fail-closed pattern)
+2. Validate resolved squad path is existing directory before lifecycle runner invocation
+3. Add fall-back-squad fixture to malformed-registry test
+4. Update lifecycle tests to prove stale/invalid paths do not start bridge
+
+Revision commits to same branch; will be re-reviewed as 08c-v2.
+
+---
+
 ## 2026-05-15: VOX Lifecycle Command Resolution (08c) — ACCEPTED
 
 **Session:** Phase B piece 08c lifecycle command resolution  

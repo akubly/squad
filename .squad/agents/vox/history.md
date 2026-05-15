@@ -39,3 +39,5 @@ Key patterns confirmed for this stack:
 - `runCliShort` helper with explicit `SQUAD_CALLSIGN` strip covers subprocess tests where the parent env might carry an empty callsign from the host shell.
 
 TDD flow: 6 RED tests written first (all failing for the expected reasons), source changes applied, all 6 GREEN. Build clean, scrub gate 1+3 failures are pre-existing baseline contamination accepted by prior Phase B pieces.
+
+📌 **Adversarial review verdict (2026-05-15T00:54:18Z):** 08c rejected by RETRO (Security) on blocker: lifecycle commands do not fail-closed when registry-resolved squad path is stale/missing. GNC assigned as revision owner per Reviewer Rejection Protocol; VOX and EECOM locked out. GNC to add existence check and fall-back-squad fixture to same branch for re-review as 08c-v2.

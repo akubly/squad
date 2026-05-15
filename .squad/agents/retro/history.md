@@ -81,3 +81,9 @@ RETRO identified 4 LOW-severity hardening improvements during adversarial review
 
 **Pattern:** Path validation should be standard for all user-provided paths flowing into file operations. Resolved variable threading + hardened path checks establish the model for 08c+.
 
+### Piece 08c adversarial review (2026-05-14T17:54:18.903-07:00)
+
+**Verdict:** REJECT
+
+Lifecycle command dispatch now resolves before starting bridges, tunnels, PTYs, or child processes, and subprocess CWD stays on the user-facing start directory. However, clone/origin registry matches can return a registry path without checking that the resolved squad directory exists, and malformed registry content can be ignored for clone/origin matching. That is not fail-closed enough for long-running commands: a stale or malformed registry can still lead to a bridge session using the wrong squad identity or fallback squad. Revision should be owned by GNC, not the original author, and should add fail-closed lifecycle tests for stale resolved paths and explicit registry parse failures.
+
