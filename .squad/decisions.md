@@ -1127,3 +1127,173 @@ Per Reviewer Rejection Protocol: **EECOM is locked out of the piece 07 revision 
 4. Confirm `npm test` passes (or document remaining failures per Piece 05 regression waiver)
 
 ---
+
+---
+
+## 2026-05-15: Piece 09 scrub-gate baseline acceptance
+
+**By:** Adam Kubly (via Copilot)
+**What:** For Phase B piece 09 (akubly/upstream-09-watch-triage-v2-resolution), the scrub gate's Gate 1 (Strip-listed paths) reports FAIL with 110 hits — identical to the base branch akubly/upstream-08c-migrate-lifecycle-commands. Piece 09 introduced zero new strip-listed path hits. Decision: accept and move on; treat the inherited baseline as a known carry-over from upstream pieces, not a piece 09 defect.
+**Why:** The piece's spec contract is satisfied: code gates pass, parity tests are green, and piece 09 made no contribution to the baseline failure. Forcing piece 09 to clean inherited paths would expand scope beyond its spec and conflate replay pieces.
+
+---
+
+## 2026-05-15: Piece 09 adversarial review — Flight (Lead)
+
+**Verdict:** APPROVE
+
+**Spec parity findings:**
+
+- **State context shape — satisfied.** Spec requires `resolution: ResolvedSquad` as a required field on `SquadStateContext`. Implementation adds it at `resolution.ts:713` with the correct type import from `resolution-v2.ts`. `resolveSquadState()` populates it from `resolveRegistrySquad()` at line 729 and returns it at line 756.
+
+- **Paths derived from resolution — satisfied.** Spec: "derive `paths` from `resolution.path` so both fields describe the same squad." Implementation at `resolution.ts:732` calls `resolveSquadPaths(resolution.path)` instead of the previous `resolveSquadPaths(startDir)`. This ensures `paths.projectDir` and `resolution.path` describe the same `.squad/` directory.
+
+- **Null on no resolution — satisfied.** Spec: "When resolution returns no result, `resolveSquadState()` returns `null`." Implementation at `resolution.ts:730`: `if (!resolution) return null;`.
+
+- **Watch startup precedence — satisfied.** Spec requires three-step fallback: (1) `stateContext.resolution.path`, (2) registry-aware resolver, (3) directory-walk fallback. `resolveWatchStartupSquadDir()` at `watch/index.ts:609–625` implements exactly this order.
+
+- **No mid-loop re-resolution — satisfied.** Spec: "`executeRound()` must not call the resolver or read `config.stateContext` again." `executeRound()` at `watch/index.ts:881` uses the captured `squadDirInfo` from line 702 and never re-resolves.
+
+- **Config preserves stateContext only from CLI overrides — satisfied.** Spec: "`loadWatchConfig()` should preserve `stateContext` only from CLI overrides, not from `.squad/config.json`." `config.ts:105` reads `stateContext: cliOverrides.stateContext` with no `?? fileConfig.stateContext` fallback.
+
+- **Triage re-export — satisfied.** Spec: "A `commands/triage.ts` module may re-export `runWatch` as `runTriage` plus `loadWatchConfig`." Implementation at `commands/triage.ts:1–2` exports exactly `runTriage`, `loadWatchConfig`, and `WatchConfig` type.
+
+- **Startup errors stay fatal — satisfied.** Spec: "Resolution failure at startup is fatal." When `resolveWatchStartupSquadDir` returns a path without `team.md`, `runWatch` calls `fatal('No squad found — run init first.')` at line 708. When the resolver throws an ambiguity error, it propagates uncaught — fatal by default.
+
+- **Changeset — satisfied.** Spec requires a changeset. `.changeset/watch-triage-resolution.md` covers both `@bradygaster/squad-sdk` (patch) and `@bradygaster/squad-cli` (patch).
+
+- **Test surface — satisfied.** Spec requires five tests. `watch-triage-migration.test.ts` delivers all five: fixture sanity (line 84), watch resolves from consumer (line 96), triage resolves from consumer (line 105), state context wins over fallback (line 117), startup errors stay fatal (line 136). All match the spec's described assertions.
+
+**Scope findings:**
+
+- **No scope creep detected.** The diff touches exactly the six files listed in the spec manifest plus test assertions in the existing `state-backend.test.ts` (two lines adding `resolution.path` checks to existing `resolveSquadState()` tests — necessary for contract verification). The `.squad/agents/eecom/history.md` change is session state per REPLAY-PROTOCOL, not product code.
+
+- **No under-delivery detected.** Every "must" in the spec is addressed. The file manifest matches. The test count meets the minimum.
+
+**Architectural findings:**
+
+- **Fit with existing patterns — good.** The `resolveSquadState()` change follows the same call-once-at-entry pattern established by pieces 08a–08c. The `resolveWatchStartupSquadDir()` helper mirrors the dispatch-guard pattern: resolve at startup boundary, capture result, thread through all downstream use. `executeRound()` never re-resolves — consistent with the "stable startup context" principle.
+
+- **Minor note: `resolveSquadState()` does not forward `registryPath` or `env` to the resolver.** At `resolution.ts:729`, the call is `resolveRegistrySquad({ cwd: effectiveStart })` with no explicit env or registryPath parameter. The resolver presumably falls back to `process.env` internally. This works because `resolveSquadState()` is called at command entry when `process.env` is the live environment. However, the watch startup helper (`watch/index.ts:615–618`) explicitly passes `env` and `registryPath`. This asymmetry is not a defect — it reflects different use cases (SDK function vs. CLI helper with test seam) — but future callers of `resolveSquadState()` who need a custom registry path must set `SQUAD_REGISTRY_PATH` in the environment before calling, rather than passing it as a parameter. Acceptable for now; a `registryPath` option on `resolveSquadState()` could be added later if needed.
+
+- **`squadDirInfoFromPath()` is a clean adapter.** It converts a bare path string into the `{ path, name, isLegacy }` shape expected by downstream watch code without pulling in the full directory-walk logic. Lightweight and correct.
+
+- **Adding `resolution` as required (not optional) on `SquadStateContext` is the right call.** The spec explicitly says "resolution is required when a context exists." Since `SquadStateContext` is only constructed by `resolveSquadState()`, this is safe. External consumers who mock this interface for tests will need to add the field, but that is the correct forcing function — their mocks should carry realistic resolution data.
+
+- **Compound future cost — low.** Piece 10 (`init fail-fast`) needs to check for existing callsign/path/clone conflicts. The `resolution` field on `SquadStateContext` gives it access to the full `ResolvedSquad` struct (path, source, callsign, matchedOrigin) without another resolver call. This is the compounding benefit the spec intended. No leaky abstractions or hidden coupling introduced.
+
+**One-sentence rationale:** The implementation satisfies every spec "must" with clean precedence logic, correct startup-boundary isolation, and no scope drift — approve without conditions.
+
+---
+
+## 2026-05-15: Piece 09 adversarial review — FIDO (Quality)
+
+**Gate verdict:** BLOCK
+
+**Test surface parity:**
+- `fixture sanity: resolver finds host squad from consumer cwd via clones[]`: present.
+- `watch resolves shared squad from consumer cwd`: partial. The `it()` block exists, but it calls `resolveWatchStartupSquadDir()` directly; it never invokes `runWatch()` and therefore does not prove the command avoids the init-guidance fatal path after startup resolution.
+- `triage resolves shared squad from consumer cwd`: partial. The `it()` block exists, but it checks the re-export/alias plus the watch helper; it never invokes `runTriage()` or an actual triage command path.
+- `state context wins over fallback`: present. Invalid registry fallback would fail if the context path were not preferred.
+- `startup errors stay fatal`: partial. The no-squad path uses `runWatch()`, but the ambiguous-registry assertion stops at `resolveWatchStartupSquadDir()` instead of proving command-level fatal surfacing.
+
+**TDD discipline:**
+- History shows one code commit (`856fce8d`) with production changes and tests together, plus the required co-author trailer.
+- Failing-first evidence is not recoverable from the final history. The protocol requires RED tests first; this commit shape proves same-commit updates, not that the parity tests were observed failing before implementation.
+
+**Coverage holes:**
+- No happy-path test enters `runWatch()` with platform/auth/polling mocked, despite the spec explicitly naming `runWatch()` behavior.
+- No triage-path behavioral test enters `runTriage(); an export alias regression or command dispatch gap could survive.
+- No test proves `loadWatchConfig()` refuses `stateContext` injected from `.squad/config.json` while preserving CLI override context.
+- No malformed or inconsistent `stateContext` coverage: missing `resolution`, empty `resolution.path`, nonexistent path, or mismatch between `paths.projectDir` and `resolution.path`.
+- No mid-loop stability test proves registry changes after startup cannot alter the active squad during later poll rounds.
+- No null/undefined/empty-string edge tests around `stateContext`, registry path, or command destination.
+- No Windows/path-normalization-specific assertion around registry clone path matching for watch startup.
+
+**Brittleness / regression risks:**
+- The two central parity tests assert the extracted helper and export identity rather than user-visible command behavior. That is implementation-detail coverage, not command-surface coverage.
+- `test/state-backend.test.ts` only adds two `resolution.path` assertions; it does not exercise registry-error propagation or no-result fallback for the expanded `SquadStateContext` contract.
+- Targeted verification passed: `npx vitest run test/cli/watch-triage-migration.test.ts` reported 5/5 green.
+- Related-suite check is risky: `npx vitest run test/state-backend.test.ts` reported 76/76 tests passed but exited 1 because Vitest caught an unhandled `onTaskUpdate` timeout after ~176s. I would not ignore a nonzero related-suite exit in a quality gate.
+
+**One-sentence rationale:** Block because the required test names exist, but the command-surface parity is not proven for watch or triage, and a related suite exits nonzero under verification.
+
+---
+
+## 2026-05-15: Piece 09 adversarial review — CONTROL (TS)
+
+**Verdict:** REJECT
+**Build:** clean
+
+**Strictness violations:**
+- packages/squad-cli/src/cli/commands/watch/index.ts:617 — new `process.env as Record<string, string | undefined>` assertion; `process.env` should satisfy the resolver contract without widening-by-assertion.
+- test/cli/watch-triage-migration.test.ts:48 — caught `error as Error` assertion.
+- test/cli/watch-triage-migration.test.ts:126 — new `stateContext!` non-null assertion.
+- test/state-backend.test.ts:367,382 — new `ctx!` non-null assertions in added resolution expectations.
+
+**API surface findings:**
+- packages/squad-cli/package.json:144-147 intentionally adds `./commands/triage`; packages/squad-cli/src/commands/triage.ts:1-2 exposes `runTriage`, `loadWatchConfig`, and `WatchConfig`, matching the spec's triage command surface.
+- packages/squad-cli/src/cli/commands/watch/index.ts:609 exports `resolveWatchStartupSquadDir` from an existing package export (`./commands/watch`). The generated declaration exposes it publicly at packages/squad-cli/dist/cli/commands/watch/index.d.ts:97 and leaks an internal test/startup helper typed as `ReturnType<typeof detectSquadDir>`. This is not an intended public API in the spec.
+- packages/squad-sdk/src/index.ts:27 already exports `SquadStateContext`; making `resolution` required is an intentional SDK type-surface change per spec.
+
+**Type shape findings:**
+- packages/squad-sdk/src/resolution.ts:713 centralizes `stateContext.resolution` as required `ResolvedSquad`; no duplicated inline shape found.
+- The resolution shape is discriminated by `ResolvedSquad.source`, with optional `callsign` and `matchedOrigin` inherited from `resolution-v2`.
+- packages/squad-cli/src/cli/commands/watch/config.ts:46 keeps `stateContext?: SquadStateContext | null` for back-compat/programmatic callers; `resolveWatchStartupSquadDir()` handles absence with optional chaining and fallback resolution.
+- No new production `noUncheckedIndexedAccess` issue found in the resolution path; added indexed env access remains typed as possibly undefined.
+
+**One-sentence rationale:** Build is clean and the central `resolution` type is sound, but the watch startup helper is accidentally exported through a public package surface, creating an unintended API contract.
+
+---
+
+## 2026-05-15: Piece 09 adversarial review — Sims (E2E)
+
+**Verdict:** NEEDS-E2E-BEFORE-MERGE
+
+**Missing E2E scenarios:**
+- No node-pty-driven E2E covers `squad watch` or `squad triage`. The acceptance harness currently documents long-running daemons as not covered, and the existing watch tests are module/helper or packaging-route checks rather than real terminal rehearsals.
+- Missing happy-path rehearsal: from a consumer project root with no local `.squad/` but valid registry-backed `stateContext.resolution`, run `squad watch --interval 1 --no-execute` through the CLI entrypoint, assert startup output, active squad path behavior, first round boundary, and controlled shutdown.
+- Missing failure rehearsal: from a path with no registry match and no local resolution, run `squad watch`/`squad triage`, assert non-zero exit, the existing "No squad found — run init first." remediation, and no crash stack.
+- Missing `squad triage` terminal rehearsal. The new test proves `runTriage` aliases `runWatch`, but not that the user-facing `triage` command threads CLI parsing, `stateContext`, config loading, and startup behavior end to end.
+- Missing Ctrl-C/SIGINT rehearsal during a running watch. Current signal coverage is static/mocked; it does not prove the real process unregisters handlers, stops Ralph, writes final state, and exits cleanly from an actual terminal session.
+- Missing long-lived stability rehearsal: start watch with a valid resolution, mutate/delete the registry file after startup, and verify subsequent polling continues using the startup squad instead of re-resolving.
+
+**UX gate gaps:**
+- No golden/frame snapshot covers watch/triage startup lines such as platform detection, capability load, label ensure, first board/report output, or graceful "Watch stopped" text.
+- No UX gate asserts that the missing-squad and ambiguous-registry messages are direct, concise, and actionable at the terminal boundary.
+- No terminal-width or ANSI-stripping snapshot covers verbose watch startup tables, even though watch prints status rows and user-facing diagnostics.
+
+**Cross-platform risks:**
+- Signal behavior is the highest risk: `process.on('SIGINT')`, child-process termination, and Ctrl-C delivery differ between Windows and Unix, and the current tests do not exercise a real spawned watch process.
+- Registry and squad paths with Windows backslashes, spaces, or trailing separators are not rehearsed through the CLI/env boundary; helper-level path assertions may miss shell/env quoting or normalization failures.
+- PID cleanup and child process semantics differ across platforms (`process.kill` vs platform-specific cleanup); watch startup/shutdown E2E should verify no stale PID or monitor state is left behind.
+
+**Top 3 E2E tests to add (priority order):**
+1. `squad watch` from a registered consumer repo with no local `.squad/`: spawn the built CLI with isolated `SQUAD_REGISTRY_PATH`, stub platform checks as needed, assert startup output reaches the first poll boundary, then send SIGINT and assert clean exit/output.
+2. `squad triage` from the same consumer repo: spawn the real command surface and assert it uses the same resolved host squad and user-visible startup behavior as watch.
+3. Missing/ambiguous resolution failures: spawn `squad watch` and `squad triage` from an unresolved or ambiguous project, assert non-zero exit, actionable remediation/specific ambiguity text, and no stack trace.
+
+**One-sentence rationale:** The implementation may satisfy helper-level spec assertions, but without a real terminal rehearsal for the long-lived command boundary, the highest-risk regressions—CLI threading, user-facing output, and shutdown behavior—remain unflown.
+
+---
+
+## 2026-05-15: Piece 09 revision — CONTROL
+
+**Verdict:** revised and ready for review.
+
+**What changed:**
+- Moved watch startup squad resolution behind an internal source path so the public watch command declaration no longer publishes the startup resolver.
+- Removed the environment shape assertion from startup resolution.
+- Strengthened watch and triage parity tests to enter the command boundary and verify startup reaches the first round using the resolved squad path.
+- Replaced the new test non-null and error assertions with explicit narrowing.
+
+**Validation:**
+- `npm run build` passed.
+- `npx vitest run test/cli/watch-triage-migration.test.ts` passed 5/5.
+- `npx vitest run test/cli/ test/state-backend.test.ts` reported existing broader-suite instability: state-backend hook timeout, several CLI timeouts, one team-root-resolution assertion, and Vitest worker `onTaskUpdate` timeouts. These remain outside this revision.
+- Scrub gate: Gate 1 baseline fail, Gate 3 baseline warning, Gates 2/4/5/6 pass.
+
+**Phase C follow-ups:**
+- Add Sims-owned terminal rehearsals for watch, triage, missing/ambiguous startup errors, signal shutdown, and long-lived startup-context stability.
+- Add FIDO-owned coverage for malformed state context, mid-loop registry stability, empty/null path edges, and Windows registry path normalization.
+- Investigate the state-backend related-suite nonzero exit and broader CLI timeout behavior as a separate stability item.

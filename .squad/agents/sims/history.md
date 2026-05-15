@@ -73,3 +73,8 @@ Extracted to `.squad/skills/resolver-guard-threading/SKILL.md`. Key components: 
 - Test env isolation (`XDG_CONFIG_HOME`/`APPDATA` overrides)
 
 **EECOM lockout status:** EECOM remains locked out for this cycle. Revision ownership transfers to Sims.
+
+### Piece 09 — Watch/Triage Startup Resolution (2026-05-15)
+
+📌 **Team update (2026-05-15T22:14:43Z — Piece 09 E2E Review + Phase C Assignment):** Piece 09 watch/triage startup resolution returned NEEDS-E2E-BEFORE-MERGE verdict (Sims). No node-pty-driven E2E rehearsal for watch/triage commands; spec requires terminal behavior verification. Missing happy-path rehearsal (consumer repo with registry resolution, CLI entry), failure rehearsal (ambiguous/missing resolution, error surfacing), triage command terminal tests, Ctrl-C/SIGINT handling, long-lived startup-context stability (post-mutation), and Windows path-normalization E2E. Phase C assignment: Sims to author node-pty E2E suite for watch and triage terminal rehearsals, signal handling, cross-platform path edge cases, and validate user-facing error messages.
+
