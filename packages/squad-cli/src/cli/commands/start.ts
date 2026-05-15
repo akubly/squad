@@ -38,6 +38,7 @@ export interface StartOptions {
   port: number;
   copilotArgs?: string[];
   command?: string;
+  squadDir?: string;
 }
 
 async function checkNodePty(): Promise<any> {
@@ -71,11 +72,13 @@ export async function runStart(cwd: string, options: StartOptions): Promise<void
 
   const { repo, branch } = getGitInfo(cwd);
   const machine = getMachineId();
-  const squadDir = storage.existsSync(path.join(cwd, '.squad'))
-    ? path.join(cwd, '.squad')
-    : storage.existsSync(path.join(cwd, '.ai-team'))
-      ? path.join(cwd, '.ai-team')
-      : '';
+  const squadDir = options.squadDir !== undefined
+    ? options.squadDir
+    : storage.existsSync(path.join(cwd, '.squad'))
+      ? path.join(cwd, '.squad')
+      : storage.existsSync(path.join(cwd, '.ai-team'))
+        ? path.join(cwd, '.ai-team')
+        : '';
 
   // ─── Setup remote bridge (after verifying PTY is available) ───
   let bridge: RemoteBridge | null = null;

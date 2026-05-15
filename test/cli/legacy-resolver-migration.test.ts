@@ -2,7 +2,7 @@
  * CLI resolver migration coverage for read-only commands.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -403,5 +403,332 @@ describe('user-action CLI command resolver migration', { timeout: 60_000 }, () =
     const gitExcludePath = join(fixture.consumerRepo, '.git', 'info', 'exclude');
     expect(existsSync(gitExcludePath)).toBe(true);
     expect(readFileSync(gitExcludePath, 'utf8')).toContain('.squad/');
+  });
+});
+
+// ─── Short-timeout CLI runner for lifecycle tests ───────────────────────────
+
+interface ShortSpawnResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+}
+
+function runCliShort(
+  args: string[],
+  cwd: string,
+  env: Record<string, string>,
+  timeoutMs = 5_000,
+): Promise<ShortSpawnResult> {
+  return new Promise((resolveResult) => {
+    // Build env: start with process.env, remove SQUAD_CALLSIGN so an empty or inherited
+    // value cannot cause the resolver to throw before returning null.
+    const { SQUAD_CALLSIGN: _omit, ...inheritedEnv } = process.env as Record<string, string>;
+    const child = spawn('node', [CLI_ENTRY, ...args], {
+      cwd,
+      env: { ...inheritedEnv, NO_COLOR: '1', NODE_NO_WARNINGS: '1', ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+    child.on('error', () => resolveResult({ stdout, stderr, exitCode: 1, timedOut: false }));
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
+
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolveResult({ stdout, stderr, exitCode: code ?? 1, timedOut });
+    });
+  });
+}
+
+// ─── Runner-level unit tests for lifecycle commands ──────────────────────────
+
+describe('lifecycle CLI command resolver migration', { timeout: 60_000 }, () => {
+  beforeEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    await mkdir(TEST_ROOT, { recursive: true });
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('start resolves shared squad from consumer cwd', async () => {
+    const fixture = await createFixture();
+
+    let capturedSquadDir: string | undefined;
+    const remoteBridgeCtor = vi.fn();
+    const remoteBridgeStart = vi.fn().mockResolvedValue(4444);
+    const mockPtySpawn = vi.fn().mockReturnValue({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      write: vi.fn(),
+      kill: vi.fn(),
+      resize: vi.fn(),
+    });
+
+    vi.doMock('@bradygaster/squad-sdk', () => {
+      class FSStorageProvider {
+        existsSync(_p: string): boolean { return false; }
+        statSync(): undefined { return undefined; }
+        appendSync(): void {}
+      }
+      class RemoteBridge {
+        setStaticHandler = vi.fn();
+        start = remoteBridgeStart;
+        getSessionToken = vi.fn(() => 'token');
+        getAuditLogPath = vi.fn(() => 'audit.log');
+        getSessionExpiry = vi.fn(() => Date.now() + 60_000);
+        setPassthrough = vi.fn();
+        passthroughFromAgent = vi.fn();
+        stop = vi.fn();
+        constructor(config: { squadDir?: string }) {
+          remoteBridgeCtor(config);
+          capturedSquadDir = config.squadDir;
+        }
+      }
+      return { FSStorageProvider, RemoteBridge };
+    });
+
+    vi.doMock('../../packages/squad-cli/src/cli/commands/rc-tunnel.js', () => ({
+      isDevtunnelAvailable: vi.fn(() => false),
+      createTunnel: vi.fn().mockResolvedValue({ url: 'https://tunnel.test' }),
+      destroyTunnel: vi.fn(),
+      getMachineId: vi.fn(() => 'machine-id'),
+      getGitInfo: vi.fn(() => ({ repo: 'test/repo', branch: 'main' })),
+    }));
+
+    vi.doMock('node-pty', () => ({ default: { spawn: mockPtySpawn }, spawn: mockPtySpawn }));
+
+    const { runStart } = await import('../../packages/squad-cli/src/cli/commands/start.ts');
+
+    // Pass squadDir as cli-entry would after resolution; runner must use it, not local detection.
+    void runStart(fixture.consumerRepo, {
+      tunnel: false,
+      port: 0,
+      copilotArgs: [],
+      squadDir: fixture.hostSquad,
+    } as Parameters<typeof runStart>[1]);
+
+    await new Promise<void>(r => setTimeout(r, 150));
+
+    expect(remoteBridgeCtor).toHaveBeenCalled();
+    expect(capturedSquadDir).toBe(fixture.hostSquad);
+  });
+
+  it('rc resolves shared squad from consumer cwd', async () => {
+    const fixture = await createFixture();
+
+    let capturedSquadDir: string | undefined;
+    const remoteBridgeCtor = vi.fn();
+    const remoteBridgeStart = vi.fn().mockResolvedValue(5555);
+    const mockSpawnChild = vi.fn().mockReturnValue({
+      on: vi.fn(),
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      stdin: { writable: true, write: vi.fn() },
+      kill: vi.fn(),
+    });
+    const mockCreateRL = vi.fn().mockReturnValue({ on: vi.fn() });
+
+    vi.doMock('@bradygaster/squad-sdk', () => {
+      class FSStorageProvider {
+        existsSync(_p: string): boolean { return false; }
+        statSync(): undefined { return undefined; }
+        readSync(): string | null { return null; }
+      }
+      class RemoteBridge {
+        setStaticHandler = vi.fn();
+        start = remoteBridgeStart;
+        stop = vi.fn();
+        setPassthrough = vi.fn();
+        passthroughFromAgent = vi.fn();
+        addMessage = vi.fn();
+        updateAgents = vi.fn();
+        getConnectionCount = vi.fn(() => 0);
+        constructor(config: { squadDir?: string }) {
+          remoteBridgeCtor(config);
+          capturedSquadDir = config.squadDir;
+        }
+      }
+      return { FSStorageProvider, RemoteBridge };
+    });
+
+    vi.doMock('../../packages/squad-cli/src/cli/commands/rc-tunnel.js', () => ({
+      isDevtunnelAvailable: vi.fn(() => false),
+      createTunnel: vi.fn().mockResolvedValue({ url: 'https://tunnel.test' }),
+      destroyTunnel: vi.fn(),
+      getMachineId: vi.fn(() => 'machine-id'),
+      getGitInfo: vi.fn(() => ({ repo: 'test/repo', branch: 'main' })),
+    }));
+
+    vi.doMock('node:child_process', () => ({ spawn: mockSpawnChild }));
+    vi.doMock('node:readline', () => ({ createInterface: mockCreateRL }));
+
+    const { runRC } = await import('../../packages/squad-cli/src/cli/commands/rc.ts');
+
+    // Pass squadDir as cli-entry would after resolution; runner must use it, not local detection.
+    void runRC(fixture.consumerRepo, {
+      tunnel: false,
+      port: 0,
+      squadDir: fixture.hostSquad,
+    } as Parameters<typeof runRC>[1]);
+
+    await new Promise<void>(r => setTimeout(r, 150));
+
+    expect(remoteBridgeCtor).toHaveBeenCalled();
+    expect(capturedSquadDir).toBe(fixture.hostSquad);
+  });
+});
+
+// ─── Dispatch-level tests: resolver runs before lifecycle command setup ───────
+
+describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
+  beforeEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    await mkdir(TEST_ROOT, { recursive: true });
+    // Fake .git so findGitRoot stops here and does not resolve the outer repo's .squad/.
+    await mkdir(join(TEST_ROOT, '.git'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('start does not start bridge when resolution returns null', async () => {
+    const fixture = await createFixture();
+    // TEST_ROOT is not in the registry, so resolution returns null.
+    // Use --command cmd.exe with /c exit as passthrough so the PTY exits immediately
+    // before migration (avoids spawning a real Copilot session in the test).
+    const result = await runCliShort(
+      ['start', '--command', 'cmd.exe', '/c', 'exit'],
+      TEST_ROOT,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout + result.stderr).toMatch(/no squad found/i);
+  });
+
+  it('rc does not start bridge when resolution throws', async () => {
+    const fixture = await createFixture();
+    // Write invalid JSON to the registry so the resolver throws REGISTRY_INVALID.
+    await writeFile(fixture.registryPath, '{ not valid json %%', 'utf8');
+
+    const result = await runCliShort(
+      ['rc'],
+      fixture.consumerRepo,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    // Before migration: rc starts bridge + spawns copilot → process hangs → timedOut=true.
+    // After migration: resolver throws before runRC is called → exits quickly → timedOut=false.
+    expect(result.timedOut).toBe(false);
+  });
+
+  it('rc --path resolves from explicit path', async () => {
+    const fixture = await createFixture();
+    // Run from TEST_ROOT with --path pointing at the registered consumer checkout.
+    // rc prints "Squad: <dir>" before bridge.start(), so partial output is sufficient.
+    const result = await runCliShort(
+      ['rc', '--path', fixture.consumerRepo],
+      TEST_ROOT,
+      {
+        SQUAD_REGISTRY_PATH: fixture.registryPath,
+        APPDATA: join(TEST_ROOT, 'fake-appdata'),
+        LOCALAPPDATA: join(TEST_ROOT, 'fake-appdata'),
+        XDG_CONFIG_HOME: join(TEST_ROOT, 'fake-xdg'),
+      },
+    );
+    // Before migration: local detection on consumerRepo → squadDir = '' → "Squad: not found".
+    // After migration: resolver uses consumerRepo → resolves hostSquad → "Squad: <hostSquad>".
+    expect(result.stdout + result.stderr).toContain(fixture.hostSquad);
+  });
+
+  it('start preserves Copilot passthrough args', async () => {
+    vi.resetModules();
+
+    const fixture = await createFixture();
+
+    let capturedSquadDir: string | undefined;
+    let capturedPtyArgs: string[] | undefined;
+    const remoteBridgeCtor = vi.fn();
+    const remoteBridgeStart = vi.fn().mockResolvedValue(7777);
+    const mockPtySpawn = vi.fn().mockImplementation((_cmd: string, args: string[]) => {
+      capturedPtyArgs = args;
+      return { onData: vi.fn(), onExit: vi.fn(), write: vi.fn(), kill: vi.fn(), resize: vi.fn() };
+    });
+
+    vi.doMock('@bradygaster/squad-sdk', () => {
+      class FSStorageProvider {
+        existsSync(_p: string): boolean { return false; }
+        statSync(): undefined { return undefined; }
+        appendSync(): void {}
+      }
+      class RemoteBridge {
+        setStaticHandler = vi.fn();
+        start = remoteBridgeStart;
+        getSessionToken = vi.fn(() => 'token');
+        getAuditLogPath = vi.fn(() => 'audit.log');
+        getSessionExpiry = vi.fn(() => Date.now() + 60_000);
+        setPassthrough = vi.fn();
+        passthroughFromAgent = vi.fn();
+        stop = vi.fn();
+        constructor(config: { squadDir?: string }) {
+          remoteBridgeCtor(config);
+          capturedSquadDir = config.squadDir;
+        }
+      }
+      return { FSStorageProvider, RemoteBridge };
+    });
+
+    vi.doMock('../../packages/squad-cli/src/cli/commands/rc-tunnel.js', () => ({
+      isDevtunnelAvailable: vi.fn(() => false),
+      createTunnel: vi.fn().mockResolvedValue({ url: 'https://tunnel.test' }),
+      destroyTunnel: vi.fn(),
+      getMachineId: vi.fn(() => 'machine-id'),
+      getGitInfo: vi.fn(() => ({ repo: 'test/repo', branch: 'main' })),
+    }));
+
+    vi.doMock('node-pty', () => ({ default: { spawn: mockPtySpawn }, spawn: mockPtySpawn }));
+
+    const { runStart } = await import('../../packages/squad-cli/src/cli/commands/start.ts');
+
+    void runStart(fixture.consumerRepo, {
+      tunnel: false,
+      port: 0,
+      copilotArgs: ['--extra-copilot-flag'],
+      squadDir: fixture.hostSquad,
+    } as Parameters<typeof runStart>[1]);
+
+    await new Promise<void>(r => setTimeout(r, 150));
+
+    expect(capturedSquadDir).toBe(fixture.hostSquad);
+    expect(capturedPtyArgs).toContain('--extra-copilot-flag');
+
+    vi.restoreAllMocks();
+    vi.resetModules();
   });
 });

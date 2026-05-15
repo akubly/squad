@@ -869,6 +869,14 @@ async function main(): Promise<void> {
   if (cmd === 'start') {
     console.log(`\n${YELLOW}⚠ DEPRECATED:${RESET} "squad start" is deprecated and will be removed in a future release.`);
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
+    const resolvedForStart = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    if (!resolvedForStart) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+      );
+      return;
+    }
     const { runStart } = await import('./cli/commands/start.js');
     const hasTunnel = args.includes('--tunnel');
     const portIdx = args.indexOf('--port');
@@ -878,7 +886,7 @@ async function main(): Promise<void> {
     const customCmd = (cmdIdx !== -1 && args[cmdIdx + 1]) ? args[cmdIdx + 1] : undefined;
     const squadFlags = ['start', '--tunnel', '--port', port.toString(), '--command', customCmd || ''].filter(Boolean);
     const copilotArgs = args.slice(1).filter(a => !squadFlags.includes(a));
-    await runStart(getSquadStartDir(), { tunnel: hasTunnel, port, copilotArgs, command: customCmd });
+    await runStart(getSquadStartDir(), { tunnel: hasTunnel, port, copilotArgs, command: customCmd, squadDir: resolvedForStart.path });
     return;
   }
 
@@ -1071,13 +1079,22 @@ async function main(): Promise<void> {
   if (cmd === 'rc' || cmd === 'remote-control') {
     console.log(`\n${YELLOW}⚠ DEPRECATED:${RESET} "squad rc" is deprecated and will be removed in a future release.`);
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
-    const { runRC } = await import('./cli/commands/rc.js');
     const hasTunnel = args.includes('--tunnel');
     const portIdx = args.indexOf('--port');
     const port = (portIdx !== -1 && args[portIdx + 1]) ? parseInt(args[portIdx + 1]!, 10) : 0;
     const pathIdx = args.indexOf('--path');
     const rcPath = (pathIdx !== -1 && args[pathIdx + 1]) ? args[pathIdx + 1] : undefined;
-    await runRC(rcPath || getSquadStartDir(), { tunnel: hasTunnel, port });
+    const rcStartDir = rcPath || getSquadStartDir();
+    const resolvedForRc = resolveSquadV2({ cwd: rcStartDir, env: process.env });
+    if (!resolvedForRc) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+      );
+      return;
+    }
+    const { runRC } = await import('./cli/commands/rc.js');
+    await runRC(rcStartDir, { tunnel: hasTunnel, port, squadDir: resolvedForRc.path });
     return;
   }
 

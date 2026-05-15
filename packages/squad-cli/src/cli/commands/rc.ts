@@ -32,6 +32,7 @@ export interface RCOptions {
   tunnel: boolean;
   port: number;
   path?: string;
+  squadDir?: string;
 }
 
 export async function runRC(cwd: string, options: RCOptions): Promise<void> {
@@ -39,11 +40,13 @@ export async function runRC(cwd: string, options: RCOptions): Promise<void> {
   const machine = getMachineId();
 
   // Resolve squad directory
-  const squadDir = storage.existsSync(path.join(cwd, '.squad'))
-    ? path.join(cwd, '.squad')
-    : storage.existsSync(path.join(cwd, '.ai-team'))
-      ? path.join(cwd, '.ai-team')
-      : '';
+  const squadDir = options.squadDir !== undefined
+    ? options.squadDir
+    : storage.existsSync(path.join(cwd, '.squad'))
+      ? path.join(cwd, '.squad')
+      : storage.existsSync(path.join(cwd, '.ai-team'))
+        ? path.join(cwd, '.ai-team')
+        : '';
 
   console.log(`\n${BOLD}🎮 Squad Remote Control${RESET}\n`);
   console.log(`  ${DIM}Repo:${RESET}    ${repo}`);
