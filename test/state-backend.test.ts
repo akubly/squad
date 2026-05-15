@@ -361,9 +361,10 @@ describe('resolveSquadState()', () => {
     writeFileSync(join(squadDir(), 'team.md'), '# Team');
     writeFileSync(join(squadDir(), 'config.json'), JSON.stringify({ version: 1, teamRoot: '.' }));
     const ctx = resolveSquadState(TMP);
-    expect(ctx).not.toBeNull();
-    expect(ctx!.backend.name).toBe('local');
-    expect(ctx!.paths.projectDir).toBe(squadDir());
+    if (!ctx) throw new Error('Expected local squad state context');
+    expect(ctx.backend.name).toBe('local');
+    expect(ctx.paths.projectDir).toBe(squadDir());
+    expect(ctx.resolution.path).toBe(squadDir());
   });
 
   it('respects stateBackend in config.json (git-notes migrates to two-layer)', () => {
@@ -376,8 +377,9 @@ describe('resolveSquadState()', () => {
   it('CLI override wins over config', () => {
     writeFileSync(join(squadDir(), 'config.json'), JSON.stringify({ version: 1, teamRoot: '.', stateBackend: 'git-notes' }));
     const ctx = resolveSquadState(TMP, 'orphan');
-    expect(ctx).not.toBeNull();
-    expect(ctx!.backend.name).toBe('orphan');
+    if (!ctx) throw new Error('Expected orphan squad state context');
+    expect(ctx.backend.name).toBe('orphan');
+    expect(ctx.resolution.path).toBe(squadDir());
   });
 
   it('repoRoot uses git rev-parse --show-toplevel, not path.resolve parent', () => {

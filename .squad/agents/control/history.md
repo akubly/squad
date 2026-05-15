@@ -14,6 +14,14 @@
 
 **Validation:** 5/5 migration tests GREEN. Build clean. Scrub gate: no new violations introduced.
 
+## Learnings
+
+### Piece 09 revision — watch and triage startup resolution
+
+- Moved the watch startup resolver to an internal source module so command declarations stay focused on supported watch APIs.
+- Command-surface parity tests should invoke `runWatch()` and `runTriage()` with platform, auth, monitor, capability, and PID seams stubbed, then shut down after the first-round boundary.
+- `SquadStateContext` checks in tests should narrow with explicit guards before reading required resolution fields.
+
 ## Cross-Agent Updates
 
 ### Piece 08a Revision Complete — CAPCOM (2026-05-14T21:38:40.349Z)

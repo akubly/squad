@@ -141,6 +141,10 @@
       "types": "./dist/cli/commands/watch/index.d.ts",
       "import": "./dist/cli/commands/watch/index.js"
     },
+    "./commands/triage": {
+      "types": "./dist/commands/triage.d.ts",
+      "import": "./dist/commands/triage.js"
+    },
     "./commands/watch/health": {
       "types": "./dist/cli/commands/watch/health.d.ts",
       "import": "./dist/cli/commands/watch/health.js"

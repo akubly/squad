@@ -41,6 +41,7 @@ import type { WatchCapability, WatchContext, WatchPhase, CapabilityResult } from
 import { CapabilityRegistry } from './registry.js';
 import { createDefaultRegistry } from './capabilities/index.js';
 import { createVerboseLogger, type VerboseLogger } from './verbose.js';
+import { resolveWatchStartupSquadDir } from './startup.js';
 
 // ── Re-exports for backward compatibility ────────────────────────
 
@@ -676,8 +677,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     fatal('--interval must be a positive number of minutes');
   }
 
-  // Detect squad directory
-  const squadDirInfo = detectSquadDir(dest);
+  const squadDirInfo = resolveWatchStartupSquadDir(dest, config);
   const teamMd = path.join(squadDirInfo.path, 'team.md');
   const routingMdPath = path.join(squadDirInfo.path, 'routing.md');
   const teamRoot = path.dirname(squadDirInfo.path);

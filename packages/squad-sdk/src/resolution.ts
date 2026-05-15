@@ -17,6 +17,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { FSStorageProvider } from './storage/fs-storage-provider.js';
+import { resolveSquad as resolveRegistrySquad, type ResolvedSquad } from './resolution-v2.js';
 import { resolveStateBackend, StateBackendStorageAdapter, type StateBackend, type StateBackendType } from './state-backend.js';
 import type { StorageProvider } from './storage/storage-provider.js';
 
@@ -708,6 +709,8 @@ export interface SquadStateContext {
   repoRoot: string;
   /** StorageProvider backed by the active state backend — pass to SDK modules */
   storage: StorageProvider;
+  /** Registry-aware squad resolution captured at command entry */
+  resolution: ResolvedSquad;
 }
 
 /**
@@ -722,19 +725,23 @@ export interface SquadStateContext {
  * @returns Resolved context, or null if no squad directory is found.
  */
 export function resolveSquadState(startDir?: string, cliOverride?: StateBackendType): SquadStateContext | null {
-  const paths = resolveSquadPaths(startDir);
+  const effectiveStart = startDir ?? process.cwd();
+  const resolution = resolveRegistrySquad({ cwd: effectiveStart });
+  if (!resolution) return null;
+
+  const paths = resolveSquadPaths(resolution.path);
   if (!paths) return null;
 
   // Resolve actual repo root via git — handles linked worktrees correctly
-  const effectiveStart = startDir ?? process.cwd();
+  const repoRootStart = path.resolve(paths.projectDir, '..');
   let repoRoot: string;
   try {
     repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: effectiveStart, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: repoRootStart, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
     // Fallback: derive from .squad/ parent if git is unavailable
-    repoRoot = path.resolve(paths.projectDir, '..');
+    repoRoot = repoRootStart;
   }
 
   // Resolve the backend from config + CLI override
@@ -746,5 +753,5 @@ export function resolveSquadState(startDir?: string, cliOverride?: StateBackendT
     ? new FSStorageProvider()
     : new StateBackendStorageAdapter(backend, paths.projectDir);
 
-  return { paths, backend, repoRoot, storage: stateStorage };
+  return { paths, backend, repoRoot, storage: stateStorage, resolution };
 }

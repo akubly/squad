@@ -89,3 +89,13 @@ SquadError lives in adapter/errors.ts. Registry validation uses ERROR severity +
 ## Archive
 
 Older learnings (prior to 2026-04-12) have been archived to history-archive.md for reference. See that file for Q1 2026 and earlier context including template sync patterns, cherry-pick conflicts, and loop command refactors.
+
+### Piece 09 — watch/triage startup resolution (2026-05-15)
+
+**State context contract:** `SquadStateContext` now carries the registry-aware `resolution` result. `resolveSquadState()` resolves squad identity first, then derives `paths` from `resolution.path` so both fields describe the same `.squad/` directory.
+
+**Watch startup boundary:** `packages/squad-cli/src/cli/commands/watch/index.ts` uses `resolveWatchStartupSquadDir()` before platform adapter setup, monitor state paths, capability loading, and polling. The helper precedence is state context first, registry-aware resolver second, directory detection fallback last. Poll rounds reuse the captured `squadDirInfo` and do not resolve again.
+
+**Triage surface:** `packages/squad-cli/src/commands/triage.ts` re-exports the watch runner as `runTriage`, with package export wiring in `packages/squad-cli/package.json`.
+
+**Test pattern:** `test/cli/watch-triage-migration.test.ts` exercises startup resolution through the helper instead of entering the long-lived watch loop. Use an invalid `SQUAD_REGISTRY_PATH` with a valid `stateContext` to prove the context path wins without invoking another registry read.
