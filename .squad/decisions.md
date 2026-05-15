@@ -5,6 +5,48 @@
 
 ---
 
+## 2026-05-15: VOX Lifecycle Command Resolution (08c) — ACCEPTED
+
+**Session:** Phase B piece 08c lifecycle command resolution  
+**Branch:** `akubly/upstream-08c-migrate-lifecycle-commands` @ commit `3c2528d4`  
+**Spec:** REPLAY-PROTOCOL 00-stack-overview, 08c-migrate-lifecycle-commands  
+**Implementation Owner:** VOX (General-Purpose Agent)  
+**Verdict:** SUCCESS — 6 parity tests RED→GREEN, scrub gate passed.
+
+### Summary
+
+VOX migrated the `start` and `rc` lifecycle commands to the v2 squad resolution chain. Both commands now gate behind `resolveSquadV2()` before side effects execute, matching the pattern established in piece 08a.
+
+**Key Implementation Patterns Confirmed:**
+
+1. **Guard Location:** dispatch layer (`cli-entry.ts`), not inside runner. Runner accepts resolved path as option and uses it.
+2. **rc --path <dir>:** Explicit path is both resolver start directory and cwd passed to `runRC`. Resolved `.squad/` affects bridge metadata only.
+3. **SQUAD_CALLSIGN Subprocess Handling:** Empty string `SQUAD_CALLSIGN=''` causes resolver to throw. Tests that need null resolution must omit the env var entirely or strip inherited empty-string values before spawning.
+4. **runRC in Unit Tests:** `void runRC(...)` prevents hanging on `await new Promise(() => {})` at function end.
+5. **runCliShort Helper:** Explicit env stripping covers subprocess tests where parent env carries empty callsign.
+
+### Test & Build Results
+
+- **Parity tests:** 6/6 GREEN (RED→GREEN)
+- **Build:** CLEAN
+- **Scrub gate:** PASSED (prior baseline contamination accepted per Phase B rules)
+- **Changeset:** `.changeset/lifecycle-command-resolution.md` included
+
+### Files Produced
+
+- `packages/squad-cli/src/cli/commands/start.ts` (revised)
+- `packages/squad-cli/src/cli/commands/rc.ts` (revised)
+- `packages/squad-cli/src/cli/core/cli-entry.ts` (revised)
+- `test/cli/legacy-resolver-migration.test.ts` (new)
+- `.changeset/lifecycle-command-resolution.md` (new)
+- `.squad/skills/resolver-guard-threading/SKILL.md` (new skill)
+
+### Handoff
+
+Ready for Phase C (PR creation). No revision assigned; implementation complete per spec.
+
+---
+
 ## 2026-05-14: Phase B Piece 08b Adversarial Review — REJECTED, Sims Revision Assigned
 
 **Session:** Phase B piece 08b adversarial review  
