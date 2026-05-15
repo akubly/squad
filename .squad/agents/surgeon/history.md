@@ -135,3 +135,40 @@ Prepared comprehensive release playbook and CI improvement plan for Brady's revi
 - Pre-release validation prevents 90% of publish issues
 - Culture: "If the same problem happens twice, the playbook failed"
 - Documentation must be user-first (Brady's perspective, not technical jargon)
+
+---
+
+### Phase B Piece 10 Finalization: Squash + Scrub + Force-Push (2026-05-15)
+
+**Task:** Finalize `akubly/upstream-10-init-fail-fast` by squashing revision commits, running scrub gate, and force-pushing.
+
+**Branch state at start:**
+- a07608df: EECOM original impl (fail-fast guards)
+- e6efb366: Scribe state merge
+- 9982249a: Scribe adversarial review closure
+- 61f718ba: CONTROL fix (unified init path + lstat)
+- cd7da677: Sims tests
+
+**Strategy Applied:** Strategy B (soft reset + recommit)
+- Soft reset to piece-09 base
+- Staged only product files (packages/squad-cli/src/, test/cli/, .changeset/)
+- Left .squad/ state files unstaged for Scribe regeneration
+- Single commit: 331894e8 (feat: init fail-fast guards...)
+
+**Scrub Gate Results:**
+- Gate 1 FAIL: Pre-existing baseline contamination (orchestration-log, casting, identity, _internal) — documented as accepted per prior Phase B pieces
+- Gate 3 WARN: akubly mentions in .squad/ state files — expected, Scribe responsibility
+- Gate 4–6: PASS — no new strip-listed paths introduced by piece-10; no Microsoft internal refs; 5 product files changed (well under 30-file limit)
+
+**Verification:**
+- Targeted tests: 43 GREEN (init-scope + init-v2)
+- Build: clean (tsc + postbuild)
+- Changeset intact: .changeset/init-fail-fast.md present in commit
+- Commit message: REPLAY-PROTOCOL compliant (no comparison framing, no version leaks, Co-authored-by trailer included)
+
+**Push Result:**
+- Force-push with `--force-with-lease` succeeded
+- Branch advanced from cd7da677 → 331894e8
+- No concurrent modifications detected
+
+**Key Decision:** Baseline scrub gate failures are piece-diff-scoped and non-blocking per established Phase B protocol. All gates that could be introduced by piece-10 passed; pre-existing contamination from upstream baseline is a separate concern.

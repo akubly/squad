@@ -8,6 +8,16 @@ Sims owns end-to-end test coverage, integration test harnesses, cross-component 
 
 ## Learnings
 
+### Piece 10 Revision — Init Fail-Fast Test Coverage (2026-05-15T23:15:56Z)
+
+📌 **Team update — Piece 10 Revision Complete:** EECOM locked out per strict lockout protocol after adversarial review split verdict (Flight APPROVE-3-notes, FIDO REJECT-6-gaps, RETRO APPROVE-WITH-FIXES). CONTROL + Sims assigned joint revision. Sims addressed all 6 FIDO test gaps: (1) guard-order CLI E2E via dispatch path with derived callsign conflict; (2) clone-collision tests for default+explicit registry scenarios; (3) `.squad` symlink collision with lstat rejection proof; (4) registry byte stability: snapshots after all conflict paths; (5) typed error assertions for `SquadError` and `ConfigurationError` instances; (6) test label/assertion alignment. Added scaffold-file assertions (no dir/file creation on conflict), CLI stderr contract assertions (specific conflict identification), exit code 2 verification on all paths. Surgeon squashed both revision commits into `331894e8`. Build CLEAN. 28/28 tests GREEN. Pattern reinforced: fail-fast guard tests should prove first guard, unchanged registry, unchanged scaffold surface, and process-visible error text in the same rehearsal. Ready for Phase C.
+
+### Piece 09 — Watch/Triage Startup Resolution (2026-05-15)
+
+📌 **Team update (2026-05-15T22:14:43Z — Piece 09 E2E Review + Phase C Assignment):** Piece 09 watch/triage startup resolution returned NEEDS-E2E-BEFORE-MERGE verdict (Sims). No node-pty-driven E2E rehearsal for watch/triage commands; spec requires terminal behavior verification. Missing happy-path rehearsal (consumer repo with registry resolution, CLI entry), failure rehearsal (ambiguous/missing resolution, error surfacing), triage command terminal tests, Ctrl-C/SIGINT handling, long-lived startup-context stability (post-mutation), and Windows path-normalization E2E. Phase C assignment: Sims to author node-pty E2E suite for watch and triage terminal rehearsals, signal handling, cross-platform path edge cases, and validate user-facing error messages.
+
+Added mission checks for init guard ordering, cwd-based clone collision, registry byte stability on conflict, typed error assertions, inactive-entry reactivation, scaffold entries, and CLI stderr delivery. Pattern reinforced: fail-fast tests should prove first guard, unchanged registry, unchanged scaffold surface, and process-visible error text in the same rehearsal.
+
 ### Piece 08b Revision — Resolver Guard Harmonization (2026-05-14)
 
 **Role:** Revision author (successor to EECOM, locked out per Reviewer Rejection Protocol)

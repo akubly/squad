@@ -4,7 +4,11 @@
 
 ## Current Session Learnings
 
-### Piece 08a — Read-only command resolver migration (2026-05-14T13:16:21-07:00)
+### Piece 10 revision — init validation path (2026-05-15T23:15:56Z)
+
+📌 **Team update — Piece 10 Revision Complete:** EECOM locked out per strict lockout protocol after adversarial review split verdict (Flight APPROVE-3-notes, FIDO REJECT-6-gaps, RETRO APPROVE-WITH-FIXES). CONTROL + Sims assigned joint revision. CONTROL unified init validation routing through `packages/squad-cli/src/commands/init.ts` so scaffold, callsign, clone path, and registry-source checks run before writes. Added `.squad` symbolic-link detection with `lstatSync` to prevent redirect escapes. Registry checks now apply to all registration paths (not just explicit --callsign), addressing RETRO's no-flag bypass gap. All 6 FIDO test gaps closed by Sims. Surgeon squashed both revision commits into `331894e8`. Build CLEAN. 28/28 tests GREEN. Decisions recorded: exit-code-2 scoping guidance for future error subclasses (register, clone). Ready for Phase C.
+
+### Piece 09 revision — watch and triage startup resolution (2026-05-15T22:14:43Z)
 
 **Scope:** Migrated read-only command paths to the structured squad resolver for registered clone checkouts.
 
@@ -15,6 +19,12 @@
 **Validation:** 5/5 migration tests GREEN. Build clean. Scrub gate: no new violations introduced.
 
 ## Learnings
+
+### Piece 10 revision — init validation path
+
+- Routed `squad init` through one validation module so scaffold, callsign, clone path, and registry-source checks run before writes.
+- Added `.squad` symbolic-link detection with `lstatSync` so scaffold writes stay inside the selected target directory.
+- Recorded test expectations for Sims covering plain init, environment-selected registries, default registries, and symbolic-link conflicts.
 
 ### Piece 09 revision — watch and triage startup resolution
 

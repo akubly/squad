@@ -10,6 +10,21 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Piece 10 Review — APPROVE (2026-05-15)
+
+📌 **Init fail-fast approved. Solid validation-before-write pattern with one forward-looking concern.**
+
+The three-guard ordering (scaffold → callsign → clone-path → scaffold write → registry write) is correctly enforced in code structure, not just convention. Each guard throws before any filesystem mutation. Exit code 2 scoping is safe today (catch block is init-specific) but the mechanism (`instanceof ConfigurationError`) could overload if future commands adopt the same pattern without introducing a more specific error subclass. Noted as non-blocking architectural concern.
+
+**Key findings:**
+- No critical blockers.
+- Reactivation path creates scaffold dirs without writing registry — acceptable since sentinel check already passed and inactive-entry handling is deferred to later pieces.
+- Clone-path guard correctly delegates to `clonesMatch` with separator-bounded containment (sibling prefix non-match verified).
+- Tests are behavioral (command-level contracts), not implementation-coupled. A legitimate refactor of internal variable names would not break them.
+- Exit code 2 contract is init-only today. Future expansion should introduce a `ConflictError` subclass rather than overloading the `ConfigurationError` instanceof check.
+
+**Phase C decision recorded:** Exit code 2 means "conflict user can resolve by choosing different target/callsign/directory." Future commands should subclass ConfigurationError rather than reusing raw instanceof check. Applies to all CLI error-to-exit-code mapping patterns.
+
 ### Piece 08c Review — APPROVE (2026-05-14)
 
 📌 **VOX lifecycle command migration approved without blockers.**

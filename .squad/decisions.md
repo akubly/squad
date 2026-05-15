@@ -5,6 +5,66 @@
 
 ---
 
+## 2026-05-15: Piece 10 Unified Init Path
+
+**Date:** 2026-05-15  
+**By:** CONTROL  
+**Subject:** Route init through one validation path
+
+### Decision
+
+All `squad init` command entry points route through `packages/squad-cli/src/commands/init.ts` for scaffold, callsign, clone path, and `.squad` symbolic-link validation before filesystem writes.
+
+### Rationale
+
+Registry resolution can come from an explicit flag, `SQUAD_REGISTRY_PATH`, or the user registry location. Running one validation path ensures each source receives the same conflict checks before scaffold creation.
+
+### Test note for Sims
+
+Add CLI coverage for plain `squad init` with derived callsign conflicts, default registry conflicts, `SQUAD_REGISTRY_PATH` conflicts, and `.squad` symbolic-link conflicts. The assertions should confirm exit code 2 and no scaffold or registry write after the conflict.
+
+---
+
+## 2026-05-15: Init Fail-Fast Validation Ordering — Piece 10 Resolution
+
+**Date:** 2026-05-15  
+**By:** EECOM  
+**Subject:** All conflict guards run before scaffold creation in `runInit`
+
+### Context
+
+Piece 10 adds three fail-fast guards to `squad init`. An initial implementation
+placed scaffold directory creation before the callsign and clone-path checks.
+This allowed a partial `.squad/` directory to exist after a registry conflict.
+
+### Decision
+
+All three conflict guards complete before any filesystem write:
+
+1. Scaffold sentinel check (always — does not require registry)
+2. Callsign conflict check (when `wantsRegistration`)
+3. Clone-path conflict check (when `wantsRegistration`)
+4. Scaffold directory creation
+5. Registry write
+
+The implementation defers scaffold creation to step 4, after all checks pass,
+so no state is written on any conflict path.
+
+### Rationale
+
+The spec is explicit: "Only after every check passes, create scaffold files
+and write or update the registry." The intermediate state (`.squad/` exists
+but is empty) is a source of confusion in later command resolution and is
+precisely what the guards exist to prevent.
+
+### Scope
+
+This ordering applies only to `packages/squad-cli/src/commands/init.ts`
+(the registry-aware init path). The legacy `cli/core/init.ts` path is not
+in scope for piece 10.
+
+---
+
 ## 2026-05-15: Adversarial Review Batch — Piece 08c Lifecycle Command Resolver Migration
 
 **Session:** Phase B piece 08c adversarial review (flight-5, fido-6, retro-2)  
@@ -1297,3 +1357,45 @@ Per Reviewer Rejection Protocol: **EECOM is locked out of the piece 07 revision 
 - Add Sims-owned terminal rehearsals for watch, triage, missing/ambiguous startup errors, signal shutdown, and long-lived startup-context stability.
 - Add FIDO-owned coverage for malformed state context, mid-loop registry stability, empty/null path edges, and Windows registry path normalization.
 - Investigate the state-backend related-suite nonzero exit and broader CLI timeout behavior as a separate stability item.
+---
+
+## 2026-05-15: Piece 10 Init Fail-Fast — APPROVED
+
+**Date:** 2026-05-15  
+**By:** Flight (Lead)  
+**Subject:** Exit code 2 scoping and future conflict error expansion
+
+### Context
+
+Piece 10 maps instanceof ConfigurationError to exit code 2 in the init catch block at cli-entry.ts:344. Today this is safe — the catch block is scoped to the registry-aware init path only. However, ConfigurationError is used broadly across the SDK (charter-compiler, history-shadow, lifecycle).
+
+### Decision
+
+APPROVE piece 10 as-is. Record the following for future pieces:
+
+- Exit code 2 means "conflict that the user can resolve by choosing a different target/callsign/directory."
+- If a future command (e.g., egister, clone) needs exit code 2 for its own conflict semantics, introduce a ConflictError subclass of ConfigurationError rather than reusing the raw instanceof ConfigurationError check.
+- The current pattern is acceptable for a single command's catch block but must not be copied as a generic error-to-exit-code mapping.
+
+### Scope
+
+Applies to all future CLI entry points that catch SDK errors and map them to exit codes.
+
+---
+
+## 2026-05-15: Piece 10 Init Fail-Fast Guard Review
+
+**Date:** 2026-05-15  
+**By:** RETRO (Security)  
+**Subject:** Tighten squad init fail-fast guards before piece 10 goes upstream
+
+Decision needed: tighten squad init fail-fast guards before piece 10 goes upstream.
+
+RETRO reviewed the piece 10 guard implementation and found two must-fix correctness gaps:
+
+1. Registry conflict checks are gated on explicit --callsign / --registry-path, so init can skip callsign and clone-path collision checks when registry selection comes from SQUAD_REGISTRY_PATH or the default user registry.
+2. Existing .squad detection follows symlinks and only blocks known sentinel files. A .squad symlink without a sentinel can pass validation and redirect scaffold directory writes outside the requested target.
+
+### Recommended Resolution
+
+Treat registry lookup as part of all registering init paths unless --no-register is set, and use lstat to reject or conflict on .squad symlinks before writing under that path. Concurrency hardening and stricter callsign normalization can follow as lower-risk improvements.

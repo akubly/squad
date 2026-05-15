@@ -93,3 +93,12 @@ Lifecycle command dispatch now resolves before starting bridges, tunnels, PTYs, 
 
 Blocker resolved: Added `lstatSync` stale-path guards after clone/origin registry matches (mirrors callsign pattern), and explicit registry parse errors now throw `REGISTRY_INVALID` before any state creation. FIDO major #1 (error assertion): `rc does not start bridge when resolution throws` now asserts error text visible. FIDO major #2 (dispatch passthrough): Dispatch-level copilot args passthrough now tested via `runCliShort(['start', '--extra-copilot-flag'])` subprocess, proving dispatch filter preserves non-squad args. Test count 27/27 GREEN, scrub gate passed, commit ff55ecf7.
 
+
+### Piece 10 init fail-fast guard review (2026-05-15)
+
+**Verdict:** APPROVE-WITH-FIXES (revised to APPROVE after CONTROL + Sims revision).
+
+RETRO found two must-fix guard-correctness issues before upstream: registry conflict checks are skipped when the caller relies on `SQUAD_REGISTRY_PATH` or the default registry without `--callsign` / `--registry-path`, and `.squad` symlinks without sentinel files can redirect scaffold writes outside the target directory. Additional non-blocking concerns: no atomic guard for concurrent init, callsign validation is looser than resolver validation, and sentinel-only detection can miss partial scaffold directories.
+
+📌 **Team update — Piece 10 Revision Complete (2026-05-15T23:15:56Z):** Per strict lockout protocol, EECOM locked out for this cycle. CONTROL + Sims assigned joint revision and delivered fix: CONTROL unified init validation routing through one path so registry from all sources (flag, env, default) receives same conflict checks; added lstat-based `.squad` symlink sentinel to prevent redirect-escape. All guards now execute before scaffold creation. Build CLEAN. 28/28 tests GREEN. Approved for Phase C.
+
