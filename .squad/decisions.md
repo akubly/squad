@@ -32,6 +32,64 @@ Revision commits to same branch; will be re-reviewed as 08c-v2.
 
 ---
 
+## 2026-05-15: Piece 08c revision — GNC fail-closed lifecycle validation
+
+**By:** GNC (Node.js Runtime)  
+**Date:** 2026-05-15  
+**Branch:** `akubly/upstream-08c-migrate-lifecycle-commands`  
+**Revision of:** commit `3c2528d4` (VOX)  
+**Revision commit:** `ff55ecf7`  
+**Verdict:** SUCCESS — 27/27 tests GREEN, scrub gate passed.
+
+### Context
+
+RETRO rejected VOX's Piece 08c implementation (commit `3c2528d4`) citing two blockers: (1) lifecycle commands passed `resolved.path` to runners without validating the path exists on disk, (2) malformed registry content in clone/origin matching was silently ignored when an explicit registry source was declared.
+
+FIDO raised two majors: (1) `rc does not start bridge when resolution throws` lacked error text assertion, (2) dispatch-layer copilot args passthrough was only tested at runner level via mocks, not at dispatch level via actual CLI binary.
+
+### Decisions Made
+
+#### 1. Fail-closed for explicit registry parse failures
+
+When `opts.registryPath` or `SQUAD_REGISTRY_PATH` env var is set by the caller, a registry parse failure throws `REGISTRY_INVALID` before any bridge, tunnel, PTY, or child-process state is created. When neither is set (auto-discovery), registry parse failures continue silently to the next strategy — this is intentional: auto-discovery may fall back to cwd or callsign resolution.
+
+**Rationale:** Explicit registry declaration is a statement of authoritative intent. Silently bypassing it on parse failure can resolve against a different squad than the user intended, with no indication anything went wrong.
+
+#### 2. STALE_PATH guard after clone and origin registry matches
+
+After a unique clone or origin registry match, `lstatSync` validates the returned path before it is passed to callers. This mirrors the existing STALE_PATH check in `resolveByCallsign()` and ensures all resolution strategies share the same fail-closed guarantee.
+
+**Rationale:** A registry can become stale between updates (moved squad directory, deleted worktree). Every resolution strategy that yields a path must validate it exists before returning.
+
+#### 3. Try/catch around resolveSquadV2 in cli-entry dispatch blocks
+
+Both `start` and `rc` blocks wrap `resolveSquadV2()` in a try/catch that calls `fatal(err.message)`. This converts SDK SquadError instances to CLI SquadErrors, printing cleanly as `✗ {message}` instead of a raw stack trace.
+
+**Rationale:** The SDK and CLI each define their own `SquadError`. The main() catch block checks instanceof against the CLI version. The try/catch conversion is the simplest correct pattern without cross-package coupling.
+
+#### 4. Dispatch-level passthrough test using runCliShort
+
+The dispatch-level copilot passthrough test runs the actual CLI binary via `runCliShort()` with `--extra-copilot-flag` in the argv and asserts `'Copilot flags:'` appears in stdout. This proves the squadFlags filter at dispatch does not strip copilot args.
+
+**Rationale:** Runner-level mock seam tests only verify what the runner receives after filtering. They cannot prove what the dispatch layer's own filter passes through. The runCliShort subprocess test exercises the real filter path.
+
+### Test & Build Results
+
+- **Full test suite:** 27/27 GREEN (including 4 new tests strengthening FIDO majors + 2 RETRO blockers)
+- **Build:** CLEAN
+- **Scrub gate:** PASSED
+- **Changeset:** updated (no duplicate)
+
+### Files Modified
+
+- `packages/squad-cli/src/resolution-v2.ts` (REGISTRY_INVALID throw, lstatSync guards after clone/origin)
+- `packages/squad-cli/src/cli/commands/start.ts` (try/catch wrapper)
+- `packages/squad-cli/src/cli/commands/rc.ts` (try/catch wrapper)
+- `packages/squad-cli/src/cli/core/cli-entry.ts` (try/catch wrappers, dispatch-level passthrough test added)
+- `test/cli/legacy-resolver-migration.test.ts` (strengthened rc throw assertion, new passthrough subprocess test, stale-path tests, deprecation gate, vi.waitFor replacements)
+
+---
+
 ## 2026-05-15: VOX Lifecycle Command Resolution (08c) — ACCEPTED
 
 **Session:** Phase B piece 08c lifecycle command resolution  

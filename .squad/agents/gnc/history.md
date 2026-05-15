@@ -25,3 +25,19 @@ ame param in templates #577) AND Copilot CLI platform changes (CAPCOM report). C
 
 📌 **Team update (2026-05-13T18:28:28Z — Piece 04 Adversarial Review Complete):** Piece 04 (path-utils) approved. Future pieces (init fail-fast, assign, unassign, doctor) will import from centralized `@bradygaster/squad-sdk/path-utils` module. Path-safety standard established: symlink identity audit, trust boundary declaration, write-path documentation. See `.squad/decisions.md` "### 2026-05-13: Path normalization safety checks as standard" for integration test patterns and deferred findings relevant to pieces 05+.
 
+### Piece 08c Revision — Lifecycle Fail-Closed Validation (2026-05-14T17:54:18Z)
+
+Revised VOX's lifecycle command migration (Piece 08c) after RETRO rejection. Two RETRO blockers and two FIDO majors addressed.
+
+**Fail-closed lifecycle resolution pattern:** After `resolveSquadV2()` returns a path from clone/origin registry matching, always validate the path still exists on disk with `existsSync + statSync().isDirectory()` before importing runners. The resolver can return a valid-looking path from a stale registry entry. The STALE_PATH check in callsign resolution (`resolveByCallsign`, lines ~175-184 of resolution-v2.ts) already did this — clone/origin matching steps 4-5 did not. Parity is now enforced.
+
+**Malformed explicit registry throws:** Registry parse failures silently continue to the next resolution strategy by design (glob-matching fallback is reasonable). But when the caller explicitly sets `SQUAD_REGISTRY_PATH` or `opts.registryPath`, they declared an authoritative source — falling back silently is wrong. Check `!!(opts.registryPath ?? opts.env?.['SQUAD_REGISTRY_PATH'])` to detect explicit registry; throw `REGISTRY_INVALID` if parse fails. This fires before any bridge/PTY state is created.
+
+**Dispatch-layer error surface:** Wrap `resolveSquadV2()` in a focused try/catch in `cli-entry.ts` that calls `fatal(err.message)`. This converts SDK `SquadError` instances (using the SDK's error class from `packages/squad-sdk/src/adapter/errors.ts`) into CLI SquadErrors (from `packages/squad-cli/src/cli/core/errors.ts`) so they print as `✗ {message}` through the main().catch() handler rather than a raw stack trace.
+
+**Two different SquadError classes:** The SDK and CLI each define their own `SquadError` extending `Error`. The main() catch block checks `instanceof` against the CLI version. The `fatal()` function throws a CLI SquadError, so SDK errors must be caught and re-thrown via `fatal()` to display cleanly.
+
+**Dispatch-level passthrough test technique:** To prove copilot args survive the squadFlags filter at the dispatch layer (not just runner-level mocks), use `runCliShort()` against the actual CLI binary with `['start', '--extra-copilot-flag', '--command', 'cmd.exe', '/c', 'exit']`. The `'Copilot flags: ...'` line is printed before PTY spawn, so it appears in stdout even if the process times out. This is the right level of test for dispatch-layer concerns — runner-level mocks only verify what the runner receives after filtering, not what the filter passes through.
+
+**vi.waitFor vs fixed timeouts:** Runner-level tests use `void runStart(...)` then wait for mocks. `remoteBridgeCtor` is called synchronously in the mock constructor; `mockPtySpawn` is called after `await bridge.start()` resolves. Use `vi.waitFor(() => expect(mockPtySpawn).toHaveBeenCalled(), { timeout: 5_000 })` for deterministic async completion without wall-clock timing dependency.
+

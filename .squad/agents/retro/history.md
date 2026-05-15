@@ -87,3 +87,9 @@ RETRO identified 4 LOW-severity hardening improvements during adversarial review
 
 Lifecycle command dispatch now resolves before starting bridges, tunnels, PTYs, or child processes, and subprocess CWD stays on the user-facing start directory. However, clone/origin registry matches can return a registry path without checking that the resolved squad directory exists, and malformed registry content can be ignored for clone/origin matching. That is not fail-closed enough for long-running commands: a stale or malformed registry can still lead to a bridge session using the wrong squad identity or fallback squad. Revision should be owned by GNC, not the original author, and should add fail-closed lifecycle tests for stale resolved paths and explicit registry parse failures.
 
+### Piece 08c Revision — GNC Applied Fail-Closed Lifecycle Validation (2026-05-15T00:54:18Z)
+
+📌 **GNC successfully addressed RETRO blocker and both FIDO majors.**
+
+Blocker resolved: Added `lstatSync` stale-path guards after clone/origin registry matches (mirrors callsign pattern), and explicit registry parse errors now throw `REGISTRY_INVALID` before any state creation. FIDO major #1 (error assertion): `rc does not start bridge when resolution throws` now asserts error text visible. FIDO major #2 (dispatch passthrough): Dispatch-level copilot args passthrough now tested via `runCliShort(['start', '--extra-copilot-flag'])` subprocess, proving dispatch filter preserves non-squad args. Test count 27/27 GREEN, scrub gate passed, commit ff55ecf7.
+
