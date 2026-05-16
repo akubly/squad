@@ -1399,3 +1399,94 @@ RETRO reviewed the piece 10 guard implementation and found two must-fix correctn
 ### Recommended Resolution
 
 Treat registry lookup as part of all registering init paths unless --no-register is set, and use lstat to reject or conflict on .squad symlinks before writing under that path. Concurrency hardening and stricter callsign normalization can follow as lower-risk improvements.
+
+---
+
+## 2026-05-15: User Directive — Governance Edits Authorized by Spec
+
+**Date:** 2026-05-15  
+**By:** Aaron Kubly (via Copilot)  
+**Subject:** Governance file edits authorized when spec explicitly directs
+
+When a spec piece explicitly directs changes to governance files (e.g., `.github/agents/squad.agent.md`, marked as "Repo maintainer (human) write-only" in the source-of-truth table), the team is authorized to make those edits as part of implementing that spec. The maintainer has pre-blessed the change by approving the spec. Reviewers may still flag the touch for awareness, but it is not a violation requiring revision.
+
+**Applies to:** piece `akubly/upstream-11a-canonical-template-failshut` and forward.
+
+---
+
+## 2026-05-15: Self-Healing Test Hooks — Anti-Pattern Decision
+
+**Date:** 2026-05-15  
+**By:** Booster (CI/CD)  
+**Subject:** Parity gates must run before mutating fixers in test setup
+
+### Decision
+
+When a test suite verifies committed mirror parity, do not run a mutating fixer in `beforeAll()` before the parity assertion. Check parity first, then run the fixer, or fail if the fixer would rewrite any tracked mirror file.
+
+### Why
+
+A self-healing setup hook can convert a stale tracked checkout into a passing test run by rewriting mirrors before the assertions execute. That hides partial landings and missed sync updates instead of catching them.
+
+### Preferred Pattern
+
+1. Enumerate every tracked mirror target for the canonical source
+2. Snapshot each target's content hash before running the sync script
+3. Run the sync script
+4. Fail with a file-by-file message if any tracked mirror hash changed
+5. Keep the existing byte-for-byte parity assertions after the gate
+
+### Applied In
+
+- `test/template-sync.test.ts`
+- `scripts/sync-templates.mjs`
+
+### Guidance for Future Tests
+
+If a suite needs a fixer to stabilize generated content, run the parity gate before the fixer mutates tracked files. Error messages should name each rewritten file so the remediation is obvious.
+
+---
+
+## 2026-05-15: Piece 11a Quality Review — FIDO (Template Governance Tests)
+
+**Date:** 2026-05-15  
+**By:** FIDO (Quality)  
+**Branch:** `akubly/upstream-11a-canonical-template-failshut`  
+**Status:** MAJOR finding, now resolved
+
+### Constraint
+
+Template-governance parity tests must detect stale committed mirrors before any sync step mutates the checkout.
+
+### Evidence
+
+In the initial implementation, `test/template-sync.test.ts` ran `node scripts/sync-templates.mjs` in `beforeAll()` and only then performed byte-for-byte parity assertions. In a clean worktree, applying only `.squad-templates/squad.agent.md` and `test/template-sync.test.ts` produced a full green run even though `.github/agents/squad.agent.md`, `templates/squad.agent.md.template`, and package mirrors were left stale before the test started.
+
+### Resolution
+
+Booster implemented a pre-sync SHA-256 snapshot gate in `test/template-sync.test.ts` that fails if sync rewrites any tracked mirror. Commit 95a19a5a passed all 158 green tests with the new parity gate active.
+
+---
+
+## 2026-05-15: Piece 11a Security Review — RETRO (Governance File Edits)
+
+**Date:** 2026-05-15  
+**By:** RETRO (Security)  
+**Branch:** `akubly/upstream-11a-canonical-template-failshut`  
+**Status:** MAJOR finding, dismissed per user directive
+
+### Finding
+
+The branch edits `.github/agents/squad.agent.md:637-649`, a file whose source-of-truth table (line 1077) designates it as authoritative governance with write access limited to the repo maintainer (human).
+
+### Why It Matters
+
+The coordinator consumes this file as live policy. Allowing core-dev branches to rewrite it bypasses the repository's file-write governance boundary.
+
+### User Directive
+
+Aaron Kubly issued a user directive (recorded in `2026-05-15: User Directive — Governance Edits Authorized by Spec`) stating that when a spec piece explicitly directs changes to maintainer-write-only files, the team is authorized to proceed. The maintainer has pre-blessed the change by approving the spec.
+
+### Status
+
+**DISMISSED** — User directive supersedes the MAJOR finding. Recorded here as historical context.
