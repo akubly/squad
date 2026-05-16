@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, writeFileSync, rmSync, mkdirSync, cpSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -41,16 +41,16 @@ beforeAll(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function readFile(relPath: string): string {
-  return readFileSync(resolve(ROOT, relPath), 'utf-8');
+function readFile(relPath: string, baseDir = ROOT): string {
+  return readFileSync(resolve(baseDir, relPath), 'utf-8');
 }
 
-function readFileBytes(relPath: string): Buffer {
-  return readFileSync(resolve(ROOT, relPath));
+function readFileBytes(relPath: string, baseDir = ROOT): Buffer {
+  return readFileSync(resolve(baseDir, relPath));
 }
 
-function fileExists(relPath: string): boolean {
-  return existsSync(resolve(ROOT, relPath));
+function fileExists(relPath: string, baseDir = ROOT): boolean {
+  return existsSync(resolve(baseDir, relPath));
 }
 
 function hashFile(relPath: string): string | null {
@@ -136,12 +136,43 @@ function snapshotMirrorHashes(relPaths: readonly string[]): Map<string, string |
   return new Map(relPaths.map((relPath) => [relPath, hashFile(relPath)]));
 }
 
-function runSyncTemplates(): string {
+function runSyncTemplates(cwd = ROOT): string {
   return execSync('node scripts/sync-templates.mjs', {
-    cwd: ROOT,
+    cwd,
     encoding: 'utf-8',
     timeout: 60_000,
   });
+}
+
+const SYNC_SANDBOX_TARGET_DIRS = [
+  'templates',
+  '.github/agents',
+  'packages/squad-cli/templates',
+  'packages/squad-sdk/templates',
+] as const;
+
+function withSyncSandbox(name: string, callback: (sandboxRoot: string) => void): void {
+  const sandboxRoot = join(
+    ROOT,
+    'test',
+    `.${name}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+
+  mkdirSync(sandboxRoot, { recursive: true });
+
+  try {
+    mkdirSync(resolve(sandboxRoot, 'scripts'), { recursive: true });
+    cpSync(resolve(ROOT, 'scripts', 'sync-templates.mjs'), resolve(sandboxRoot, 'scripts', 'sync-templates.mjs'));
+    cpSync(resolve(ROOT, SOURCE_DIR), resolve(sandboxRoot, SOURCE_DIR), { recursive: true });
+
+    for (const relPath of SYNC_SANDBOX_TARGET_DIRS) {
+      mkdirSync(resolve(sandboxRoot, relPath), { recursive: true });
+    }
+
+    callback(sandboxRoot);
+  } finally {
+    rmSync(sandboxRoot, { recursive: true, force: true });
+  }
 }
 
 const OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS = [
@@ -223,39 +254,45 @@ describe('sync-templates.mjs script execution', () => {
 });
 
 describe('optional package-local squad.agent.md mirrors', () => {
-  it('re-syncs unsuffixed package-local mirrors when they exist for runtime packaging', () => {
-    const canonicalPath = `${SOURCE_DIR}/${AGENT_MD_FILE}`;
-    const canonicalBytes = readFileBytes(canonicalPath);
-    const originals = OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS.map((relPath) => ({
-      relPath,
-      absPath: resolve(ROOT, relPath),
-      original: fileExists(relPath) ? readFileBytes(relPath) : null,
-    }));
+  it('refreshes existing package-local mirrors from the canonical template', () => {
+    withSyncSandbox('template-sync-existing-mirror', (sandboxRoot) => {
+      const canonicalPath = `${SOURCE_DIR}/${AGENT_MD_FILE}`;
+      const canonicalBytes = readFileBytes(canonicalPath, sandboxRoot);
 
-    try {
-      for (const mirror of originals) {
-        writeFileSync(mirror.absPath, Buffer.from(`stale mirror for ${mirror.relPath}\n`, 'utf-8'));
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        writeFileSync(resolve(sandboxRoot, relPath), Buffer.from(`stale mirror for ${relPath}\n`, 'utf-8'));
       }
 
-      const output = runSyncTemplates();
+      const output = runSyncTemplates(sandboxRoot);
       expect(output).toContain('Synced');
 
-      for (const mirror of originals) {
-        expect(fileExists(mirror.relPath), `${mirror.relPath} should exist`).toBe(true);
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        expect(fileExists(relPath, sandboxRoot), `${relPath} should exist`).toBe(true);
         expect(
-          Buffer.compare(readFileBytes(mirror.relPath), canonicalBytes),
-          `${mirror.relPath} should match ${canonicalPath}`
+          Buffer.compare(readFileBytes(relPath, sandboxRoot), canonicalBytes),
+          `${relPath} should match ${canonicalPath}`
         ).toBe(0);
       }
-    } finally {
-      for (const mirror of originals) {
-        if (mirror.original) {
-          writeFileSync(mirror.absPath, mirror.original);
-        } else {
-          rmSync(mirror.absPath, { force: true });
-        }
+    });
+  });
+
+  it('leaves package-local mirrors absent until a runtime path creates them', () => {
+    withSyncSandbox('template-sync-absent-mirror', (sandboxRoot) => {
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        rmSync(resolve(sandboxRoot, relPath), { force: true });
+        expect(fileExists(relPath, sandboxRoot), `${relPath} should start absent`).toBe(false);
       }
-    }
+
+      const output = runSyncTemplates(sandboxRoot);
+      expect(output).toContain('Synced');
+
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        expect(
+          fileExists(relPath, sandboxRoot),
+          `${relPath} should remain absent until a runtime path creates it`
+        ).toBe(false);
+      }
+    });
   });
 });
 
@@ -291,17 +328,6 @@ describe('squad.agent.md universe count', () => {
       const content = readFile(loc);
       const count = extractUniverseCount(content);
       expect(count).toBe(expectedCount);
-    });
-  }
-
-  for (const loc of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
-    it(`${loc} matches canonical content when present`, () => {
-      if (!fileExists(loc)) {
-        expect(fileExists(loc)).toBe(false);
-        return;
-      }
-
-      expect(Buffer.compare(readFileBytes(loc), readFileBytes(canonicalPath))).toBe(0);
     });
   }
 

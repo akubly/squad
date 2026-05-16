@@ -18,6 +18,14 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 **Gotchas:** `npm run build` runs both skill sync and template sync, so clean generated build fallout before staging. The repository-level scrub gate still reports strip-listed baseline paths outside the changed-file surface.
 
+### Piece 11b — mirror sync test hardening (2026-05-16T00:25:23.605-07:00)
+
+**Implemented:** The parity test now proves package-local mirrors refresh only when a runtime path has already materialized them, and it proves absent package-local mirrors stay absent after sync.
+
+**Key patterns:** Run mirror-mutation coverage inside an isolated sandbox so sync exercises real file refresh behavior without touching the checkout. Use one case for existing mirrors and a separate case for absent mirrors so both contracts stay explicit.
+
+**Gotchas:** A present-vs-absent branch inside one assertion can collapse into a no-op. Keep the existing-mirror test on a real stale file so the parity gate fails when sync stops refreshing that runtime copy.
+
 ### Piece 11a — canonical template fail-shut chain (2026-05-15T17:02:37.675-07:00)
 
 **Implemented:** The coordinator template now treats team-root lookup steps as probes, not gates. The final no-team path requires explicit negative evidence from CWD, git-root, registry, platform, and worktree probes before Init Mode can begin.
