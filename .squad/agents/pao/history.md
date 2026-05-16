@@ -49,6 +49,17 @@ Explicitly state what a skill produces and does NOT produce. Deterministic skill
 ### Teams MCP Audit
 External tool integrations require explicit "where to get it" guidance. Placeholder paths need clarification that users must provide actual MCP server implementations.
 
+### Rally familiarization & positioning (2026-05-15T22:45:19-07:00)
+
+**Positioning strategy captured:**
+- **Squad** is the primary multi-agent runtime and team operating model. It fits best when you want durable AI team state, explicit roles, and repo-visible or repo-adjacent team configuration as part of the way your team works.
+- **Rally** is the external operator shell for that runtime. It fits best for solo developers, maintainers, and contributors working in shared repos where committing `.squad/` state is not appropriate.
+- Rally's docs are consistent on one key message: it brings Squad to shared repositories without repo pollution by keeping team state outside the repo, using worktrees, and automating the issue/PR lifecycle. That complements Squad well, but only if Squad's own docs keep the product hierarchy clear: Rally is a companion path, not the default or the replacement.
+- **Messaging guidance:** (1) In Squad docs, describe Rally as the "shared-repo / solo-maintainer companion" to Squad. (2) Keep Squad centered as the durable team/runtime layer, not just memory or prompts. (3) Add explicit cross-links for users asking: "I want Squad, but I cannot commit `.squad/` into this repo." (4) Avoid framing Rally as required for normal Squad adoption.
+- **Suggested doc action:** Add a short README/FAQ comparison with scenarios: Use Squad directly when your project can adopt team files and wants the workflow in-repo. Use Rally with Squad when you want Squad's team memory and roles, but need worktree-driven, externalized state for shared or third-party repositories.
+
+📌 **Team update (2026-05-15T22:45:19Z — Rally Familiarization Complete & Decisions Merged):** Four-agent familiarization sprint on Rally completed. Flight analyzed Rally relationship to Squad (committable in-repo vs. non-committable external), EECOM documented technical integration (GitHub CLI host/agent split, `.worktrees/` patterns), Network analyzed distribution implications, PAO developed positioning strategy. Decisions drafted and merged to `.squad/decisions.md`: Rally Relationship, EECOM Technical Notes, Squad/Rally Positioning. Orchestration logs written (flight/eecom/network/pao). Session log created. All Rally learnings captured. Scribe archived inbox files and committed team state. Squadron ready for next cycle.
+
 ### Cross-Org Authentication Docs
 Problem/solution structure for multi-account auth: gh auth switch, Copilot instructions, Squad skill pattern. Cover credential helpers, EMU variations, common error messages. Cross-reference in troubleshooting and enterprise-platforms pages.
 
@@ -285,3 +296,31 @@ Completed full PRD based on research findings. **Document:** `docs/research/jsdo
 - Four-phase approach breaks large effort into digestible increments (Phase 0 validation before JSDoc audit helps mitigate risk of TypeDoc setup failing)
 
 **Decision:** PRD approved for handoff to implementation team. Ready for execution on next sprint.
+
+### Rally familiarization (2026-05-15T22:45:19-07:00)
+
+**Scope reviewed:** `d:\git\rally\README.md`, `docs/` structure + journey docs/PRD, and `docs-site/` structure with key guides, workflows, reference, and security pages.
+
+**Positioning summary:** Rally positions itself as the operator layer around Squad for people who want Squad's benefits without committing Squad state into the repo. Rally's repeated promise is: keep `.squad/` memory and team configuration outside the repository, use git worktrees for isolation, and automate the full issue/PR workflow that would otherwise take ~15 manual steps. Rally's docs frame Squad as the reusable team/memory substrate; Rally is the dispatch/dashboard/worktree product that makes that substrate practical on shared repos.
+
+**Target audience:** Individual developers, open-source maintainers, and contributors working on shared repositories where committing `.squad/` files is not appropriate. Rally explicitly says non-users are people who do not use Squad at all and people who are happy to commit Squad into the repo already.
+
+**Rally's elevator pitch:** "Rally your Squad" = use Squad on shared repos without polluting the repository. Rally gives you onboarding, worktree creation, dispatch, dashboard visibility, security controls, and consult mode so one personal Squad can follow you across many repos and many concurrent tasks.
+
+**What Rally makes Squad look like from the outside:** Through Rally's lens, Squad is a portable AI team plus memory system, a consult-mode-capable SDK/runtime, and the source of reusable team state. Rally does not present Squad primarily as the end-user product; it presents Squad as the engine/team layer underneath a cleaner operator UX. The strongest outside-world message is: Squad is powerful, but Rally removes the repo-clutter and workflow friction for solo/shared-repo usage.
+
+**Where Rally complements Squad:** Rally sharpens a message we should preserve: Squad is strongest when you want durable team state, reusable learnings, and explicit roles; Rally helps when that state should live outside the repo or when one person needs to operate across many repos/issues. Good complement: Squad = committed team system/runtime; Rally = externalized dispatch/worktree shell for personal or maintainer workflows.
+
+**Messaging alignment / polite divergence:**
+- **Align with:** Rally's framing that Squad provides durable team memory, reusable roles, and consult-mode-style reuse across tasks.
+- **Align with:** shared-repo friendliness — we should explicitly acknowledge that not every repo wants committed `.squad/` state.
+- **Politely diverge from:** any implication that Rally is the default way to use Squad. Our docs should keep Squad centered as the primary product for teams who want the AI workflow in-repo and under version control.
+- **Politely diverge from:** Rally's occasional simplification that Squad mainly equals memory + roles. Our README/docs should keep the stronger description: programmable multi-agent runtime / team operating model, not just saved prompts.
+
+**Concrete doc cross-link opportunities:**
+1. Add a short "Using Squad on shared repos?" callout in the Squad README that points to Rally.
+2. In Squad docs, add a page or FAQ entry: "When to use Squad directly vs Rally".
+3. In onboarding/getting-started docs, mention Rally as the path for solo maintainers or contributors who cannot commit `.squad/` files.
+4. In Rally-facing references from Squad, describe Rally as an external operator/worktree companion rather than a replacement.
+
+**Noted doc nuance:** Rally has a useful, consistent story about repo cleanliness and externalized team state. That is worth echoing. Its docs also surface a few wording inconsistencies around read-only defaults vs local edits; we should borrow the positioning clarity, not necessarily every implementation-detail phrase.

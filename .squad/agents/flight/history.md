@@ -16,7 +16,19 @@
 
 Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary review heuristic: "Squad Ships It" — if Squad doesn't ship the code, it's IRL content. Proposal-first: meaningful changes need docs/proposals/ before code. Two-error lockout policy: agent locked out after 2 errors in a session. Test name-agnosticism: framework tests must never depend on dev team's agent names.
 
-## Learnings
+📌 **Team update (2026-05-15T22:45:19Z — Rally Familiarization Complete & Decisions Merged):** Four-agent familiarization sprint on Rally completed. Flight analyzed Rally relationship to Squad (committable in-repo vs. non-committable external), EECOM documented technical integration (GitHub CLI host/agent split, `.worktrees/` patterns), Network analyzed distribution implications, PAO developed positioning strategy. Decisions drafted and merged to `.squad/decisions.md`: Rally Relationship, EECOM Technical Notes, Squad/Rally Positioning. Orchestration logs written (flight/eecom/network/pao). Session log created. All Rally learnings captured. Scribe archived inbox files and committed team state. Squadron ready for next cycle.
+
+## Core Context
+
+### Rally familiarization (2026-05-15T22:45:19-07:00)
+- **What Rally is:** a standalone CLI that dispatches Squad teams to GitHub issues/PRs through isolated git worktrees. It is built for solo/open-source/shared-repo workflows where committing `.squad/` files into the target repo is not appropriate.
+- **How it integrates with Squad:** Rally depends on `@bradygaster/squad-sdk`, sets up **consult mode** in each worktree, and can symlink `.squad/`, `.squad-templates/`, and `.github/agents/squad.agent.md` into onboarded repos. Rally is not a parallel agent system; it is an operator/orchestration shell around Squad.
+- **Responsibility split:** Squad owns team identity, prompts, governance, runtime semantics, and the agent contract. Rally owns repo onboarding, worktree lifecycle, issue/PR dispatch, session tracking, dashboard UX, trust prompts, and optional sandboxing.
+- **State model:** Rally stores its own operational state in `~/rally` (`config.yaml`, `projects.yaml`, `active.yaml`) with atomic writes and lock files. That keeps shared repos mostly clean while still letting each worktree carry local context/log files.
+- **Safety model:** Rally prepends a read-only dispatch policy, denies `gh`, `git push`, and common network shells by default, and offers trust checks plus Docker sandboxing. Its posture is “analyze and prepare locally; human reviews/publishes.”
+- **Product pattern worth noting:** Rally treats terminal UX as a first-class product surface — Ink/React dashboard for TTY, plain-text dashboard for non-TTY, and docs generated from E2E journey tests. This is a stronger operator-console stance than Squad’s in-repo team-state model.
+- **Roadmap implication for Squad:** Rally now depends on **stable consult-mode + personal-squad semantics** from Squad SDK/CLI. Any Squad change to personal squad resolution, agent-file layout, or consult-mode behavior can break Rally’s external workflow.
+- **Boundary to preserve:** Squad remains the committable, in-repo team framework; Rally is the complementary path for non-committable/shared-repo dispatch. If Squad ever expands into Rally-style external orchestration, that should be an explicit product decision, not accidental overlap.
 
 ### Issue Filing Patterns (2026-03-23 Release Incident)
 When a major incident occurs, file 9+ GitHub issues documenting root causes and improvements. Pattern: one issue per root cause + one per action item. Use descriptive titles linking to specific improvements (e.g., "#556 Dependency validation in pre-publish checks"). Let team pick up issues in priority order. This accelerates fixes and creates accountability.

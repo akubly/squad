@@ -2,6 +2,8 @@
 
 > Environmental, Electrical, and Consumables Manager
 
+📌 **Team update (2026-05-15T22:45:19Z — Rally Familiarization Complete & Decisions Merged):** Four-agent familiarization sprint on Rally completed. Flight analyzed Rally relationship to Squad (committable in-repo vs. non-committable external), EECOM documented technical integration (GitHub CLI host/agent split, `.worktrees/` patterns), Network analyzed distribution implications, PAO developed positioning strategy. Decisions drafted and merged to `.squad/decisions.md`: Rally Relationship, EECOM Technical Notes, Squad/Rally Positioning. Orchestration logs written (flight/eecom/network/pao). Session log created. All Rally learnings captured. Scribe archived inbox files and committed team state. Squadron ready for next cycle.
+
 ## Learnings
 
 ### Template Brady contamination fix (#977) (2026-05-01)
@@ -326,4 +328,18 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 
 **Pattern:** `resolveGlobalSquadPath()` returns the container; `ensurePersonalSquadDir()` creates the subdirectory the rest of the system looks for.
 📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
+
+### Rally familiarization (2026-05-15T22:45:19-07:00)
+
+- **Entry points:** `bin/rally.js` is the commander entrypoint. `dashboard` is the primary UX. Repo resolution lives in `lib/dispatch.js`; issue/PR dispatch flows live in `lib/dispatch-issue.js` and `lib/dispatch-pr.js`; shared setup lives in `lib/dispatch-core.js`.
+- **Worktree creation:** Rally creates branches with `git worktree add {repo}\.worktrees\rally-{issue}` or `rally-pr-{pr}` via `lib/worktree.js`. Branch names are `rally/{issue}-{slug}` or `rally/pr-{pr}-{slug}`. Existing registered worktrees are reused; stale unregistered worktrees are removed and recreated.
+- **PR setup:** PR dispatch creates the worktree first, then runs `gh pr checkout <number> --detach` inside it before writing context. Review context is written to `.squad/dispatch-context.md`; issue dispatch writes analogous issue context there too.
+- **Agent launch model:** `lib/copilot.js` spawns detached `gh copilot` sessions, usually with `--agent squad`, `--allow-all-tools`, and a deny list. Rally prepends a read-only dispatch policy and can swap the launcher to `docker sandbox run copilot ...` for sandboxed runs.
+- **Parallel dispatch management:** Rally tracks every dispatch in `~/rally/active.yaml`, guarded by a mkdir-based lock plus atomic writes (`lib/active.js`, `lib/config.js`). The Ink dashboard refreshes every 5s; `lib/dispatch-refresh.js` advances `implementing -> reviewing` only after the Copilot PID exits and the log contains Copilot's completion marker (`Total session time:`), then upgrades PID placeholders to real session UUIDs by parsing `.copilot-output.log`.
+- **`.squad/` synchronization:** onboarding symlinks the main project checkout to the personal squad for `.squad/`, `.squad-templates/`, and `.github/agents/squad.agent.md` (`lib/onboard.js`). **Dispatched worktrees do not reuse those symlinks.** Instead Rally calls Squad SDK `setupConsultMode()` to copy the personal squad into the worktree-local `.squad/`, writes consult-mode config/agent metadata, patches Scribe for extraction, hides the copied state via `git rev-parse --git-path info/exclude`, and later calls `extractLearnings({ clean: true })` during cleanup to merge generic learnings back home.
+- **GitHub transport split:** Rally itself talks to GitHub almost entirely through `gh` / `gh api` (`gh repo clone`, `gh issue/pr view/list`, `gh pr checkout`, trust checks via `gh api user` and org membership). I found no Octokit/API client layer. Once the agent is launched, Rally *denies* `gh` inside the Copilot session and expects GitHub MCP read tools instead.
+- **Patterns worth borrowing:**
+  - Rally places worktrees under `{repo}\.worktrees\...` instead of sibling directories. That means Node module resolution can naturally walk up to the main repo's `node_modules`, avoiding the explicit `node_modules` junction/symlink step our coordinator prompt still documents.
+  - Rally's host/agent split is clean: host process uses `gh` for orchestration, dispatched agent gets local repo access plus MCP reads but no `gh push`/network tools.
+  - Rally has concrete dispatch bookkeeping (`active.yaml` + lock + log/PID refresh) that is more operationally complete than our coordinator prompt's mostly procedural worktree lifecycle guidance.
 

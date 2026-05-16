@@ -240,3 +240,115 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 - #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision
 - #581 (ADO PRD) — P2, blocked until #341 (SDK-first parity) ships
 
+---
+
+### 2026-03-26: CI deletion guard and source tree canary
+**By:** Booster (CI/CD)
+**What:** Added two safety checks to squad-ci.yml: (1) source tree canary verifying critical files exist, (2) large deletion guard failing PRs that delete >50 files without 'large-deletion-approved' label. Branch protection on dev requested (may need manual setup).
+**Why:** Incident #631 — @copilot deleted 361 files on dev with no CI gate catching it.
+
+---
+
+### 2026-03-26: Copilot git safety rules
+**By:** RETRO (Security)
+**What:** Added mandatory Git Safety section to copilot-instructions.md: prohibits `git add .`, requires feature branches and PRs, adds pre-push checklist, defines red-flag stop conditions.
+**Why:** Incident #631 — @copilot used destructive staging on an incomplete working tree, deleting 361 files.
+
+---
+
+### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
+**By:** Flight (Lead)
+**Status:** DECIDED
+**Confidence:** Medium (confirmed by PR #640 incident, PR #116 prerelease leak, CI gate implementation)
+
+**Decision:**
+1. All packages use strict semver (`MAJOR.MINOR.PATCH`). No prerelease suffixes on `dev` or `main`.
+2. Prerelease versions are ephemeral. `bump-build.mjs` creates `-build.N` for local testing only — never committed.
+3. SDK and CLI versions must stay in sync. Divergence silently breaks npm workspace resolution.
+4. Surgeon owns version bumps. Other agents must not modify `version` fields in `package.json` unless fixing a prerelease leak.
+5. CI enforcement via `prerelease-version-guard` blocks PRs with prerelease versions. `skip-version-check` label is Surgeon-only.
+
+**Why:** The repo had no documented versioning policy. This caused two incidents:
+- **PR #640:** Prerelease version `0.9.1-build.4` silently broke workspace resolution. The semver range `>=0.9.0` does not match prerelease versions, causing npm to install a stale registry package instead of the local workspace link. Four PRs (#637–#640) patched symptoms before the root cause was found.
+- **PR #116:** Surgeon set versions to `0.9.1-build.1` instead of `0.9.1` on a release branch because there was no guidance on what constitutes a clean release version.
+
+**Skill Reference:** Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
+
+**Impact:** All agents must follow the versioning policy when touching `package.json`. Surgeon charter should reference this skill for release procedures. CI pipeline enforces the policy via automated gate.
+
+---
+
+### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
+**Author:** Booster (CI/CD Engineer)
+**Status:** Implemented
+
+**Summary:** Updated both release-process skill files with critical learnings from the v0.9.4 release session. The v0.9.4 release was delayed by three distinct issues, each fixed by a separate PR.
+
+**Files Updated:**
+1. `.squad/skills/release-process/SKILL.md` (team-level skill)
+2. `.copilot/skills/release-process/SKILL.md` (copilot-level skill)
+3. `.squad/agents/booster/history.md` (learnings log)
+
+**New Knowledge Added:**
+| Issue | Root Cause | Fix PR | Skill Section |
+|-------|-----------|--------|---------------|
+| Root package.json version drift | squad-release.yml reads from root, not sub-packages | #1043 | Known Gotchas + v0.9.4 Incident Learnings |
+| CHANGELOG missing `## [$VERSION]` | Workflow validates version entry exists | #1042 | Known Gotchas + Release Checklist |
+| Lockfile integrity check rejects workspace packages | Check didn't filter for registry-only packages | #1044 | Known Gotchas + Common Failure Modes |
+| GITHUB_TOKEN can't trigger downstream workflows | GitHub security feature prevents event propagation | N/A (design) | GITHUB_TOKEN section + Manual Publish |
+| Prebuild bump breaks workspace linking | bump-build.mjs mutates versions breaking exact match | N/A (known) | Local Development section |
+
+**Cross-References:** Added bidirectional cross-references between team-level and copilot-level skill files. Added PR references (#1042, #1043, #1044) as source evidence throughout.
+
+**Rationale:** These are high-impact, recurring failure modes. Documenting them in the skill files ensures every agent (human or AI) working on releases has the knowledge to avoid repeating the v0.9.4 delays. The GITHUB_TOKEN limitation in particular is non-obvious and would catch any future release.
+
+---
+
+### 2026-05-15: Rally Relationship to Squad
+**By:** Flight (Lead)
+**Requested by:** Brady (via Rally familiarization request)
+**Status:** DECIDED
+
+**Decision:**
+1. Squad remains the committable, in-repo team framework. Its home model is repository-visible team state (`.squad/`, decisions, histories, routing, prompts).
+2. Rally is the sanctioned complementary path for non-committable/shared-repo workflows. It should be treated as the external dispatch/orchestration layer for solo devs, OSS maintainers, forks, and shared repos where committing Squad state is undesirable.
+3. Consult mode is now a compatibility surface. Squad SDK/CLI changes to personal squad resolution, consult-mode wiring, or agent file layout must consider Rally as a downstream consumer.
+4. Do not blur the products by accident. Features that belong to Rally's operator console (repo onboarding, worktree dispatch management, dashboard/session bookkeeping) should not drift into Squad core unless we explicitly choose to converge product lines.
+
+**Why:** Rally is not a clone of Squad. It wraps Squad with worktree orchestration, repo registration, dashboard UX, trust gating, and read-only dispatch controls, while relying on Squad for team behavior and agent semantics. That makes the relationship complementary, but it also means Squad now has an external consumer whose workflow depends on stable consult-mode behavior.
+
+**Impact:** Squad roadmap discussions should assume two deployment models: committable/in-repo (Squad) and non-committable/external (Rally). Changes to personal squad, consult mode, and `.github/agents/squad.agent.md` layout need compatibility review for Rally. Product overlap with Rally should require an explicit decision, not organic duplication.
+
+---
+
+### 2026-05-15: EECOM — Rally Technical Integration Notes
+**By:** EECOM (Core Dev)
+**Requested by:** Brady (via Rally familiarization request)
+
+**Key Technical Notes:**
+- Rally uses `gh`/`gh api` as its host-side GitHub control plane, not Octokit. Cloning, issue/PR fetches, PR checkout, browser open, and trust/org checks all go through GitHub CLI wrappers in `lib/onboard.js`, `lib/dispatch-issue.js`, `lib/dispatch-pr.js`, `lib/picker.js`, and `lib/dispatch-trust.js`.
+- Rally intentionally flips that rule inside spawned agents. `lib/copilot.js` denies `shell(gh)` (and `git push`, `curl`, `wget`, `ssh`, etc.) for dispatched Copilot runs and tells the agent to use GitHub MCP read tools instead. Host orchestration uses `gh`; in-worktree agents get local edits + MCP reads, but not GitHub CLI mutation power.
+- Rally's `.worktrees/` placement is an implementation detail worth borrowing. Dispatch worktrees live under `{repo}\.worktrees\...`, so Node.js projects can often reuse the main checkout's `node_modules` through normal parent-directory resolution without explicit junction/symlink setup. Current coordinator worktree guidance still documents sibling worktrees plus manual `node_modules` linking.
+
+---
+
+### 2026-05-15: Squad and Rally Positioning Strategy
+**By:** PAO (DevRel)
+**Requested by:** Brady (via Rally familiarization request)
+
+**Proposed Positioning:**
+- **Squad** is the primary multi-agent runtime and team operating model. It fits best when you want durable AI team state, explicit roles, and repo-visible or repo-adjacent team configuration as part of the way your team works.
+- **Rally** is the external operator shell for that runtime. It fits best for solo developers, maintainers, and contributors working in shared repos where committing `.squad/` state is not appropriate.
+
+**Why Record This:** Rally's docs are consistent on one key message: it brings Squad to shared repositories without repo pollution by keeping team state outside the repo, using worktrees, and automating the issue/PR lifecycle. That complements Squad well, but only if Squad's own docs keep the product hierarchy clear: Rally is a companion path, not the default or the replacement.
+
+**Messaging Guidance:**
+1. In Squad docs, describe Rally as the "shared-repo / solo-maintainer companion" to Squad.
+2. Keep Squad centered as the durable team/runtime layer, not just memory or prompts.
+3. Add explicit cross-links for users asking: "I want Squad, but I cannot commit `.squad/` into this repo."
+4. Avoid framing Rally as required for normal Squad adoption.
+
+**Suggested Doc Action:** Add a short README/FAQ comparison with scenarios:
+- **Use Squad directly** when your project can adopt team files and wants the workflow in-repo.
+- **Use Rally with Squad** when you want Squad's team memory and roles, but need worktree-driven, externalized state for shared or third-party repositories.
+
