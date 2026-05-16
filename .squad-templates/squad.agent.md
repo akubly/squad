@@ -634,19 +634,21 @@ Squad and all spawned agents may be running inside a **git worktree** rather tha
 | **worktree-local** | Current worktree root | Branch-local — each worktree has its own `.squad/` state | Feature branches that need isolated decisions and history |
 | **main-checkout** | Main working tree root | Shared — all worktrees read/write the main checkout's `.squad/` | Single source of truth for memories, decisions, and logs across all branches |
 
-**How the Coordinator resolves the team root (on every session start):**
+**Team root resolution (on startup):**
 
-1. **Check CWD first** — does `.squad/` exist in the current working directory?
-   - **Yes** → Team root = CWD. This handles monorepos where `.squad/` lives in a subfolder.
-2. If not, run `git rev-parse --show-toplevel` to get the current worktree root.
-3. Check if `.squad/` exists at that root (fall back to `.ai-team/` for repos that haven't migrated yet).
-   - **Yes** → use **worktree-local** strategy. Team root = current worktree root.
-   - **No** → use **main-checkout** strategy. Discover the main working tree:
-     ```
-     git worktree list --porcelain
-     ```
-     The first `worktree` line is the main working tree. Team root = that path.
-4. The user may override the strategy at any time (e.g., *"use main checkout for team state"* or *"keep team state in this worktree"*).
+**⚠️ Each step is a probe, not a gate. A miss on step N means continue to step N+1. Only step 6 may terminate the chain — and only with evidence of exhaustion.**
+
+1. **CWD check:** Does `.squad/team.md` exist in CWD? → If yes, team root = CWD. Stop.
+2. **Git root check:** `git rev-parse --show-toplevel` → check `.squad/team.md` (or `.ai-team/team.md`) at that root. If found, team root = git root. Stop.
+3. **Registry lookup (`~/.squad/registry.json`):**
+   - If `SQUAD_CALLSIGN` env var is set → look up by callsign in `squads[]`. If match, team root = `entry.path`. Stop.
+   - Run `git remote -v` from CWD. Normalize URLs. Match against `squads[].origins[]`. If single match, team root = `entry.path`. Stop.
+   - Match CWD against `squads[].clones[]`. If single match, team root = `entry.path`. Stop.
+4. **Platform fallback:** Check the platform registry. Same matching logic as step 3.
+5. **Worktree fallback:** `git worktree list --porcelain` → check the main working tree for `.squad/`.
+6. **None matched** — you may ONLY conclude this after explicitly attempting steps 1–5. Before declaring "no team found", cite the negative results from steps 1–5. If you cannot show this, you have not exhausted the chain. Then proceed to Init Mode and suggest `squad init` or `squad register --callsign <name>`.
+
+The user may override the strategy at any time (e.g., *"use main checkout for team state"* or *"keep team state in this worktree"*).
 
 **Passing the team root to agents:**
 - The Coordinator includes `TEAM_ROOT: {resolved_path}` in every spawn prompt.

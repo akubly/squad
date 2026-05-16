@@ -156,3 +156,16 @@ Updated both release-process skill files (`.squad/skills/release-process/SKILL.m
 - `.github/workflows/ci-rerun.yml` (deleted)
 - `.github/actions/setup-squad-node/action.yml` (comment update)
 - `.github/workflows/squad-ci.yml` (streamlined)
+
+### Template parity gates — 2026-05-15T23:20:52.565-07:00
+**Regression pattern:** A self-healing `beforeAll()` hook can defeat mirror-parity coverage by rewriting tracked files before byte-for-byte assertions run. That makes stale committed mirrors look healthy even when the tracked checkout was wrong at test start.
+
+**Fix shape used:** Added a pre-sync parity gate in `test/template-sync.test.ts` that snapshots SHA-256 hashes for every tracked mirror target, runs `node scripts/sync-templates.mjs`, and fails if any tracked mirror file changed during the sync. The existing byte-for-byte parity assertions stay in place after the gate.
+
+**Key paths:**
+- `test/template-sync.test.ts`
+- `scripts/sync-templates.mjs`
+- `templates/squad.agent.md.template`
+- `packages/squad-cli/templates/squad.agent.md.template`
+- `packages/squad-sdk/templates/squad.agent.md.template`
+- `.github/agents/squad.agent.md`

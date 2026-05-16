@@ -10,6 +10,14 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings — Active
 
+### Piece 11a — canonical template fail-shut chain (2026-05-15T17:02:37.675-07:00)
+
+**Implemented:** The coordinator template now treats team-root lookup steps as probes, not gates. The final no-team path requires explicit negative evidence from CWD, git-root, registry, platform, and worktree probes before Init Mode can begin.
+
+**Key patterns:** Update the canonical `.squad-templates/squad.agent.md` source first, then run the template sync script so root, package, and installed mirrors stay byte-for-byte aligned. Pair prompt governance changes with semantic template assertions in `test/template-sync.test.ts`, not only mirror parity.
+
+**Gotchas:** The template sync test reads canonical content directly and also runs the sync script; assertions should allow Markdown formatting around step labels. The repository-level scrub gate still reports existing strip-listed state paths outside this change, so review the changed-file surface separately.
+
 ### Piece 10 — init fail-fast (2026-05-15) 🔴 REJECTED — Locked Out
 
 **Session outcome:** REJECTED per strict lockout protocol. Adversarial review verdicts: Flight APPROVE (3 non-blocking notes), FIDO REJECT (6 blocking test gaps), RETRO APPROVE-WITH-FIXES (3 guard correctness gaps). 
