@@ -46,6 +46,10 @@ const MIRROR_TARGETS = [
 // squad.agent.md also goes to .github/agents/
 const AGENT_MD_TARGET = join(ROOT, '.github', 'agents');
 const AGENT_MD_FILE = 'squad.agent.md';
+const OPTIONAL_PACKAGE_AGENT_TARGETS = [
+  join(ROOT, 'packages', 'squad-cli', 'templates', AGENT_MD_FILE),
+  join(ROOT, 'packages', 'squad-sdk', 'templates', AGENT_MD_FILE),
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,6 +112,16 @@ for (const relFile of sourceFiles) {
   // Special case: squad.agent.md also goes to .github/agents/
   if (relFile === AGENT_MD_FILE && existsSync(AGENT_MD_TARGET)) {
     targets.push(join(AGENT_MD_TARGET, AGENT_MD_FILE));
+  }
+
+  // Optional package-local unsuffixed mirrors stay generated if runtime packaging
+  // needs active squad.agent.md copies inside the package templates directories.
+  if (relFile === AGENT_MD_FILE) {
+    for (const optionalTarget of OPTIONAL_PACKAGE_AGENT_TARGETS) {
+      if (existsSync(optionalTarget)) {
+        targets.push(optionalTarget);
+      }
+    }
   }
 
   if (targets.length === 0) continue;

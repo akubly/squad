@@ -10,6 +10,14 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings — Active
 
+### Piece 11b — mirror sync (2026-05-15T23:49:57.391-07:00)
+
+**Implemented:** `scripts/sync-templates.mjs` now refreshes unsuffixed package-local `squad.agent.md` mirrors when those files exist for runtime packaging, while keeping the tracked `.template` mirrors as the default package payload.
+
+**Key patterns:** Keep `.squad-templates/squad.agent.md` as the only governance source. Use `test/template-sync.test.ts` to prove both tracked mirrors and optional package-local mirrors return to canonical bytes after sync runs.
+
+**Gotchas:** `npm run build` runs both skill sync and template sync, so clean generated build fallout before staging. The repository-level scrub gate still reports strip-listed baseline paths outside the changed-file surface.
+
 ### Piece 11a — canonical template fail-shut chain (2026-05-15T17:02:37.675-07:00)
 
 **Implemented:** The coordinator template now treats team-root lookup steps as probes, not gates. The final no-team path requires explicit negative evidence from CWD, git-root, registry, platform, and worktree probes before Init Mode can begin.

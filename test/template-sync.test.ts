@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -29,11 +29,7 @@ let mirrorFilesChangedBySync: string[] = [];
 beforeAll(() => {
   const beforeSync = snapshotMirrorHashes(TRACKED_MIRROR_FILES);
 
-  execSync('node scripts/sync-templates.mjs', {
-    cwd: ROOT,
-    encoding: 'utf-8',
-    timeout: 60_000,
-  });
+  runSyncTemplates();
 
   const afterSync = snapshotMirrorHashes(TRACKED_MIRROR_FILES);
   mirrorFilesChangedBySync = TRACKED_MIRROR_FILES.filter(
@@ -140,6 +136,19 @@ function snapshotMirrorHashes(relPaths: readonly string[]): Map<string, string |
   return new Map(relPaths.map((relPath) => [relPath, hashFile(relPath)]));
 }
 
+function runSyncTemplates(): string {
+  return execSync('node scripts/sync-templates.mjs', {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 60_000,
+  });
+}
+
+const OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS = [
+  'packages/squad-cli/templates/squad.agent.md',
+  'packages/squad-sdk/templates/squad.agent.md',
+] as const;
+
 const CASTING_POLICY_LOCATIONS = [
   `${SOURCE_DIR}/casting-policy.json`,
   'templates/casting-policy.json',
@@ -208,13 +217,45 @@ describe('dynamic template enumeration (all synced files)', () => {
 
 describe('sync-templates.mjs script execution', () => {
   it('exits with code 0 (no syntax errors, no crashes)', () => {
-    // execSync throws on non-zero exit codes
-    const output = execSync('node scripts/sync-templates.mjs', {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
+    const output = runSyncTemplates();
     expect(output).toContain('Synced');
+  });
+});
+
+describe('optional package-local squad.agent.md mirrors', () => {
+  it('re-syncs unsuffixed package-local mirrors when they exist for runtime packaging', () => {
+    const canonicalPath = `${SOURCE_DIR}/${AGENT_MD_FILE}`;
+    const canonicalBytes = readFileBytes(canonicalPath);
+    const originals = OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS.map((relPath) => ({
+      relPath,
+      absPath: resolve(ROOT, relPath),
+      original: fileExists(relPath) ? readFileBytes(relPath) : null,
+    }));
+
+    try {
+      for (const mirror of originals) {
+        writeFileSync(mirror.absPath, Buffer.from(`stale mirror for ${mirror.relPath}\n`, 'utf-8'));
+      }
+
+      const output = runSyncTemplates();
+      expect(output).toContain('Synced');
+
+      for (const mirror of originals) {
+        expect(fileExists(mirror.relPath), `${mirror.relPath} should exist`).toBe(true);
+        expect(
+          Buffer.compare(readFileBytes(mirror.relPath), canonicalBytes),
+          `${mirror.relPath} should match ${canonicalPath}`
+        ).toBe(0);
+      }
+    } finally {
+      for (const mirror of originals) {
+        if (mirror.original) {
+          writeFileSync(mirror.absPath, mirror.original);
+        } else {
+          rmSync(mirror.absPath, { force: true });
+        }
+      }
+    }
   });
 });
 
@@ -250,6 +291,17 @@ describe('squad.agent.md universe count', () => {
       const content = readFile(loc);
       const count = extractUniverseCount(content);
       expect(count).toBe(expectedCount);
+    });
+  }
+
+  for (const loc of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+    it(`${loc} matches canonical content when present`, () => {
+      if (!fileExists(loc)) {
+        expect(fileExists(loc)).toBe(false);
+        return;
+      }
+
+      expect(Buffer.compare(readFileBytes(loc), readFileBytes(canonicalPath))).toBe(0);
     });
   }
 
