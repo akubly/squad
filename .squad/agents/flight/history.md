@@ -1,10 +1,46 @@
-# Flight — Project History
+# Flight — Project History Summary
 
 > Knowledge accumulated through leading Squad development.
 
+## SUMMARY: Casting & Team Identity
+
+Apollo 13 team model (names drawn from NASA Mission Control). Scribe always Scribe, Ralph always Ralph. Three-branch model: main/dev/insiders. Test name-agnosticism enforced (framework tests must never depend on agent names). Two-error lockout policy prevents cascading failures.
+
+## SUMMARY: Rally Integration Boundary
+
+Rally is standalone CLI for git-worktree dispatch to GitHub issues/PRs (non-committable `.squad/` scenario). Responsibility split: Squad owns team identity/prompts/governance/runtime semantics/agent contract. Rally owns onboarding/worktrees/issue dispatch/session tracking/dashboard/trust/sandboxing. Product pattern: Rally treats terminal UX first-class (Ink/React dashboard for TTY, plain-text for non-TTY, docs from E2E tests). Boundary to preserve: Squad = committable in-repo, Rally = complementary external path. If Squad expands into Rally-style orchestration, must be explicit decision.
+
+## SUMMARY: Release Governance & Incident Response
+
+Surgeon owns all publishing (not Coordinator). Strict playbook adherence. Document problems for recurrence prevention. CI/CD top priority. Written playbooks for everything. No improvisation. Issue filing pattern: 9+ issues per major incident (one per root cause + action item). Accelerates fixes, creates accountability.
+
+## SUMMARY: Adoption & Content Boundaries
+
+Three-tier opt-in system: Tier 1 (aggregate-only, `.github/adoption/`) ships first, Tier 2 (opt-in registry) designs next, Tier 3 (public showcase) launches at ≥5 opt-in projects. `.squad/` for team state only; never list individual repos without consent. "Squad Ships It" litmus test: if Squad doesn't ship the code/config, it's IRL content. Content triage skill codifies boundary review pattern.
+
+## SUMMARY: Remote Squad Access Rollout
+
+Phase 1: GitHub Discussions bot with `/squad` command (1 day, zero hosting). Phase 2: GitHub Copilot Extension via Contents API (1 week). Phase 3: Slack/Teams bot (2 weeks). Constraint: any remote solution must solve `.squad/` context access.
+
+## SUMMARY: Community & PR Strategy
+
+Proposal-first discipline: meaningful changes require proposal in `docs/proposals/` before code. Tamir PRs explicitly require proposal framing. 14-issue triage identified 3 duplicate/overlap pairs consolidating 6 PRs to 4. Crash recovery: 3 rounds of issue audit/PR review/merging yielded 10 merged (6 merge-plan, 3 community, 1 legacy), 3 closed duplicates, 6 awaiting revisions. Dev branch green (5,038 tests).
+
+## SUMMARY: SDK Architecture & Integration
+
+SDK Init Shore-Up PRD consolidated 6 SDK issues into 3-phase initiative (root causes: config sync gap, built-in member exclusion, CastingEngine bypass). Phases: (1) fix gaps (P1), (2) wire CastingEngine (P1), (3) full test matrix (P2). 4-sprint estimate to 100% parity. Owners: EECOM + CAPCOM (phases 1–2), FIDO + CAPCOM (phase 3).
+
+## SUMMARY: Distributed Mesh Integration
+
+Zero code changes pattern: skill files in templates/skills/, scripts in scripts/mesh/, docs in features/. mesh.json stays separate from squad.config.ts. Convention-first additive layer (invisible if unused). 125:1 ratio: 30 lines script vs 3,756 lines deleted federation code.
+
+## SUMMARY: Fork Relationship (2026-05-15)
+
+Treat `tamirdresher/squad` as **incubation lane**, not alternate trunk. Fork converges on same problem selection (scheduler automation, persistent Ralph, cross-squad discovery, state backends) with divergence in delivery shape (Tamir packages whole loops; Brady productizes safer primitives). For overlapping capabilities, use mainline as reference. For new capabilities, treat as proposals first. Watchlist: `feat/upstream-auto-sync` for potential adoption.
+
 ---
 
-📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution Complete):** Post-CLI crash recovery executed in 3 rounds. Round 1: Flight audited PR/issue state (found #617 merged, #619 conflicting, 3 dupes #605/#604/#602 open); FIDO verified baseline (5,038 tests ✅ green); Scribe merged stale inbox. Round 2: Flight closed 3 duplicate PRs with rationale; Procedures rebased PR #619 (model catalog) onto dev, resolved 3 merge conflicts, merged; FIDO reviewed 9 community PRs—approved 3 (#625/#603/#608), requested changes on 6 (package naming, file paths). Round 3: Coordinator merged 3 approved PRs. **10 PRs merged total** (6 merge-plan, 3 community, 1 legacy #592). **3 PRs closed** as duplicates. **6 PRs awaiting author revisions**. **Dev branch green** (5,038 tests). All merge-plan sequence complete. Draft #567 parked pending requirements. Decision inbox merged to decisions.md and deleted. Next: Monitor change-request PRs for author responses.
+📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution Complete):**Post-CLI crash recovery executed in 3 rounds. Round 1: Flight audited PR/issue state (found #617 merged, #619 conflicting, 3 dupes #605/#604/#602 open); FIDO verified baseline (5,038 tests ✅ green); Scribe merged stale inbox. Round 2: Flight closed 3 duplicate PRs with rationale; Procedures rebased PR #619 (model catalog) onto dev, resolved 3 merge conflicts, merged; FIDO reviewed 9 community PRs—approved 3 (#625/#603/#608), requested changes on 6 (package naming, file paths). Round 3: Coordinator merged 3 approved PRs. **10 PRs merged total** (6 merge-plan, 3 community, 1 legacy #592). **3 PRs closed** as duplicates. **6 PRs awaiting author revisions**. **Dev branch green** (5,038 tests). All merge-plan sequence complete. Draft #567 parked pending requirements. Decision inbox merged to decisions.md and deleted. Next: Monitor change-request PRs for author responses.
 
 📌 **Team update (2026-03-25T15:23Z — Triage Session & PR Review):** Flight triaged 14 untriaged GitHub issues, created prioritized work session plan. Identified high-value quick wins (P1): #610 (docs broken link, 5-min fix), #590 (getPersonalSquadRoot bug, P0), #591 (hiring wiring docs). Deferred community feature contributions (#601–#595) pending PR review. Categorized maintenance (P2) and questions for community. FIDO reviewed 10 open PRs, identified 3 duplicate/overlap pairs (6 PRs consolidate to 4: merge #607/#603/#606, close #605/#604/#602). Work session priority: #610→PAO, #590→EECOM, #592/#611→Flight review, #588→Procedures. Established PR review strategy: Tamir PRs require proposal-first discipline before review. Merge-ready identified: #611 (blocked on #610), #592 (joniba wiring guide, high-quality). A2A protocol PRs remain shelved. All 14 issues fully categorized with squad assignments. Decision inbox merged to decisions.md. Session complete; team ready for execution.
 
@@ -197,3 +233,14 @@ Decision written to `.squad/decisions/inbox/flight-release-hardening-plan.md`.
 **Pattern:** Tamir is a high-output contributor (6 PRs in 2 weeks) but needs proposal-first discipline. Joniba and diberry deliver MSFT-level quality.
 
 Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
+
+## Learnings
+
+### Fork familiarization — tamirdresher/squad (2026-05-15T22:57:50-07:00)
+- Tamir’s fork is not wandering randomly; it is exploring a coherent operating model: durable autonomous ops (`persistent-ralph` + `squad-scheduler`), multi-squad mesh coordination (`cross-squad-orchestration`), inherited/shared context between squads (`upstream-auto-sync`), and Git-native state storage (`state-backend-global-996`).
+- The strongest convergence signal is that Brady mainline now contains the same core primitives: `packages/squad-sdk/src/runtime/scheduler.ts`, `packages/squad-sdk/src/runtime/cross-squad.ts`, `packages/squad-cli/src/cli/commands/upstream.ts`, `packages/squad-sdk/src/state-backend.ts`, and the current docs for persistent Ralph / scheduler / cross-squad / state backends. Tamir’s fork is functioning as an incubation lane for ideas Brady is willing to productize.
+- `feat/state-backend-global-996` is the clearest proof of adoption: compared to `bradygaster/squad` `dev`, it is now **behind only** (`aheadBy: 0`, `behindBy: 25`). Translation: the branch’s state-backend work has effectively been absorbed upstream and then advanced further.
+- The main strategic divergence is **automation scope**. Tamir tends to push end-to-end systems (auto-propagation, heartbeat workflows, broad template + doc + runtime bundles), while Brady mainline narrows those ideas into safer primitives with clearer operator control and proposal/governance gates.
+- `feat/upstream-auto-sync` is the branch Brady should keep watching. Mainline already has upstream inheritance, but Tamir’s branch is explicitly about bidirectional sync + propagation; that is a bigger collaboration model than today’s inheritance-focused implementation and could become important if Squad leans harder into fork/network workflows.
+- Secondary watch item: the `persistent-ralph` + `squad-scheduler` pairing. Mainline has both primitives, but Tamir is using them as an always-on operations loop; if Squad wants stronger autonomous maintenance, that combined operational pattern is the next likely adoption surface.
+- Flight takeaway: treat Tamir’s fork as a strategy probe, not merely a contributor fork. When evaluating future Tamir branches, ask whether they introduce a genuinely new primitive or just a more aggressive automation layer on top of capabilities Brady already adopted.

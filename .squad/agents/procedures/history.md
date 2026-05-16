@@ -1,19 +1,34 @@
-# Procedures
+# Procedures — Project History Summary
 
 > Standard Operating Procedures & Spec Writer
 
-## Learnings
+## SUMMARY: Deterministic Skill Architecture
 
-### Issue Triage (2026-03-22T06:44:01Z)
+Skills must be fully deterministic: (1) SCOPE section with exact artifacts (THIS SKILL PRODUCES / DOES NOT PRODUCE), (2) AGENT WORKFLOW with step-by-step instructions (ASK / GENERATE / WRITE / TELL / STOP), (3) Decision template showing exactly what to write. Tested in mesh-demo: loose skills generated 76 validator lines, 5 test files (43 tests), regenerated sync scripts that should have been copied, left decisions empty. Loose interpretation vs. explicit steps was root cause.
 
-**Flight triaged 6 unlabeled issues and filed 1 new issue.**
+## SUMMARY: Coordinator Prompt Optimization
 
-Procedures assigned:
-- **#485 (Agent Specification PRD)** → squad:flight + squad:procedures (architecture decision + formal spec structure)
+Extract ~350 lines (~37%) to lazy-loaded templates (worktree-reference.md, ralph-reference.md, casting-reference.md, mcp-reference.md). Reduce from 950→600 lines, making routing constraint larger percentage of total. Keep coordinator focused on routing/enforcement. Push domain-specific or optional behavior into skills to avoid saturation.
 
-Pattern: Agent specification gap identified. Procedures owns formal spec structure and documentation; Flight owns architecture decisions.
+## SUMMARY: Team Role & Spec Ownership
 
-📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution & Model Catalog Merge):** Procedures executed Round 2 PR merge action: rebased PR #619 (model catalog refresh, issue #588) onto dev branch from main, resolved 3 merge conflicts, and successfully merged. Model catalog now current: default model bumped to `claude-sonnet-4.6` (latest standard-tier Claude), specialist bumped to `gpt-5.3-codex` (latest code-writing specialist), fallback chains restructured to include new models (`gpt-5.4`, `gpt-5.4-mini`) and removed dead models (`claude-opus-4.6-fast`). All 6 original merge-plan PRs (#620, #627, #624, #611, #617, #619) now ✅ complete. Dev branch green (5,038 tests). Decision inbox merged to decisions.md and deleted. Next: Ready for follow-on feature PRs.
+Flight owns triage + work routing. Procedures owns formal spec structure + documentation. Agent specification PRD (#485) assigned to both as pattern: architecture decisions from Flight, formal spec structure from Procedures. When evaluating prompt-layer changes: ask "Does this need always-loaded coordinator text, or can it be a skill?"
+
+## SUMMARY: Model Catalog & Governance
+
+Model catalog refresh (PR #619): default bumped to `claude-sonnet-4.6`, specialist to `gpt-5.3-codex`. Fallback chains restructured (`gpt-5.4`, `gpt-5.4-mini` added; `claude-opus-4.6-fast` removed). 6 merge-plan PRs all merged. Dev green (5,038 tests). Persistent model preference (Layer 0) documented. Economy mode adds Layer 3 table + spawn convention. Personal squad adds consult mode detection + path reference table.
+
+## SUMMARY: Wave 1 Personal Squad Initiative
+
+Economy mode governance proposal and personal squad consult-mode governance proposal both DRAFT, awaiting Flight review before merging to squad.agent.md. Proposed new skill: `.squad/skills/consult-mode/SKILL.md` (post-approval). Deterministic skill pattern proven effective. PR #503 open with skills module. All design gaps resolved.
+
+## SUMMARY: Fork Prompt Ideas Pattern (2026-05-15)
+
+Fork prompt ideas should land as **lazy-loaded skills first**, not always-loaded coordinator text. Only promote to coordinator layer when closing verified failure or establishing hard governance rule. Fork's strongest ideas (`fact-checking`, `iterative-retrieval`, `error-recovery`, `notification-routing`, `scheduled-tasks`) are already packaged as skills/templates—matches Squad's existing direction. Weak candidates attempt mandatory ceremony (always-on Challenger checks, Ralph pre-empting all dispatch). These increase ceremony cost + prompt weight without addressing known coordinator failure.
+
+---
+
+📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution & Model Catalog Merge):**Procedures executed Round 2 PR merge action: rebased PR #619 (model catalog refresh, issue #588) onto dev branch from main, resolved 3 merge conflicts, and successfully merged. Model catalog now current: default model bumped to `claude-sonnet-4.6` (latest standard-tier Claude), specialist bumped to `gpt-5.3-codex` (latest code-writing specialist), fallback chains restructured to include new models (`gpt-5.4`, `gpt-5.4-mini`) and removed dead models (`claude-opus-4.6-fast`). All 6 original merge-plan PRs (#620, #627, #624, #611, #617, #619) now ✅ complete. Dev branch green (5,038 tests). Decision inbox merged to decisions.md and deleted. Next: Ready for follow-on feature PRs.
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. Procedures owns Agent Specification PRD structure (#485). Architecture decisions from Flight. Coordinate on formal spec format and standard structure for future agent definitions.
 # Procedures — Project History
@@ -213,4 +228,16 @@ Also updated: examples section (showing `name` + `description` pairs), anti-patt
 **Files modified:** `.github/copilot-instructions.md`, `.copilot/skills/protected-files/SKILL.md` (new).
 
 **Pattern:** When trimming agent instructions, extract domain-specific reference content to skills (lazy-loaded on demand) and keep the main instructions file as a routing/workflow document. Skills are the right abstraction for "read this when you touch X" — they don't consume tokens until needed.
+
+### Fork familiarization — tamirdresher/squad (prompt layer)
+
+**Date:** 2026-05-15T22:57:50-07:00
+
+- `.github/agents/squad.agent.md` on `feat/persistent-ralph` only changes the stamped version (`0.8.25-build.10` → `0.8.25-build.5`); implication: that branch is not exploring new coordinator behavior at the prompt layer.
+- `.squad/skills/cross-squad/SKILL.md` on `feat/cross-squad-orchestration` introduces manifest-driven cross-repo delegation (`.squad/manifest.json`, `squad discover`, `squad delegate`); implication: good external orchestration pattern, but it is already present locally, so not fork-only prompt divergence for us.
+- `.squad/skills/fact-checking/SKILL.md` plus `.squad/templates/agents/challenger.md` on `feat/fact-checking-skill` add a Challenger reviewer with evidence tables, counter-hypothesis checks, and a 3-cycle investigation budget; implication: worth considering as an optional reviewer skill/template, but auto-triggering it before every architecture decision would add prompt weight and ceremony pressure.
+- `.squad/skills/tiered-history/SKILL.md` on `feat/tiered-history-skill` proposes a hot/cold `history.md` split with issue-tag retrieval and Scribe archival rules; implication: the slimming direction matches our prompt-budget work, but the branch is the narrower 2-tier variant already superseded in local decisions by the broader tiered-memory proposal.
+- `.squad/templates/ceremonies.md` plus `.squad/templates/ralph-reference.md` on `feat/weekly-retro-ceremony` add a Ralph-enforced weekly retrospective, GitHub-issue action tracking, and a quarterly model review; implication: the ceremony content is reusable, but hard pre-dispatch retro enforcement should stay optional and skill/template-driven rather than becoming core coordinator behavior.
+- `packages/squad-cli/templates/skills/{directive-capture,error-recovery,reflect,iterative-retrieval,notification-routing,scheduled-tasks,ceremony-templates}/SKILL.md` show Tamir packaging prompt patterns as reusable skills instead of inline coordinator text; implication: the reusable-skill packaging is the strongest fork pattern to borrow, especially for error recovery, iterative retrieval, notification routing, and scheduled tasks.
+- `feat/communication-adapter` and `feat/rename-subsquads` mainly change runtime/docs surfaces, not the coordinator/agent prompt files; implication: treat them as adjacent product work, not prompt-architecture divergence.
 

@@ -2,6 +2,53 @@
 
 > Team decisions that all agents must respect. Managed by Scribe.
 
+---
+
+## 2026-05-15: Fork Relationship & Integration Strategy
+
+### Strategic relationship to tamirdresher/squad fork
+
+**By:** Flight  
+**Date:** 2026-05-15T22:57:50-07:00
+
+Treat `tamirdresher/squad` as an **incubation lane**, not an alternate trunk. When a Tamir branch addresses a capability that already exists in `bradygaster/squad`, use mainline as the reference implementation. When a Tamir branch proposes a capability beyond current mainline scope, treat it as a proposal candidate first. Keep `feat/upstream-auto-sync` on the watchlist as the clearest branch extending beyond current upstream inheritance semantics.
+
+**Rationale:** Fork convergence on problem selection (scheduler-backed automation, persistent Ralph, cross-squad discovery, state backends) with divergence in delivery shape (Tamir packages whole loops, Brady productizes safer primitives). `feat/state-backend-global-996` demonstrates pattern: now behind-only, meaning core direction was accepted upstream then evolved further. Fork most useful as early-warning stream, not long-lived source of truth.
+
+**Operating Guidance:**
+1. Read Tamir branch names as signals about where community energy concentrates
+2. Compare concepts and operator model for overlapping branches, not raw diff size
+3. Require proposal-first framing for new automation-heavy branches before upstream adoption
+4. Revisit if Squad moves toward stronger fork-to-fork propagation workflows
+
+---
+
+### Fork prompt ideas should land as lazy-loaded skills first
+
+**Date:** 2026-05-15T22:57:50-07:00  
+**Author:** Procedures
+
+When borrowing prompt-layer ideas from fork, prefer **lazy-loaded skills, templates, or reference files** over adding more always-loaded coordinator text. Only promote a fork idea into `.github/agents/squad.agent.md` when it closes a verified coordinator failure or establishes a hard governance rule.
+
+**Why:** Fork's strongest ideas (`fact-checking`, `iterative-retrieval`, `error-recovery`, `notification-routing`, `scheduled-tasks`) are packaged as skills/templates—matching existing direction. Weaker candidates make optional behavior mandatory at coordinator layer, increasing ceremony cost and prompt weight without addressing known coordinator failure as directly.
+
+**Implications:**
+- Good fork candidates should enter Squad as optional skills/templates first
+- Ceremony/scheduler/reviewer behavior should stay opt-in unless Flight approves governance change
+- Prompt reviews should ask: "Does this need always-loaded coordinator text, or can it be a skill?"
+
+---
+
+### State backend integration priority: evaluate feat/state-backend-global-996
+
+**Date:** 2026-05-15T22:57:50-07:00
+**Author:** EECOM
+
+Before adding more squad-home / cross-machine state work on `dev`, evaluate Tamir's `feat/state-backend-global-996` design as the primary integration candidate rather than building a second parallel state mobility stack.
+
+**Why:** It's the fork's heaviest code branch, landing in modules Squad already owns: `packages/squad-sdk/src/state-backend.ts`, `resolution.ts`, `presets/*`, and CLI commands. The branch has a concrete persistence model (`local`, `git-notes`, `external`, `orphan`, `two-layer`) with distinctive `git notes --ref=squad` backend anchored to repo root commit—avoiding branch-local state loss while staying git-native.
+
+**Suggested team takeaway:** If Squad wants portable/shared `.squad` state, prefer one deliberate review of the `state-backend-global-996` backend abstraction over ad hoc additions to `resolution.ts`, personal squad sync, or preset roaming.
 
 ---
 
