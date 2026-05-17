@@ -102,3 +102,17 @@ RETRO found two must-fix guard-correctness issues before upstream: registry conf
 
 📌 **Team update — Piece 10 Revision Complete (2026-05-15T23:15:56Z):** Per strict lockout protocol, EECOM locked out for this cycle. CONTROL + Sims assigned joint revision and delivered fix: CONTROL unified init validation routing through one path so registry from all sources (flag, env, default) receives same conflict checks; added lstat-based `.squad` symlink sentinel to prevent redirect-escape. All guards now execute before scaffold creation. Build CLEAN. 28/28 tests GREEN. Approved for Phase C.
 
+### Piece 11b mirror-sync adversarial review (2026-05-16T00:08:06.680-07:00)
+
+**Verdict:** PASS
+
+Commit ea655861 implements template sync for optional package-local `squad.agent.md` mirrors. PII/secret scan: CLEAN (author email acceptable in git metadata; zero tokens, zero `ghp_`/`github_pat_` patterns; zero credentials). Path scan: CLEAN (no D:\, C:\, /home, /root; all paths via path.join or relative). Tone & Record scan: CLEAN across all 6 touched files — no fork residue, no comparison framing, no preview-channel terminology, no preview-channel language, no commit-history breadcrumbs. @bradygaster scope acceptable (project namespace). Changeset: professional tone, factual. History entry follows established 11a pattern (including "Gotchas:" terminology already in use). Decision file proper format, clear consequences, no leaks. Skills file adds constructive anti-pattern. Code comments professional, no residue. Test structure clean, no fork language, descriptive test names.
+
+All Tone & Record requirements (REPLAY-PROTOCOL § Tone & Record Enforcement): satisfied.
+
+### Branch akubly/upstream-11a-canonical-template-failshut review (2026-05-15T22:59:10.798-07:00)
+
+**Verdict:** REQUEST-CHANGES.
+
+One MAJOR governance risk: the branch edits `.github/agents/squad.agent.md` even though the source-of-truth table in that same file marks it as authoritative governance and human-maintainer-write-only. Clean checks: strip-listed path count stayed 121 on both compared branches, added lines in the branch diff introduced no banned-record terms or secret patterns, and git remote configuration remained single-origin only.
+
