@@ -236,6 +236,9 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 
 ## Learnings
 
+### Proposal v1.2 revision — Casey narrative integration (2026-05-17T13:10:07-07:00)
+- v1.2 of multisquad proposal — integrated PAO's finalized Casey narrative as Part I User Story.
+
 ### Proposal v1.1 revision — binding flexibility, layering, Rally boundary (2026-05-17T12:15:27-07:00)
 - Wrote `.squad/decisions/inbox/flight-multisquad-proposal-and-spec-v1.1.md` as the v1.1 revision of the multi-squad proposal and functional spec.
 - Locked the position that Squad has **zero hard dependency on Rally**; Rally is one optional consuming host with its own `~/rally/` state directory rather than a required upstream dependency.

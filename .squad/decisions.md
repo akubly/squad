@@ -319,6 +319,14 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 **What:** Anything *specific to using Squad in an organizational setting* MUST be layered on top of Squad, not built into Squad itself. Squad's job is to provide the core flexibilities required so that the organizational layer works without friction or a custom fork. This is the canonical org-vs-public boundary rule.  
 **Why:** User request — captured for team memory. Frames the SDK boundary question (Round 6 open question #2: managed-machine personal sandboxing). Implication: the SDK provides primitives for scoping/restricting personal mode; the *policy* of when to enforce it on corp boxes belongs in the org tool, not in upstream Squad.
 
+### 2026-05-17 (rev): Multi-Squad Proposal — v1.2 revision
+
+**By:** Brady + PAO + Flight
+**What:** Added a "User Story — Casey's First Day" section to Part I of the multi-squad proposal, immediately after the executive summary. v1.2 supersedes v1.1; v1.1 preserved as historical artifact.
+**Authoritative artifact:** `.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec-v1.2.md`
+**Why:** Make the v1.1 design legible to non-engineer stakeholders by anchoring it in lived experience.
+**Note:** v1.2 "Changes from v1.1" block flags one narrative↔spec discrepancy: the story uses illustrative `eng` org-tool commands and `squad-cli` flag spellings that Part II does not yet define normatively. Resolve in a future revision when those surfaces firm up.
+
 ## Deferred
 
 - #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision

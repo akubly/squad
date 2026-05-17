@@ -8,6 +8,8 @@ Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, f
 
 ## Learnings
 
+- 2026-05-17T13:10:07-07:00 — Final Casey v1.1 narrative drafted in `.squad/decisions/inbox/pao-multisquad-day-in-life-casey-final.md`; centers the third-path world, pluggable binding locations, explanation payloads, and explicit personal-only mode.
+
 ### Casey via Rally day-in-life variant (2026-05-15T23:45:52-07:00)
 Org-scale Rally needs three user-facing moves that stay plain English: register squad sources (`rally squad add`), choose the squad for a folder or repo (`rally squad use`), and verify the active squad before work (`rally squad status`). The clean fit is Rally's central `~/rally/` home and dashboard; the strain is Rally's current repo-root mental model, which breaks when one repo contains multiple services that need different squads.
 
