@@ -8,6 +8,10 @@ Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, f
 
 ## Learnings
 
+### Casey via Rally day-in-life variant (2026-05-15T23:45:52-07:00)
+Org-scale Rally needs three user-facing moves that stay plain English: register squad sources (`rally squad add`), choose the squad for a folder or repo (`rally squad use`), and verify the active squad before work (`rally squad status`). The clean fit is Rally's central `~/rally/` home and dashboard; the strain is Rally's current repo-root mental model, which breaks when one repo contains multiple services that need different squads.
+
+
 ### Discussion Triage Patterns (2026-03-23 Release Incident)
 **Context:** v0.9.1 release completed; 15 open discussions analyzing whether community response patterns matched feature releases.
 
@@ -76,6 +80,9 @@ Squad docs use plain markdown without Astro frontmatter. Structure: title (H1), 
 Two-way communication layer between Squad and work environment. Outbound: Teams webhook notifications (breaking, briefings, recaps, flashes) sent via Adaptive Cards — only when newsworthy. Inbound: WorkIQ/Playwright scanning of Teams channels and email → auto-create GitHub issues with teams-bridge label, anti-duplicate logic enforced. Loop: inbound creates issues → Ralph dispatches → agents work → outbound notifies results. Human stays informed on mobile. Prerequisites are enhancements, not requirements.
 
 📌 **Team update (2026-03-11T01:27:57Z):** Proactive communication patterns and PR trust levels (full/selective/self-managing spectrum) documented in decisions.md. Pattern rationale reinforced: Ralph 24/7 autonomous deployment requires awareness loop (Teams webhooks for outbound) and external work integration (WorkIQ scanning for inbound). Trust levels enable context-appropriate oversight without bottlenecking teams.
+
+### Org-tool multisquad narrative (2026-05-15T23:45:52-07:00)
+Org-managed Squad experiences work best when the company tool resolves repo/subdir binding, auth, approved connectors, and fallback policy before session start. The strongest narrative tension is choice relief versus portability loss: Casey gains zero-config defaults and staffing-aware routing, but loses direct access to portable Squad concepts and arbitrary shared sources. The SDK boundary must support pre-resolved workspace identity, per-directory bindings inside one repo, worktree-backed state, and sandboxed personal mode on corp devices.
 
 ### PR #487 Review & Merge — CLI Docs Expansion (2026-03-22)
 
@@ -324,3 +331,8 @@ Completed full PRD based on research findings. **Document:** `docs/research/jsdo
 4. In Rally-facing references from Squad, describe Rally as an external operator/worktree companion rather than a replacement.
 
 **Noted doc nuance:** Rally has a useful, consistent story about repo cleanliness and externalized team state. That is worth echoing. Its docs also surface a few wording inconsistencies around read-only defaults vs local edits; we should borrow the positioning clarity, not necessarily every implementation-detail phrase.
+
+### Multi-squad day-in-the-life narrative (2026-05-15T23:06:53-07:00)
+A good org-scale Squad experience must explain "why this help applies here" in plain English, support folder-level differences inside one repo clone, and let a user say "only my personal help here" without any hidden company/team carryover. Casey-style narratives are useful because they surface trust gaps that a purely technical proposal can miss.
+
+📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.

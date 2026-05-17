@@ -378,3 +378,13 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 - **Smaller but still code-bearing branches:** `feat/persistent-ralph` is mostly docs/tests/version churn, but the code change is a direct rewrite of `packages/squad-sdk/src/ralph/index.ts` into a persistent `RalphMonitor` that subscribes to the event bus, tracks agent activity in memory, and persists monitor state to disk for crash recovery. `feat/ado-configurable-items` extends the existing ADO adapter with `getAvailableWorkItemTypes()` via `az boards work-item type list`, making work-item creation process-template-aware. `feat/rename-subsquads` is a terminology refactor over the existing `streams/` implementation, not a separate orchestration model.
 - **Dependencies and packaging:** none of the substantive branches add third-party runtime packages. The code stays on Node built-ins plus existing `gh`, `git`, and `az` CLI shells. Package changes are mostly new subpath exports (`./presets`, `./runtime/scheduler`, `./runtime/cross-squad`) and build-copy steps for preset assets, not new npm dependencies.
 
+### Multi-squad storage proposal breadcrumb (2026-05-15T23:06:53-07:00)
+
+Drafted storage strategy in `.squad/decisions/inbox/eecom-multisquad-storage-proposal.md`: Squad should be a manifest-addressed `.squad/` artifact with stable `id`, while storage media are modeled as source adapters feeding existing backends (`local` / `external` / `orphan` / `two-layer`). Recommended machine-local source cache + per-repo stack binding + local overlay, plus a small SDK addition (`SquadStack`, source parsing/materialization, backend capability flags) instead of a new service.
+
+### Multi-squad reuse-vs-new audit breadcrumb (2026-05-16T00:14:13-07:00)
+
+Wrote `.squad/decisions/inbox/eecom-multisquad-reuse-audit.md`. Recommendation: reuse current mainline descendants of `feat/state-backend-global-996` for storage, keep Rally's operator shell (`~/rally/`, `.worktrees/`, consult-mode-based dispatch mechanics) where it already works, and spend net-new effort only on the SDK invariant contract (`resolveSquadStack`, ambiguity/explanation, runtime contract, materialization, reentry). Biggest trap branch for this cycle: `feat/communication-adapter`.
+
+
+📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.

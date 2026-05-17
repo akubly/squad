@@ -241,3 +241,7 @@ Also updated: examples section (showing `name` + `description` pairs), anti-patt
 - `packages/squad-cli/templates/skills/{directive-capture,error-recovery,reflect,iterative-retrieval,notification-routing,scheduled-tasks,ceremony-templates}/SKILL.md` show Tamir packaging prompt patterns as reusable skills instead of inline coordinator text; implication: the reusable-skill packaging is the strongest fork pattern to borrow, especially for error recovery, iterative retrieval, notification routing, and scheduled tasks.
 - `feat/communication-adapter` and `feat/rename-subsquads` mainly change runtime/docs surfaces, not the coordinator/agent prompt files; implication: treat them as adjacent product work, not prompt-architecture divergence.
 
+- **2026-05-15T23:06:53-07:00 — Multi-squad discovery proposal:** Recommended additive stack resolution for project/team/org/personal layering: per-clone bindings, per-user registries, personal-as-advisory overlay, single active write layer, and explicit promotion for team/org decisions.
+
+
+📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.

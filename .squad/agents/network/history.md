@@ -31,3 +31,11 @@ Added `--init` flag to sync scripts for scaffolding mesh state repositories. Whe
 
 📌 **Team update (2026-05-15T22:45:19Z — Rally Familiarization Complete & Decisions Merged):** Four-agent familiarization sprint on Rally completed. Flight analyzed Rally relationship to Squad (committable in-repo vs. non-committable external), EECOM documented technical integration (GitHub CLI host/agent split, `.worktrees/` patterns), Network analyzed distribution implications, PAO developed positioning strategy. Decisions drafted and merged to `.squad/decisions.md`: Rally Relationship, EECOM Technical Notes, Squad/Rally Positioning. Orchestration logs written (flight/eecom/network/pao). Session log created. All Rally learnings captured. Scribe archived inbox files and committed team state. Squadron ready for next cycle.
 
+### Multi-squad distribution proposal breadcrumb (2026-05-15T23:06:53-07:00)
+
+- Proposed a Rally-style central store rooted at `~/.squad/`, with the Squad CLI owning `source add`, `update`, `bind`, and status/doctor flows while the SDK owns transport adapters, immutable cache materialization, lock metadata, and layered binding resolution.
+- Recommended org auto-deploy via **MDM-installed Squad CLI + machine bootstrap manifest**, not direct home-directory mutation from pipelines. First run should import org sources automatically and hydrate the local cache.
+- Update defaults proposed: **personal = manual**, **team = notify/user-applied by default**, **org = stable-ring auto-update with temporary freeze window**. No new end-user tool for v1; Rally is optional visibility only.
+
+
+📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.

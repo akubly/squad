@@ -236,6 +236,11 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 
 ## Learnings
 
+### Proposal v1.1 revision — binding flexibility, layering, Rally boundary (2026-05-17T12:15:27-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-proposal-and-spec-v1.1.md` as the v1.1 revision of the multi-squad proposal and functional spec.
+- Locked the position that Squad has **zero hard dependency on Rally**; Rally is one optional consuming host with its own `~/rally/` state directory rather than a required upstream dependency.
+- Recast binding as a **pluggable binding-location lookup** and moved corp catalog discovery, enterprise auth flows, and managed-machine personal enforcement out of the SDK mechanism layer and into host policy.
+
 ### Fork familiarization — tamirdresher/squad (2026-05-15T22:57:50-07:00)
 - Tamir’s fork is not wandering randomly; it is exploring a coherent operating model: durable autonomous ops (`persistent-ralph` + `squad-scheduler`), multi-squad mesh coordination (`cross-squad-orchestration`), inherited/shared context between squads (`upstream-auto-sync`), and Git-native state storage (`state-backend-global-996`).
 - The strongest convergence signal is that Brady mainline now contains the same core primitives: `packages/squad-sdk/src/runtime/scheduler.ts`, `packages/squad-sdk/src/runtime/cross-squad.ts`, `packages/squad-cli/src/cli/commands/upstream.ts`, `packages/squad-sdk/src/state-backend.ts`, and the current docs for persistent Ralph / scheduler / cross-squad / state backends. Tamir’s fork is functioning as an incubation lane for ideas Brady is willing to productize.
@@ -244,3 +249,35 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 - `feat/upstream-auto-sync` is the branch Brady should keep watching. Mainline already has upstream inheritance, but Tamir’s branch is explicitly about bidirectional sync + propagation; that is a bigger collaboration model than today’s inheritance-focused implementation and could become important if Squad leans harder into fork/network workflows.
 - Secondary watch item: the `persistent-ralph` + `squad-scheduler` pairing. Mainline has both primitives, but Tamir is using them as an always-on operations loop; if Squad wants stronger autonomous maintenance, that combined operational pattern is the next likely adoption surface.
 - Flight takeaway: treat Tamir’s fork as a strategy probe, not merely a contributor fork. When evaluating future Tamir branches, ask whether they introduce a genuinely new primitive or just a more aggressive automation layer on top of capabilities Brady already adopted.
+
+### Multi-squad strategy proposal (2026-05-15T23:06:53-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-strategy-proposal.md`.
+- Headline recommendation: adopt an explicit **Source + Binding + Stack** model where the nearest binding selects one primary squad, org/team/personal layers overlay only where jurisdiction allows, and mutable runtime state stays project-local by default.
+- Rally remains the external/shared-repo operator shell; Tamir’s pluggable state backends and Rally’s consult/worktree patterns fit as supporting primitives, not separate competing models.
+
+### Multi-squad strategy convergence (2026-05-15T23:06:53-07:00)
+- Read and converged the five Round 1 proposals from Flight, Procedures, EECOM, RETRO, and Network into `.squad/decisions/inbox/flight-multisquad-strategy-converged.md`.
+- Canonical decision: **one primary authoritative squad per cwd, personal advisory overlay by default, one active write layer, explicit promotion for broader learnings, and inbox-only cross-squad grants**.
+- Canonical storage/distribution decision: **use `%USERPROFILE%\\.squad\\` as the user-home registry/cache/personal store, keep repo/subdir bindings in repo space, use managed CLI + bootstrap manifest for org rollout, and do not create a new v1 tool**.
+
+### Gap analysis vs PAO narratives (2026-05-15T23:54:07-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-strategy-gap-analysis.md` to diff the converged strategy against PAO’s three Casey onboarding narratives.
+- Biggest gap: Round 2 under-modeled discovery/bootstrap, ambiguity handling, and host-consumable runtime contracts; the narratives require those as day-1 capabilities, not later polish.
+- Biggest correction: `squad-cli` is justified as the first-party portable/reference host, but not as the universal primary host; Rally and org-built hosts need to be treated as first-class consumers of the same SDK contract.
+
+### Solution-shape recommendation (2026-05-16T00:07:22-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-solution-shape-recommendation.md` to settle the Round 4 build-allocation question.
+- Final recommendation: invest in **SDK contract work + squad-cli reference-host work + Rally host work**, and do **not** build a new first-party standalone host in v1.
+- Most important line held: the SDK owns the invariant host contract (resolution, explanation, runtime contract, policy, materialization); hosts own onboarding, dashboarding, and environment-specific UX.
+
+### Priority-framed plan (2026-05-16T00:14:13-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-priority-framed-plan.md` to re-frame the Round 4 recommendation under Brady’s explicit P0/P1/P1 ordering.
+- Chosen execution path: **Path B — selective adoption**; reuse Tamir’s backend/global-state ideas and Rally’s operator shell, but shape the invariant as upstream SDK contract work plus minimal Rally integration.
+- Key tension resolved: favor **upstream-shaped SDK/CLI surfaces** over wholesale fork adoption, while letting Rally keep host-local persistence in v1 to minimize custom churn.
+
+### Final proposal + functional specification (2026-05-16T00:24:51-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-proposal-and-spec.md` as the final consolidation across Rounds 1–5 for stakeholder proposal + implementation-ready functional spec.
+- Final recommendation: **third path** — upstream the minimum invariant SDK kernel, keep catalog/policy/deployment/dashboard layers private, use Rally as a consumer shell, and treat Tamir’s fork as an idea source rather than a merge queue.
+- Locked the pivot heuristic now: stay upstream-shaped by default, but flip to independence if the minimum kernel is projected to take more than ~12 weeks to land or if maintainers reject the SDK ownership boundary.
+
+📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.

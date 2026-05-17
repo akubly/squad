@@ -282,6 +282,43 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 - **Joniba contributions:** Consistently high-quality, matches team standards (wiring guide is excellent).
 - **Diberry contributions:** MSFT-level quality, merge-ready on delivery.
 
+---
+
+## 2026-05-17: Multi-Squad Management — Design Phase Closeout
+
+**By:** Brady + Squad team (multi-round)
+
+**What:** Adopted the "third path" multi-squad design: minimum invariant SDK kernel upstream-shaped, org-specific catalog/policy/deployment as a layer ON TOP of Squad, Rally as an optional consuming host with no hard dependency, pluggable binding-location lookup, pivot heuristic to flip to full independence if upstream kernel acceptance exceeds ~12 weeks.
+
+**Authoritative artifact:** `.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec-v1.1.md` (supersedes v1.0). Status: Proposal — pending Brady approval.
+
+**Decision trail:** `.squad/decisions/multisquad-design/` contains all Round 1–7 working artifacts:
+- Round 1: Proposals from Flight/Procedures/EECOM/RETRO/Network/PAO
+- Round 2: Convergence
+- Round 3: Gap analysis
+- Round 4: Solution shape recommendation
+- Round 5: Priority-framed plan + reuse audit + rubber-duck devil's advocate
+- Round 6: Proposal v1.0 + directives
+- Round 7: Proposal v1.1 with directives folded in
+
+**Why:** Closeout of design phase. Future implementation work references the v1.1 proposal as the source of truth. This entry is the index — DO NOT inline the proposal content.
+
+---
+
+## 2026-05-17: User directives — Binding location & layering
+
+### Binding location flexibility
+
+**By:** Brady  
+**What:** Flexibility of `.squad/` source-of-truth location is a first principle. Some organizations / teams will want in-repo bindings; others will not. Treat this as one flavor of the broader "dotfiles can live anywhere" requirement. The SDK must support both modes without friction; neither is privileged.  
+**Why:** User request — captured for team memory. Frames the binding-default design question (Round 6 open question #1).
+
+### Squad layering principle
+
+**By:** Brady  
+**What:** Anything *specific to using Squad in an organizational setting* MUST be layered on top of Squad, not built into Squad itself. Squad's job is to provide the core flexibilities required so that the organizational layer works without friction or a custom fork. This is the canonical org-vs-public boundary rule.  
+**Why:** User request — captured for team memory. Frames the SDK boundary question (Round 6 open question #2: managed-machine personal sandboxing). Implication: the SDK provides primitives for scoping/restricting personal mode; the *policy* of when to enforce it on corp boxes belongs in the org tool, not in upstream Squad.
+
 ## Deferred
 
 - #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision
