@@ -49,8 +49,17 @@ export async function createCommunicationAdapter(repoRoot: string): Promise<Comm
     return createAdapterByChannel(config.channel, repoRoot, config);
   }
 
-  // Auto-detect from platform
-  const platform = detectPlatform(repoRoot);
+  // Auto-detect from platform (non-fatal — falls back to FileLog on error)
+  let platform: import('./types.js').PlatformType;
+  try {
+    platform = detectPlatform(repoRoot);
+  } catch (err) {
+    console.warn(
+      `[squad] Platform detection failed — falling back to file-log communication adapter. ` +
+      `Cause: ${(err as Error).message}`,
+    );
+    return new FileLogCommunicationAdapter(repoRoot);
+  }
   const remoteUrl = getRemoteUrl(repoRoot);
 
   if (platform === 'github' && remoteUrl) {

@@ -202,6 +202,10 @@
       "types": "./dist/platform/index.d.ts",
       "import": "./dist/platform/index.js"
     },
+    "./adapter-factory": {
+      "types": "./dist/platform/adapter-factory.d.ts",
+      "import": "./dist/platform/adapter-factory.js"
+    },
     "./remote": {
       "types": "./dist/remote/index.d.ts",
       "import": "./dist/remote/index.js"

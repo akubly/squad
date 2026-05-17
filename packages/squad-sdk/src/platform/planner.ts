@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import type { PlatformType, WorkItem } from './types.js';
+import type { WorkItem } from './types.js';
 
 const EXEC_OPTS: { encoding: 'utf-8'; stdio: ['pipe', 'pipe', 'pipe'] } = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
 
@@ -90,7 +90,9 @@ function hashTaskId(id: string): number {
  * Use alongside a repo adapter (GitHub/ADO) in a hybrid config.
  */
 export class PlannerAdapter {
-  readonly type: PlatformType = 'planner';
+  // 'planner' is a WorkItemSource, not a git PlatformType.
+  // Use this adapter via HybridPlatformConfig.workItems = 'planner'.
+  readonly type = 'planner' as const;
   private bucketCache: PlannerBucket[] | null = null;
 
   constructor(private readonly planId: string) {}

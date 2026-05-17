@@ -28,8 +28,6 @@ export function getRalphScanCommands(platform: PlatformType): RalphCommands {
       return getGitHubRalphCommands();
     case 'azure-devops':
       return getAzureDevOpsRalphCommands();
-    case 'planner':
-      return getPlannerRalphCommands();
     default:
       return getGitHubRalphCommands();
   }
