@@ -183,6 +183,7 @@ async function main(): Promise<void> {
     console.log(`  ${b}(default)${r}  Launch interactive shell`);
     console.log(`  ${b}init${r}       Initialize squad in current directory`);
     console.log(`  ${b}assign${r}     Bind this checkout to a registered squad`);
+    console.log(`  ${b}unassign${r}   Remove this checkout's binding from a registered squad`);
     console.log(`  ${b}list${r}       List registered squads`);
     console.log(`  ${b}doctor${r}     Validate setup and registry health`);
     console.log(`  ${b}upgrade${r}    Update Squad-owned files to latest`);
@@ -1232,6 +1233,32 @@ async function main(): Promise<void> {
       const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
       console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
+    }
+    return;
+  }
+
+  if (cmd === 'unassign') {
+    const { parseUnassignArgs } = await import('./commands/assign-args.js');
+    const { callsign, registryPath, targetDir } = parseUnassignArgs(args);
+    const { runUnassign } = await import('./commands/unassign.js');
+    try {
+      const result = await runUnassign({
+        callsign,
+        registryPath,
+        targetDir,
+        cwd: getSquadStartDir(),
+      });
+      if (result.hostPathGuard) {
+        // Message already emitted inside runUnassign.
+      } else if (result.alreadyUnassigned) {
+        console.log(`ℹ Already unassigned — no matching registry entry for this directory.`);
+      }
+      // demoted and normal removal messages are emitted inside runUnassign.
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const exitCode = (err as { exitCode?: number }).exitCode ?? 1;
+      process.exit(exitCode);
     }
     return;
   }

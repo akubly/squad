@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { argValue, parseAssignArgs } from '../assign-args.js';
+import { argValue, parseAssignArgs, parseUnassignArgs } from '../assign-args.js';
 
 describe('argValue', () => {
   it('returns the next token for --flag value form', () => {
@@ -110,5 +110,45 @@ describe('parseAssignArgs', () => {
     expect(result.callsignOrUrl).toBe('https://github.com/example/squad.git');
     expect(result.cloneTo).toBe('./dest');
     expect(result.callsign).toBe('my-squad');
+  });
+});
+
+describe('parseUnassignArgs', () => {
+  it('UA1 parses --callsign=alpha form (equals-delimited)', () => {
+    const result = parseUnassignArgs(['--callsign=alpha']);
+    expect(result.callsign).toBe('alpha');
+  });
+
+  it('UA2 parses --callsign alpha form (space-separated)', () => {
+    const result = parseUnassignArgs(['--callsign', 'alpha']);
+    expect(result.callsign).toBe('alpha');
+  });
+
+  it('UA3 parses --registry-path=/some/path form (equals-delimited)', () => {
+    const result = parseUnassignArgs(['--registry-path=/some/path/registry.json']);
+    expect(result.registryPath).toBe('/some/path/registry.json');
+  });
+
+  it('UA4 parses --registry-path /some/path form (space-separated)', () => {
+    const result = parseUnassignArgs(['--registry-path', '/some/path/registry.json']);
+    expect(result.registryPath).toBe('/some/path/registry.json');
+  });
+
+  it('UA5 parses --target-dir in equals-delimited form', () => {
+    const result = parseUnassignArgs(['--target-dir=./product']);
+    expect(result.targetDir).toBe('./product');
+  });
+
+  it('UA6 handles multiple flags together', () => {
+    const result = parseUnassignArgs(['--callsign=alpha', '--registry-path=/some/path']);
+    expect(result.callsign).toBe('alpha');
+    expect(result.registryPath).toBe('/some/path');
+  });
+
+  it('UA7 returns all undefined for empty args', () => {
+    const result = parseUnassignArgs([]);
+    expect(result.callsign).toBeUndefined();
+    expect(result.registryPath).toBeUndefined();
+    expect(result.targetDir).toBeUndefined();
   });
 });

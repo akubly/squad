@@ -54,3 +54,22 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     targetDir: argValue(args, '--target-dir'),
   };
 }
+
+/**
+ * Parse CLI arguments for the `squad unassign` subcommand.
+ *
+ * Named flags are parsed in both `--flag value` and `--flag=value` forms.
+ */
+export interface UnassignCliArgs {
+  callsign: string | undefined;
+  registryPath: string | undefined;
+  targetDir: string | undefined;
+}
+
+export function parseUnassignArgs(args: string[]): UnassignCliArgs {
+  return {
+    callsign: argValue(args, '--callsign'),
+    registryPath: argValue(args, '--registry-path'),
+    targetDir: argValue(args, '--target-dir'),
+  };
+}

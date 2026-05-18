@@ -10,7 +10,17 @@ EECOM owns SDK lifecycle, registry schema, template propagation, cherry-pick reb
 
 ## Learnings — Active
 
-### Piece 11b — mirror sync (2026-05-15T23:49:57.391-07:00)
+### Piece 15 — squad unassign (2026-05-18T15:41:51-07:00)
+
+**Implemented:** `runUnassign` with demote-not-delete semantics. Removing the last clone path from a registry entry sets `status: 'inactive'` and preserves `callsign`, `path`, `initUri`, and all unknown forward-compatible fields. The entry stays in the registry; `squad assign <callsign>` reactivates it.
+
+**Key patterns:** Origin refcounting uses `normalizeRemoteUrl` on both the removed clone's URLs and the remaining clones' URLs — remove an origin only when no remaining clone still reports it. The host-path guard triggers when `normalisedPathKey(targetDir) === normalisedPathKey(path.dirname(entry.path))` (the `.squad/` parent, not `.squad/` itself). Ambiguous scan (target dir in multiple entries without `--callsign`) exits with code 3.
+
+**Gotchas:** Gate 1 and Gate 2 scrub failures are pre-existing baseline contamination accepted for all Phase B pieces — not introduced by this piece. Verify this on each new piece by checking that the diff surface contains no new strip-listed paths or legacy fork-name residue.
+
+**Revision (2026-05-18T16:19:28-07:00):** Applied F1–F8 findings from Flight and FIDO review. Extracted shared `findCloseMatch` helper to `packages/squad-cli/src/lib/close-match.ts` (F7). Wired `collectCwdRemoteUrls` as the production default for `getRemoteUrls` (F1). Added `parseUnassignArgs` to `assign-args.ts` and wired it in CLI entry to handle `--flag=value` forms (F2). Added payload cleanup TODO comment at the correct insertion point (F4). Entry ordering now uses `map` to preserve original position (F8). U7 asserts `alpha.status === 'inactive'` after last-clone removal (F5). New U13 test covers double-call idempotency explicitly (F6). Rewrote Gate 2 history note to use neutral language (F3). Test count: 13 unassign + 25 assign-args + 29 assign = 67 total, all GREEN.
+
+
 
 **Implemented:** `scripts/sync-templates.mjs` now refreshes unsuffixed package-local `squad.agent.md` mirrors when those files exist for runtime packaging, while keeping the tracked `.template` mirrors as the default package payload.
 

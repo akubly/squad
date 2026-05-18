@@ -1,6 +1,6 @@
 {
   "name": "@bradygaster/squad-cli",
-  "version": "0.9.6-build.1",
+  "version": "0.9.6-build.6",
   "description": "Squad CLI — Command-line interface for the Squad multi-agent runtime",
   "type": "module",
   "bin": {
@@ -184,6 +184,10 @@
     "./commands/assign": {
       "types": "./dist/commands/assign.d.ts",
       "import": "./dist/commands/assign.js"
+    },
+    "./commands/unassign": {
+      "types": "./dist/commands/unassign.d.ts",
+      "import": "./dist/commands/unassign.js"
     }
   },
   "files": [
