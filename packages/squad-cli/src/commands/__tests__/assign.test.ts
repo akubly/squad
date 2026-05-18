@@ -1061,3 +1061,90 @@ describe('runAssign: forward-compat preserves sibling entry fields', () => {
     expect(beta['_siblingFutureField']).toBe('must-survive');
   });
 });
+
+// ============================================================
+// Origins dedup at write boundary
+// ============================================================
+
+describe('runAssign: origins dedup at write boundary', () => {
+  let hostDir: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    cloneDir = makeDir('clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadPath,
+      origins: [],
+      clones: [],
+    }]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A27 getRemoteUrls returning repeated URLs persists each unique origin exactly once', async () => {
+    // Inject a seam that returns three copies of the same URL — the write
+    // boundary must collapse them to a single entry in origins[].
+    const result = await runAssign({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [
+        'https://github.com/owner/repo.git',
+        'https://github.com/owner/repo.git',
+        'https://github.com/owner/repo.git',
+      ],
+    });
+
+    expect(result.kind).toBe('assigned');
+
+    const reg = readRegistry(registryPath);
+    const entry = (reg.squads as Record<string, unknown>[])[0]!;
+    const origins = entry['origins'] as string[];
+
+    // The three identical URLs must appear in origins as a single normalized entry.
+    expect(origins.filter(o => o === 'github.com/owner/repo')).toHaveLength(1);
+
+    // Verify with two distinct URLs each repeated: dedup keeps one of each.
+    const cloneDir2 = makeDir('clone2');
+    const hostDir2 = makeDir('host2');
+    const squadPath2 = makeSquadHost(hostDir2);
+    const registryPath2 = path.join(TEST_ROOT, 'registry2.json');
+    writeRegistry(registryPath2, [{
+      callsign: 'bravo',
+      path: squadPath2,
+      origins: [],
+      clones: [],
+    }]);
+
+    await runAssign({
+      callsignOrUrl: 'bravo',
+      registryPath: registryPath2,
+      cwd: cloneDir2,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [
+        'https://github.com/owner/repo.git',
+        'https://github.com/owner/repo.git',
+        'https://github.com/owner/fork.git',
+        'https://github.com/owner/fork.git',
+      ],
+    });
+
+    const reg2 = readRegistry(registryPath2);
+    const entry2 = (reg2.squads as Record<string, unknown>[])[0]!;
+    const origins2 = entry2['origins'] as string[];
+
+    // Two distinct normalized origins, each appearing exactly once.
+    expect(origins2).toHaveLength(2);
+    expect(origins2.filter(o => o === 'github.com/owner/repo')).toHaveLength(1);
+    expect(origins2.filter(o => o === 'github.com/owner/fork')).toHaveLength(1);
+  });
+});
