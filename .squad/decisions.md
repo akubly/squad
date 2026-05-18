@@ -5,6 +5,121 @@
 
 ---
 
+### 2026-05-18: Guard-Ordering Test Discipline
+
+**Author:** Flight (Lead)  
+**Date:** 2026-05-18  
+**Context:** Piece 14 adversarial review — containment guard ordering test gap
+
+## Decision
+
+When a command implements numbered guards where ordering prevents misclassification (e.g., containment before git-root resolution before idempotency), the test for guard N must mock guard N+1's transformation to its **realistic output**, not use an identity mock.
+
+### Rationale
+
+Identity mocks (`getGitRoot: (dir) => dir`) prove the guard fires for a given input but don't demonstrate that ordering prevents a downstream guard from incorrectly handling the same input after transformation. The real value of ordered guards is that earlier guards intercept before later guards normalize the input into a different scenario.
+
+### Applies to
+
+All commands with spec-defined guard ordering (currently: `init`, `assign`). Future pieces that introduce numbered guard sequences.
+
+### Test pattern
+
+```typescript
+// WRONG: identity mock doesn't prove ordering matters
+getGitRoot: (dir) => dir
+
+// RIGHT: simulates what real git-root resolution would return
+getGitRoot: () => registeredCloneRoot  // collapses subdir to parent
+```
+
+Then assert the EARLIER guard (containment) fires, not the LATER guard (idempotency).
+
+---
+
+### 2026-05-18: Security Decision — git subprocess `--` separator convention
+
+**Author:** RETRO  
+**Date:** 2026-05-18  
+**Status:** Proposed
+
+## Decision
+
+All `execFileSync` / `execFile` calls that pass a user-supplied or URL-derived string as a positional argument to git (e.g., `git clone <url>`, `git fetch <remote>`) MUST include `--` immediately before the positional argument(s) to prevent git from interpreting strings beginning with `--` as option flags.
+
+## Rationale
+
+During the piece-14 security review, `_defaultCloneCommand` at `packages/squad-cli/src/commands/assign.ts:267` was found to invoke `git clone` as:
+
+```ts
+_assignExecFileSync('git', ['clone', url, dest], { stdio: 'inherit' });
+```
+
+Without `--`, a `url` value of `--upload-pack=/path/program` is treated by git as a flag, not as the repository URL. The `--upload-pack` option specifies an executable used to serve repository pack objects, making this a git-argument-injection vector. While no privilege escalation beyond the invoking user is possible (same-user execution), the behavior is unintended and violates least-surprise.
+
+The fix is one token:
+
+```ts
+_assignExecFileSync('git', ['clone', '--', url, dest], { stdio: 'inherit' });
+```
+
+## Scope
+
+Apply this convention to every call site that passes user-supplied or derived data as a positional argument after the git subcommand. Existing call sites in `lib/git-root.ts` use only fixed positional arguments (`rev-parse --show-toplevel`) and are not affected.
+
+## Consequences
+
+- **Adopting:** Eliminates the flag-injection surface for all git subcommand calls. One-token change per call site.
+- **Not adopting:** Any refactor that adds a new git call with a user-supplied URL could silently introduce the same vector.
+
+---
+
+### 2026-05-18: Decision Proposal — TypeScript Patterns from Piece 14 Review
+
+**Author:** CONTROL  
+**Date:** 2026-05-18  
+**Source:** Adversarial TypeScript review of piece 14 (`squad assign`, commit 971a9d0a)
+
+---
+
+## Decision 1 — Error codes must be discriminable properties, not message prefixes
+
+**Context:** All `ERR_ASSIGN_*` codes in `assign.ts` are concatenated into the human-readable message string on `ConfigurationError`. There is no `.code` property and no exported type union.
+
+**Proposed rule:** Any command module that throws typed errors must:
+
+1. Export a `type FooErrorCode = 'ERR_FOO_BAR' | 'ERR_FOO_BAZ' | ...;` union.
+2. Attach `code: FooErrorCode` as a discriminable property on the thrown error (either as a field on `ConfigurationError` or via a thin typed wrapper).
+3. Test assertions check `err.code === 'ERR_FOO_BAR'`, not `err.message.match(/ERR_FOO_BAR/)`.
+
+**Rationale:** Programmatic callers (tests, orchestration layers, future SDK consumers) need to switch on error identity without parsing human text. String-embedded codes are brittle — a copy-paste typo in the code prefix silently diverges between thrower and catcher with no compile-time signal.
+
+---
+
+## Decision 2 — `--key=value` form must be handled in all CLI arg parsers
+
+**Context:** The piece 14 `assign` arg parser uses `args.indexOf('--clone-to')`, which returns `-1` when the user writes `--clone-to=./path`. This produces a misleading `ERR_ASSIGN_URL_WITHOUT_CLONE_TO` error even though the user correctly supplied the flag.
+
+**Proposed rule:** All arg-parsing blocks in `cli-entry.ts` must handle both `--flag value` and `--flag=value` forms. Introduce a shared `argValue(args, flag)` helper function in `cli-entry.ts` that checks the `=`-delimited form first, then falls back to positional lookup.
+
+---
+
+## Decision 3 — Exhaustiveness guards required on `kind` discriminants
+
+**Context:** The switch on `result.kind` in `cli-entry.ts:1171` covers all four current `AssignKind` variants but has no `default: { const _exhaustive: never = result.kind; }` arm. A future fifth variant would silently fall through.
+
+**Proposed rule:** Every switch on a discriminant property of a team-defined union type must end with:
+```ts
+default: {
+  const _exhaustive: never = result.kind;
+  break;
+}
+```
+
+This is a compile-time gate, not a runtime check — zero performance cost.
+
+---
+
 ### 2026-05-15: Optional package-local squad.agent.md mirrors stay generated
 
 **Status:** Accepted  
