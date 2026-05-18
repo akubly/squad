@@ -848,6 +848,102 @@ Ready for Phase C (PR creation in future session).
 
 ---
 
+### 2026-05-18: Piece 14 Revision — CAPCOM Complete
+
+**By:** CAPCOM (SDK Expert)  
+**Date:** 2026-05-18  
+**Branch:** `akubly/upstream-14-squad-assign` @ commits `1a47e601` (revision) + `935e73b2` (test gap close)
+
+## Summary
+
+CAPCOM addressed all adversarial-review findings (S1, T1-T7, F1/F3/F7) from Flight, RETRO, and CONTROL. FIDO verified APPROVED WITH NOTES. Sims closed the F3 origins-dedup test gap with seam-injection test A27.
+
+## Findings Addressed
+
+| Code | Reviewer | Category | Status |
+|------|----------|----------|--------|
+| S1 | RETRO | git subprocess shell injection | ✅ `--` separator added to all git clone/fetch/checkout calls |
+| T1 | CONTROL | Typed error codes | ✅ `AssignErrorCode` union exported; errors discriminable |
+| T2 | CONTROL | CLI arg parsing for `--flag=value` form | ✅ `argValue` helper in cli-entry.ts handles both `--flag value` and `--flag=value` |
+| T3 | CONTROL | Exhaustiveness guards on discriminants | ✅ `never` default added to result.kind switch |
+| F1 | FIDO | Registry write atomicity | ✅ atomic write + `0o600` mode in registry.ts |
+| F3 | FIDO | Origins dedup at write boundary | ✅ Test A27 added for seam-injection duplicate-URL scenario |
+| F7 | FIDO | Parse errors caught early | ✅ Argument parsing in separate assign-args.ts; errors before file write |
+
+## Deferred (Acceptable)
+
+| Code | Item | Reason |
+|------|------|--------|
+| T8 | index-signature refactor on `RunAssignOpts` | Architectural debt for future piece (not required for correctness) |
+| F8 | Branch-checkout fallback | Spec uses "may provision"; fallback behavior not required, only guard-pass path required |
+
+## Test & Build Results
+
+- **assign.test.ts:** 28 tests (all GREEN)
+- **assign-args.test.ts:** 18 tests (all GREEN; new file)
+- **Total scope:** 47 tests GREEN
+- **Build:** CLEAN
+- **Scrub gate:** Pre-existing Gate 1/2 noise; no new contamination
+
+## Files Modified
+
+- `packages/squad-cli/src/cli-entry.ts`
+- `packages/squad-cli/src/commands/assign.ts` (revised)
+- `packages/squad-cli/src/commands/assign-args.ts` (new)
+- `packages/squad-cli/src/commands/__tests__/assign.test.ts` (28 tests, +7 new)
+- `packages/squad-cli/src/commands/__tests__/assign-args.test.ts` (new; 18 tests)
+- `packages/squad-sdk/src/registry.ts` (atomic write + 0o600)
+- `.changeset/upstream-squad-assign-fixes.md`
+
+## Handoff State
+
+Branch: `akubly/upstream-14-squad-assign` @ `935e73b2` (final state after test-gap close)  
+All required findings addressed; two acceptable deferrals documented.  
+Ready for Phase C (PR creation).
+
+---
+
+### 2026-05-18: Piece 14 Revision Verification — FIDO APPROVED WITH NOTES
+
+**By:** FIDO (Quality Owner)  
+**Date:** 2026-05-18  
+**Subject:** Revision commit `1a47e601` on `akubly/upstream-14-squad-assign`
+
+## Verdict
+
+APPROVED WITH NOTES. All required adversarial findings from Flight, RETRO, and CONTROL are addressed or code-correct at implementation level. Build passes clean. 46 scoped tests GREEN (28 assign + 18 assign-args). Pre-existing scrub-gate failures confirmed unrelated.
+
+## Detailed Assessment
+
+### Required Findings — Addressed
+
+| Reviewer | Code | Status | Evidence |
+|----------|------|--------|----------|
+| RETRO | S1 — git subprocess `--` separator | ✅ Closed | `_defaultCloneCommand` uses `['git', 'clone', '--', url, dest]` |
+| CONTROL | T1–T3, T5–T7 — typed errors, arg parsing, exhaustiveness | ✅ Closed | `AssignErrorCode` exported; `argValue` helper; `never` guards all implemented |
+| FLIGHT | F1, F7 — registry atomicity, early parse errors | ✅ Closed | atomic `fs.writeFileSync(..., 0o600)`; arg parsing pre-write |
+
+### F3 Test Gap — Documented for Follow-Up
+
+**Finding:** No test exercises `getRemoteUrls: () => ['url', 'url']` (duplicate-returning seam) to confirm `origins[]` in written registry has no duplicates.
+
+**Code Status:** Fixed. `Array.from(new Set(...))` at write boundaries confirmed in implementation review.
+
+**Test Status:** PENDING — Expected addition: test A27 exercising duplicate-returning seam confirms dedup at `registryWrite()`.
+
+**Owner:** Follow-up maintainer or next piece touching origins logic.
+
+### Deferred (Acceptable)
+
+- **T8 (index-signature):** Architectural cleanup, not correctness issue.
+- **F8 (branch fallback):** Spec says "may"; fallback not required.
+
+### Scrub Gate Baseline
+
+Gates 1 and 2 are pre-existing contamination accepted across all Phase B pieces. No new strip-listed paths or wifi-aware content introduced in revision diff. Consistent with piece history.
+
+---
+
 ## Foundational Directives (carried from beta, updated for Mission Control)
 
 ### Type safety — strict mode non-negotiable

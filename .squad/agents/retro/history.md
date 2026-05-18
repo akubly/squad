@@ -31,6 +31,12 @@ All git invocations use `execFileSync` with array args, no shell, stderr ignored
 
 **Risk assessment:** Low today (strict equality validation prevents injection). Future-proofing: if callsigns are used in file paths or URLs downstream, character validation acts as first-line defense.
 
+### Piece 14 Adversarial Review — Security Findings Landed (2026-05-18)
+
+📌 **RETRO security findings from piece 14 adversarial pass successfully addressed in revision.**
+
+Initial review identified git subprocess shell-injection vector (S1): `_defaultCloneCommand` invoked git clone without `--` separator before URL, enabling git-argument-injection attack when URL starts with `--`. Revision commit 1a47e601 added `--` separator to all git subprocess calls (clone, fetch, checkout). All 3 minor hardening recommendations also addressed: registered callsign validated as absolute paths with `..`-segment detection; test env isolation completed. Branch ready for Phase C. Security decision merged: git subprocess `--` separator convention now team-wide standard.
+
 **Cleared threat vectors:** Registry traversal, env-var trust boundary, symlink following, JSON injection, TOCTOU races — all non-exploitable from unprivileged inputs given current design. Validation at resolver boundary completes the security model begun in piece 01 registry validation.
 
 ### Piece 08b adversarial review (2026-05-14T16:12:01.302-07:00)
@@ -109,6 +115,14 @@ RETRO found two must-fix guard-correctness issues before upstream: registry conf
 Commit ea655861 implements template sync for optional package-local `squad.agent.md` mirrors. PII/secret scan: CLEAN (author email acceptable in git metadata; zero tokens, zero `ghp_`/`github_pat_` patterns; zero credentials). Path scan: CLEAN (no D:\, C:\, /home, /root; all paths via path.join or relative). Tone & Record scan: CLEAN across all 6 touched files — no fork residue, no comparison framing, no preview-channel terminology, no preview-channel language, no commit-history breadcrumbs. @bradygaster scope acceptable (project namespace). Changeset: professional tone, factual. History entry follows established 11a pattern (including "Gotchas:" terminology already in use). Decision file proper format, clear consequences, no leaks. Skills file adds constructive anti-pattern. Code comments professional, no residue. Test structure clean, no fork language, descriptive test names.
 
 All Tone & Record requirements (REPLAY-PROTOCOL § Tone & Record Enforcement): satisfied.
+
+### Piece 14 security review (2026-05-18)
+
+**Verdict:** APPROVED WITH HARDENING (3 minors, 4 hardening; no blockers)
+
+Two findings warrant pre-merge attention: (S1) `git clone` is invoked without a `--` argument separator, allowing a `--upload-pack=` or `--config=`-prefixed string passed as the URL to be interpreted by git as a flag rather than a URL — fix is one token (`--`); (S3) `writeRegistry` uses non-atomic `writeFileSync`, leaving the registry in an unreadable state if the process is killed between truncate and write — fix is write-temp-then-rename. S6 (case normalization inconsistency in `runAssignToCopilot` idempotency check) is an existing behavioral gap on case-insensitive filesystems. Hardening items: no boundary assertion on `--clone-to` resolved path (S2); registry created world-readable 0o644 on POSIX (S4); `fs.existsSync` follows symlinks at host-path and team.md guards while `_installCoordinatorAgent` correctly uses `lstatSync` (S5); no test covers URL input starting with `--` (S7). PII scan clean. Shell injection not possible — all git calls use `execFileSync` with argument arrays. `.npmrc` invariant satisfied. Rollback does not follow symlinks on POSIX.
+
+Pattern: the `--` separator before positional URL arguments should be a standing convention for all git subprocess calls in the codebase. Atomic registry writes should be a shared utility in `registry.ts` rather than a per-caller concern.
 
 ### Branch akubly/upstream-11a-canonical-template-failshut review (2026-05-15T22:59:10.798-07:00)
 

@@ -4,6 +4,16 @@
 
 📌 **Team update (2026-05-18T19:19:14Z — Piece 14 Complete):** Piece 14 squad assign (EECOM implementation + FIDO review, APPROVED) landed successfully. SDK registry schema extended: added `status`, `initUri`, `stateBackend` fields to RegistryEntry, plus unknown-field passthrough via `[key: string]: unknown`. Existing registry files forward-compatible. If you're working on registry-touching features (pieces 15+), the extended schema is now canonical.
 
+## Learnings
+
+### Piece 14 adversarial TypeScript review (2026-05-18)
+
+- **Error codes as message prefixes are a TypeScript anti-pattern.** All `ERR_ASSIGN_*` codes are embedded in the human-readable message string on `ConfigurationError`. No `.code` property, no exported `AssignErrorCode` type union. Programmatic callers must regex-parse the message. Future commands should declare a typed error code union and attach it as a discriminable property.
+- **`--key=value` arg parsing must be explicitly handled.** The `args.indexOf('--flag')` pattern silently ignores the `=`-delimited form (`--clone-to=./path`). This produces a misleading error for `squad assign url --clone-to=./path`. Shared arg-value helper needed in cli-entry.
+- **Discriminated unions need `never` guards in switches.** A switch on a `kind` field without a `default: { const _: never = result.kind; }` arm silently misses new variants at compile time. This should be a team-wide convention.
+- **`RegistryEntry [key: string]: unknown` is safer than feared.** Named properties take precedence for direct property access; the index signature only affects bracket-form reads. The concern is real but lower-priority than it appears.
+- **`noUncheckedIndexedAccess` compliance throughout.** All array index reads in piece 14 code use the `!` operator correctly. Zero tsc errors.
+
 ## Current Session Learnings
 
 ### Piece 10 revision — init validation path (2026-05-15T23:15:56Z)
@@ -83,3 +93,9 @@ See `.squad/decisions.md` for full findings and `.squad/orchestration-log/` for 
 ### Piece 08a Adversarial Review Outcome (2026-05-14T21:19:34Z)
 
 📌 **Rejection & Lockout Notice:** Piece 08a (read-only command resolver migration, commit fcb0cf1a) received adversarial reviews from Flight (APPROVE), FIDO (REQUEST CHANGES), RETRO (APPROVE), and CAPCOM (REJECT). CAPCOM's boundary-discipline rejection (CLI subpath imports, dispatch inconsistency) combined with FIDO's blocking test gaps resulted in **REJECTED** final verdict. CONTROL (author) locked out per strict Reviewer Rejection Protocol. CAPCOM self-nominated and accepted as revision owner. Revision scope: SDK barrel export fix + test coverage for `SQUAD_TEAM_ROOT` parity + full-suite gate compliance. See `.squad/decisions.md` for full findings and orchestration-log for per-reviewer details.
+
+### Piece 14 Adversarial Review — TypeScript Findings Landed (2026-05-18)
+
+📌 **CONTROL TypeScript findings from piece 14 adversarial pass successfully addressed in revision.**
+
+Initial review identified three TypeScript pattern violations: (T1) error codes embedded in message string, no typed union or `.code` property (T2) `--flag=value` arg parsing silently ignored, producing false errors (T3) discriminated union switch on `result.kind` lacks `never` default guard. Revision commit 1a47e601 delivered: `AssignErrorCode` union exported and discriminable on error objects; `argValue` helper handles both `--flag value` and `--flag=value` forms; `never` guard added to result.kind switch. All 3 majors addressed. Additional deferred: T8 (index-signature refactor — acceptable architectural debt). Branch ready for Phase C. Decision merged: typed error codes, discriminated unions, and exhaustiveness guards now team-wide conventions.

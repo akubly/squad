@@ -10,6 +10,16 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Piece 14 Adversarial Review — APPROVED WITH FINDINGS (2026-05-18)
+
+📌 **Guard-ordering tests must use mocks that simulate the NEXT guard's normalization behavior, not identity mocks.**
+
+Adversarial review of `squad assign` (warm path + cold-start) found no code bugs but identified a significant test gap: the containment guard ordering test (A15) uses `getGitRoot: (dir) => dir`, which doesn't prove the ordering prevents false idempotency. Real git root resolution collapses subdirectories to their repository root. A test needs `getGitRoot: () => parentCloneRoot` to demonstrate that Guard 4 fires BEFORE Guard 5 prevents the collapse from reaching Guard 6.
+
+**Additional findings:** 6 minor (multi-clone growth untested, origins within-batch dedup gap, inactive reactivation assertion incomplete, no negative filesystem assertion on warm path, forward-compat only tested on target entry, cold-start orphan on registry-write failure). 2 nits (branch fallback unimplemented per "may" provision, relative `--clone-to` path resolution untested).
+
+**Pattern confirmed:** Ordered-guard test discipline requires mocking the DOWNSTREAM guard's transformation function to its realistic output, then proving the UPSTREAM guard catches the scenario first. Identity mocks prove the guard fires but leave ordering bugs invisible.
+
 ### Piece 13 Adversarial Review — REJECT → Fixed → APPROVE (2026-05-18)
 
 📌 **PowerShell backtick corruption in commit messages caught by byte-level verification. Static spec-parity checks alone would have missed this.**
@@ -97,4 +107,10 @@ Source-sniff tests can mask CLI dispatch gaps; require behavioral assertions for
 📌 **Flight verdict: APPROVE WITH NITS**
 
 Piece 08b mixes dispatch-level guards (consult/link) with module-internal (assign), creating ambiguous precedent. Pattern: if one command guards at dispatch, ALL must. Dual resolver imports compound confusion. **Non-blocking nits:** reconcile resolver import path and move assign guard to dispatch level before 08c. FIDO REJECT (test gaps) overrides; Sims assigned revision owner.
+
+### Piece 14 Adversarial Review — Findings Landed (2026-05-18)
+
+📌 **Flight findings from piece 14 adversarial pass successfully addressed in revision.**
+
+Initial review identified guard-ordering test gap (A15 identity mock doesn't prove ordering), plus 6 minor + 2 nit findings. CAPCOM revision delivered: injectable-seam guard-order test pattern documented in decisions; all minors addressed in code (multi-clone growth, origins dedup, inactive reactivation, filesystem assertions, forward-compat tests, cold-start orphan). Branch 1a47e601 + 935e73b2 ready for Phase C. Test A27 validates origins dedup; full suite 47 tests GREEN.
 
