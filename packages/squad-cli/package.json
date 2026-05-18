@@ -180,6 +180,10 @@
     "./commands/cast": {
       "types": "./dist/cli/commands/cast.d.ts",
       "import": "./dist/cli/commands/cast.js"
+    },
+    "./commands/assign": {
+      "types": "./dist/commands/assign.d.ts",
+      "import": "./dist/commands/assign.js"
     }
   },
   "files": [

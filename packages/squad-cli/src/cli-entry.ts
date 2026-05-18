@@ -1145,7 +1145,52 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (cmd === 'assign-to-copilot' || cmd === 'assign') {
+  if (cmd === 'assign') {
+    const callsignOrUrl = args.find(a => !a.startsWith('-'));
+    const cloneToIdx = args.indexOf('--clone-to');
+    const cloneTo = cloneToIdx !== -1 ? args[cloneToIdx + 1] : undefined;
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = callsignIdx !== -1 ? args[callsignIdx + 1] : undefined;
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = registryPathIdx !== -1 ? args[registryPathIdx + 1] : undefined;
+    const targetDirIdx = args.indexOf('--target-dir');
+    const targetDir = targetDirIdx !== -1 ? args[targetDirIdx + 1] : undefined;
+    const { runAssign } = await import('./commands/assign.js');
+    try {
+      const result = await runAssign({
+        callsignOrUrl,
+        cloneTo,
+        callsign,
+        registryPath,
+        targetDir,
+        cwd: getSquadStartDir(),
+      });
+      for (const w of result.warnings) {
+        console.warn(w);
+      }
+      switch (result.kind) {
+        case 'assigned':
+          console.log(`✓ Assigned "${result.callsign}" → ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'reactivated':
+          console.log(`✓ Reactivated "${result.callsign}" → ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'alreadyAssigned':
+          console.log(`ℹ "${result.callsign}" already assigned to ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'noOp':
+          console.log(`ℹ Running from squad host — no assignment needed for "${result.callsign}"`);
+          break;
+      }
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cmd === 'assign-to-copilot') {
     // Dispatch-level guard: consistent pattern with consult and link.
     const guardResult = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
     if (!guardResult) {

@@ -9,6 +9,10 @@ export interface RegistryEntry {
   path: string;
   origins?: string[];
   clones?: string[];
+  status?: 'active' | 'inactive';
+  initUri?: string;
+  stateBackend?: 'worktree' | 'local' | 'external';
+  [key: string]: unknown;
 }
 
 export interface Registry {
@@ -107,6 +111,36 @@ function validateEntry(value: unknown, entryIndex: number): RegistryEntry {
       }
       return clonePath;
     });
+  }
+
+  if (value['status'] !== undefined) {
+    if (value['status'] !== 'active' && value['status'] !== 'inactive') {
+      throw validationError(`Registry entry ${entryIndex} status must be 'active' or 'inactive'.`);
+    }
+    entry.status = value['status'] as 'active' | 'inactive';
+  }
+
+  if (value['initUri'] !== undefined) {
+    if (typeof value['initUri'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} initUri must be a string.`);
+    }
+    entry.initUri = value['initUri'];
+  }
+
+  if (value['stateBackend'] !== undefined) {
+    const validBackends = ['worktree', 'local', 'external'];
+    if (!validBackends.includes(value['stateBackend'] as string)) {
+      throw validationError(`Registry entry ${entryIndex} stateBackend must be one of ${validBackends.join(', ')}.`);
+    }
+    entry.stateBackend = value['stateBackend'] as 'worktree' | 'local' | 'external';
+  }
+
+  // Preserve unknown forward-compatible fields for round-trip fidelity.
+  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend']);
+  for (const [key, val] of Object.entries(value)) {
+    if (!knownFields.has(key)) {
+      entry[key] = val;
+    }
   }
 
   return entry;
