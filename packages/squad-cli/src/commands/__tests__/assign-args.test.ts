@@ -1,0 +1,114 @@
+/**
+ * Tests for the squad assign CLI argument parser.
+ *
+ * Verifies that both `--flag value` and `--flag=value` forms are handled
+ * for all named assign options.
+ *
+ * @module commands/__tests__/assign-args.test
+ */
+
+import { describe, it, expect } from 'vitest';
+import { argValue, parseAssignArgs } from '../assign-args.js';
+
+describe('argValue', () => {
+  it('returns the next token for --flag value form', () => {
+    expect(argValue(['--clone-to', './path'], '--clone-to')).toBe('./path');
+  });
+
+  it('returns the suffix for --flag=value form', () => {
+    expect(argValue(['--clone-to=./path'], '--clone-to')).toBe('./path');
+  });
+
+  it('prefers --flag=value over --flag value when both present', () => {
+    // The = form is checked first via find, so it wins.
+    expect(argValue(['--clone-to=eq-val', '--clone-to', 'space-val'], '--clone-to')).toBe('eq-val');
+  });
+
+  it('returns undefined when flag is absent', () => {
+    expect(argValue(['--other', 'val'], '--clone-to')).toBeUndefined();
+  });
+
+  it('handles empty value in --flag= form', () => {
+    expect(argValue(['--clone-to='], '--clone-to')).toBe('');
+  });
+
+  it('handles values containing = in --flag=value form', () => {
+    // e.g. --registry-path=./dir/reg.json
+    expect(argValue(['--registry-path=./dir/reg.json'], '--registry-path')).toBe('./dir/reg.json');
+  });
+});
+
+describe('parseAssignArgs', () => {
+  it('parses positional callsign-or-URL as the first non-flag token', () => {
+    const result = parseAssignArgs(['alpha']);
+    expect(result.callsignOrUrl).toBe('alpha');
+  });
+
+  it('skips flag value tokens when finding the positional argument', () => {
+    // --clone-to ./dest comes first; ./dest is a flag value, not the positional.
+    const result = parseAssignArgs(['--clone-to', './dest', 'https://github.com/example/squad.git']);
+    expect(result.callsignOrUrl).toBe('https://github.com/example/squad.git');
+    expect(result.cloneTo).toBe('./dest');
+  });
+
+  it('parses --clone-to in space-separated form', () => {
+    const result = parseAssignArgs(['alpha', '--clone-to', './my-squad']);
+    expect(result.cloneTo).toBe('./my-squad');
+  });
+
+  it('parses --clone-to in equals-delimited form', () => {
+    const result = parseAssignArgs(['alpha', '--clone-to=./my-squad']);
+    expect(result.cloneTo).toBe('./my-squad');
+  });
+
+  it('parses --callsign in space-separated form', () => {
+    const result = parseAssignArgs(['https://github.com/example/squad.git', '--callsign', 'custom']);
+    expect(result.callsign).toBe('custom');
+  });
+
+  it('parses --callsign in equals-delimited form', () => {
+    const result = parseAssignArgs(['https://github.com/example/squad.git', '--callsign=custom']);
+    expect(result.callsign).toBe('custom');
+  });
+
+  it('parses --registry-path in space-separated form', () => {
+    const result = parseAssignArgs(['alpha', '--registry-path', '/abs/path/registry.json']);
+    expect(result.registryPath).toBe('/abs/path/registry.json');
+  });
+
+  it('parses --registry-path in equals-delimited form', () => {
+    const result = parseAssignArgs(['alpha', '--registry-path=/abs/path/registry.json']);
+    expect(result.registryPath).toBe('/abs/path/registry.json');
+  });
+
+  it('parses --target-dir in space-separated form', () => {
+    const result = parseAssignArgs(['alpha', '--target-dir', './product']);
+    expect(result.targetDir).toBe('./product');
+  });
+
+  it('parses --target-dir in equals-delimited form', () => {
+    const result = parseAssignArgs(['alpha', '--target-dir=./product']);
+    expect(result.targetDir).toBe('./product');
+  });
+
+  it('returns all undefined for empty args', () => {
+    const result = parseAssignArgs([]);
+    expect(result.callsignOrUrl).toBeUndefined();
+    expect(result.cloneTo).toBeUndefined();
+    expect(result.callsign).toBeUndefined();
+    expect(result.registryPath).toBeUndefined();
+    expect(result.targetDir).toBeUndefined();
+  });
+
+  it('handles mixed = and space forms for different flags', () => {
+    const result = parseAssignArgs([
+      'https://github.com/example/squad.git',
+      '--clone-to=./dest',
+      '--callsign',
+      'my-squad',
+    ]);
+    expect(result.callsignOrUrl).toBe('https://github.com/example/squad.git');
+    expect(result.cloneTo).toBe('./dest');
+    expect(result.callsign).toBe('my-squad');
+  });
+});

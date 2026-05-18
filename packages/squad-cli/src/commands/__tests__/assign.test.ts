@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { runAssign } from '../assign.js';
-import type { SquadAssignOpts } from '../assign.js';
+import type { SquadAssignOpts, AssignKind, SquadAssignResult } from '../assign.js';
 
 const TEST_ROOT = path.join(process.cwd(), `.test-assign-${randomBytes(4).toString('hex')}`);
 
@@ -406,8 +406,10 @@ describe('runAssign: origin collision', () => {
     });
 
     expect(result.kind).toBe('assigned');
-    expect(result.warnings.length).toBeGreaterThan(0);
-    expect(result.warnings[0]).toMatch(/beta/);
+    // TypeScript cannot narrow based on expect(), so cast to access warnings on the assigned variant.
+    const warnings = (result as { warnings: string[] }).warnings;
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toMatch(/beta/);
   });
 
   it('A19 two-entry origin ambiguity → error', async () => {
@@ -733,5 +735,329 @@ describe('runAssign: cold-start', () => {
     const reg = readRegistry(registryPath);
     const entry = (reg.squads as Record<string, unknown>[])[0]!;
     expect(entry['callsign']).toBe('custom-name');
+  });
+});
+
+// ============================================================
+// A15b — Guard ordering: containment fires before git-root collapse (F1)
+// ============================================================
+
+describe('runAssign: guard ordering (containment before idempotency)', () => {
+  let hostDir: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    cloneDir = makeDir('clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadPath,
+      origins: [],
+      clones: [cloneDir],  // cloneDir is already assigned
+    }]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A15b containment guard fires before git-root collapse (guard ordering)', async () => {
+    // Scenario: user runs from a subdirectory of an already-assigned clone.
+    // Real git: getGitRoot('/clone/src') → '/clone'.
+    // If guard order were reversed (idempotency before containment), the git-root
+    // collapse would make the path match the existing clone entry and return
+    // 'alreadyAssigned' — a spurious success.
+    // Correct order (containment guard 4 before idempotency guard 6) ensures
+    // ERR_ASSIGN_CONTAINMENT is thrown regardless of git-root resolution.
+    const subdir = path.join(cloneDir, 'src');
+    fs.mkdirSync(subdir, { recursive: true });
+
+    await expect(
+      runAssign({
+        callsignOrUrl: 'alpha',
+        registryPath,
+        cwd: subdir,
+        // Simulates real git: root always resolves to parent clone root.
+        getGitRoot: () => cloneDir,
+        getRemoteUrls: () => [],
+      }),
+    ).rejects.toThrow(/ERR_ASSIGN_CONTAINMENT/);
+  });
+});
+
+// ============================================================
+// S1 / S7 — git clone URL passed through as a literal string
+// ============================================================
+
+describe('runAssign: URL argument handling', () => {
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    cloneDir = makeDir('product-clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, []);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A22 URL starting with -- is passed to cloneCommand as a literal string, not a git flag', async () => {
+    const capturedUrls: string[] = [];
+    const cloneDest = path.join(TEST_ROOT, 'evil-dest');
+
+    await expect(
+      runAssign({
+        callsignOrUrl: '--upload-pack=/bad/binary',
+        cloneTo: cloneDest,
+        registryPath,
+        cwd: cloneDir,
+        getGitRoot: (dir) => dir,
+        getRemoteUrls: () => [],
+        cloneCommand: async (url, _dest) => {
+          capturedUrls.push(url);
+          throw new Error('not a real git server');
+        },
+      }),
+    ).rejects.toThrow(/ERR_ASSIGN_CLONE_FAILED/);
+
+    // The URL must reach cloneCommand verbatim — not parsed as a git flag.
+    expect(capturedUrls[0]).toBe('--upload-pack=/bad/binary');
+  });
+});
+
+// ============================================================
+// F7 — cold-start orphan removal on registry write failure
+// ============================================================
+
+describe('runAssign: cold-start registry write failure rollback', () => {
+  let cloneDir: string;
+  let registryPath: string;
+  let cloneDest: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    cloneDir = makeDir('product-clone');
+    cloneDest = path.join(TEST_ROOT, 'squad-host');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, []);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A23 orphan clone removed when registry write fails after successful clone', async () => {
+    const cloneCommand = async (_url: string, dest: string) => {
+      fs.mkdirSync(path.join(dest, '.squad'), { recursive: true });
+      fs.writeFileSync(path.join(dest, '.squad', 'team.md'), '# Team\n');
+    };
+
+    await expect(
+      runAssign({
+        callsignOrUrl: 'https://github.com/example/squad.git',
+        cloneTo: cloneDest,
+        registryPath,
+        cwd: cloneDir,
+        getGitRoot: (dir) => dir,
+        getRemoteUrls: () => [],
+        cloneCommand,
+        _writeRegistryFn: () => { throw new Error('disk full'); },
+      }),
+    ).rejects.toThrow('disk full');
+
+    // Orphan clone must be removed — no directory left without a registry reference.
+    expect(fs.existsSync(cloneDest)).toBe(false);
+  });
+});
+
+// ============================================================
+// F2 — multi-clone growth test (same callsign, two distinct clones)
+// ============================================================
+
+describe('runAssign: multi-clone growth', () => {
+  let hostDir: string;
+  let cloneDir1: string;
+  let cloneDir2: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    cloneDir1 = makeDir('clone1');
+    cloneDir2 = makeDir('clone2');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadPath,
+      origins: [],
+      clones: [],
+    }]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A24 assigning two distinct clone directories grows clones[] to length 2 without duplication', async () => {
+    const opts: Omit<SquadAssignOpts, 'cwd'> = {
+      callsignOrUrl: 'alpha',
+      registryPath,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [],
+    };
+
+    await runAssign({ ...opts, cwd: cloneDir1 });
+    await runAssign({ ...opts, cwd: cloneDir2 });
+
+    const reg = readRegistry(registryPath);
+    const entry = (reg.squads as Record<string, unknown>[])[0]!;
+    const clones = entry['clones'] as string[];
+    expect(clones).toHaveLength(2);
+    expect(clones).toContain(cloneDir1);
+    expect(clones).toContain(cloneDir2);
+  });
+});
+
+// ============================================================
+// F4 — A5 extended: assert clones[] after reactivation
+// ============================================================
+
+describe('runAssign: reactivation clone binding', () => {
+  let hostDir: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    cloneDir = makeDir('clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadPath,
+      status: 'inactive',
+      origins: [],
+      clones: [],
+    }]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A5b reactivation binds the new clone directory into clones[]', async () => {
+    const result = await runAssign({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [],
+    }) satisfies SquadAssignResult;
+
+    expect(result.kind satisfies AssignKind).toBe('reactivated');
+
+    const reg = readRegistry(registryPath);
+    const entry = (reg.squads as Record<string, unknown>[])[0]!;
+    expect(entry['status']).toBe('active');
+    // F4: the newly assigned clone path must be bound in clones[].
+    expect((entry['clones'] as string[])).toContain(cloneDir);
+  });
+});
+
+// ============================================================
+// F5 — warm path leaves product repo filesystem untouched
+// ============================================================
+
+describe('runAssign: no writes to product clone directory', () => {
+  let hostDir: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    cloneDir = makeDir('clone');
+    // Create a sentinel file so the listing is non-empty and predictable.
+    fs.writeFileSync(path.join(cloneDir, 'app.ts'), '// app\n');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadPath,
+      origins: [],
+      clones: [],
+    }]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A25 warm path does not write any files into the product clone directory', async () => {
+    const before = fs.readdirSync(cloneDir).sort();
+
+    await runAssign({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [],
+    });
+
+    const after = fs.readdirSync(cloneDir).sort();
+    expect(after).toEqual(before);
+  });
+});
+
+// ============================================================
+// F6 — forward-compat: sibling entries' unknown fields survive assign
+// ============================================================
+
+describe('runAssign: forward-compat preserves sibling entry fields', () => {
+  let hostDir: string;
+  let hostDir2: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    hostDir2 = makeDir('host2');
+    const squadPath2 = makeSquadHost(hostDir2);
+    cloneDir = makeDir('clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    // Two entries: alpha (target) and beta (sibling with unknown field).
+    writeRegistry(registryPath, [
+      { callsign: 'alpha', path: squadPath, origins: [], clones: [] },
+      { callsign: 'beta', path: squadPath2, origins: [], clones: [], _siblingFutureField: 'must-survive' },
+    ]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('A26 sibling entry unknown fields survive when assigning to a different entry', async () => {
+    await runAssign({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => [],
+    });
+
+    const reg = readRegistry(registryPath);
+    const beta = (reg.squads as Record<string, unknown>[]).find(s => s['callsign'] === 'beta')!;
+    expect(beta['_siblingFutureField']).toBe('must-survive');
   });
 });

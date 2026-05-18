@@ -1146,15 +1146,8 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'assign') {
-    const callsignOrUrl = args.find(a => !a.startsWith('-'));
-    const cloneToIdx = args.indexOf('--clone-to');
-    const cloneTo = cloneToIdx !== -1 ? args[cloneToIdx + 1] : undefined;
-    const callsignIdx = args.indexOf('--callsign');
-    const callsign = callsignIdx !== -1 ? args[callsignIdx + 1] : undefined;
-    const registryPathIdx = args.indexOf('--registry-path');
-    const registryPath = registryPathIdx !== -1 ? args[registryPathIdx + 1] : undefined;
-    const targetDirIdx = args.indexOf('--target-dir');
-    const targetDir = targetDirIdx !== -1 ? args[targetDirIdx + 1] : undefined;
+    const { parseAssignArgs } = await import('./commands/assign-args.js');
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir } = parseAssignArgs(args);
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1165,8 +1158,11 @@ async function main(): Promise<void> {
         targetDir,
         cwd: getSquadStartDir(),
       });
-      for (const w of result.warnings) {
-        console.warn(w);
+      // Emit warnings only on result kinds that carry them.
+      if (result.kind === 'assigned' || result.kind === 'reactivated') {
+        for (const w of result.warnings) {
+          console.warn(w);
+        }
       }
       switch (result.kind) {
         case 'assigned':
@@ -1181,6 +1177,13 @@ async function main(): Promise<void> {
         case 'noOp':
           console.log(`ℹ Running from squad host — no assignment needed for "${result.callsign}"`);
           break;
+        default: {
+          // Compile-time exhaustiveness guard — TypeScript will error here if a
+          // new AssignKind variant is added without a corresponding case above.
+          const _exhaustive: never = result;
+          void _exhaustive;
+          break;
+        }
       }
     } catch (err) {
       const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;

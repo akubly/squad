@@ -189,13 +189,46 @@ function _installCoordinatorAgent(home: string): void {
 
 export type AssignKind = 'assigned' | 'alreadyAssigned' | 'reactivated' | 'noOp';
 
-export interface SquadAssignResult {
-  kind: AssignKind;
-  callsign: string;
-  hostPath: string;
-  clonePath?: string;
-  warnings: string[];
+/**
+ * Typed union of every error code that runAssign can throw.
+ * Use `err.code` on a caught `AssignError` to branch programmatically
+ * without parsing the human-readable message string.
+ */
+export type AssignErrorCode =
+  | 'ERR_ASSIGN_MISSING_ARG'
+  | 'ERR_ASSIGN_URL_WITHOUT_CLONE_TO'
+  | 'ERR_ASSIGN_NO_REGISTRY'
+  | 'ERR_ASSIGN_UNKNOWN_CALLSIGN'
+  | 'ERR_ASSIGN_HOST_PATH_MISSING'
+  | 'ERR_ASSIGN_NOT_GIT_REPO'
+  | 'ERR_ASSIGN_CONTAINMENT'
+  | 'ERR_ASSIGN_CROSS_CALLSIGN'
+  | 'ERR_ASSIGN_ORIGIN_AMBIGUITY'
+  | 'ERR_ASSIGN_CLONE_DEST_NOT_EMPTY'
+  | 'ERR_ASSIGN_CALLSIGN_COLLISION'
+  | 'ERR_ASSIGN_CLONE_FAILED'
+  | 'ERR_ASSIGN_NO_TEAM_MD';
+
+/** Structured error thrown by runAssign — carries a typed error code. */
+export class AssignError extends ConfigurationError {
+  public readonly code: AssignErrorCode;
+  constructor(code: AssignErrorCode, message: string) {
+    super(`${code}: ${message}`, { timestamp: new Date() });
+    this.name = 'AssignError';
+    this.code = code;
+  }
 }
+
+/**
+ * Discriminated result union for runAssign.
+ *
+ * `warnings` is only present on the `assigned` and `reactivated` kinds, which
+ * are the only variants that can carry meaningful diagnostic information. The
+ * `alreadyAssigned` and `noOp` variants carry no warnings by design.
+ */
+export type SquadAssignResult =
+  | { kind: 'assigned' | 'reactivated'; callsign: string; hostPath: string; clonePath?: string; warnings: string[] }
+  | { kind: 'alreadyAssigned' | 'noOp'; callsign: string; hostPath: string; clonePath?: string };
 
 export interface SquadAssignOpts {
   /** First positional argument: callsign (warm path) or URL (cold-start with --clone-to). */
@@ -210,12 +243,16 @@ export interface SquadAssignOpts {
   targetDir?: string;
   /** Working directory for git and path operations (defaults to process.cwd()). */
   cwd?: string;
+  /** Injectable environment — falls back to process.env for SQUAD_REGISTRY_PATH resolution. */
+  env?: Record<string, string | undefined>;
   /** Injectable seam: git clone. Production default uses git clone. */
   cloneCommand?: (url: string, dest: string) => Promise<void>;
   /** Injectable seam: git root resolver. Production default uses execFileSync git. */
   getGitRoot?: (dir: string) => string | null;
   /** Injectable seam: fetch remote URL collector. Production default uses git remote -v. */
   getRemoteUrls?: (dir: string) => string[];
+  /** @internal Injectable seam: override registry write. For testing failure paths only. */
+  _writeRegistryFn?: (filePath: string, registry: Registry) => void;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -264,7 +301,9 @@ function _findCloseMatch(query: string, candidates: string[]): string | null {
 }
 
 async function _defaultCloneCommand(url: string, dest: string): Promise<void> {
-  _assignExecFileSync('git', ['clone', url, dest], { stdio: 'inherit' });
+  // The `--` separator ensures git treats the next token as a positional
+  // URL argument, not as a flag — guarding against values like --upload-pack=…
+  _assignExecFileSync('git', ['clone', '--', url, dest], { stdio: 'inherit' });
 }
 
 /**
@@ -283,31 +322,34 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   const gitRootFn = opts.getGitRoot ?? _defaultGetGitRoot;
   const remotesFn = opts.getRemoteUrls ?? collectCwdRemoteUrls;
   const cloneFn = opts.cloneCommand ?? _defaultCloneCommand;
+  const writeRegistryFn = opts._writeRegistryFn ?? writeRegistry;
 
   // Guard 1a: Missing argument.
   const rawArg = opts.callsignOrUrl?.trim() ?? '';
   if (!rawArg) {
-    throw new ConfigurationError(
-      'ERR_ASSIGN_MISSING_ARG: Provide a callsign or URL.\n' +
+    throw new AssignError(
+      'ERR_ASSIGN_MISSING_ARG',
+      'Provide a callsign or URL.\n' +
       '  squad assign <callsign>\n' +
       '  squad assign <url> --clone-to <path>',
-      { timestamp: new Date() },
     );
   }
 
   // Cold-start path: explicit --clone-to triggers clone regardless of arg shape.
   if (opts.cloneTo !== undefined) {
-    return _coldStart({ rawArg, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn });
+    // Resolve cloneTo at the call site so _coldStart operates on a concrete string.
+    const cloneTo = opts.cloneTo;
+    return _coldStart({ rawArg, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn });
   }
 
   // URL without --clone-to: surface a teaching error.
   if (_isUrlArg(rawArg)) {
-    throw new ConfigurationError(
-      `ERR_ASSIGN_URL_WITHOUT_CLONE_TO: To assign from a URL, also pass --clone-to <path>.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_URL_WITHOUT_CLONE_TO',
+      `To assign from a URL, also pass --clone-to <path>.\n` +
       `  Example: squad assign ${rawArg} --clone-to ./squad-host\n` +
       `Or clone manually and use the callsign:\n` +
       `  git clone ${rawArg} ./squad-host && squad assign <callsign>`,
-      { timestamp: new Date() },
     );
   }
 
@@ -327,11 +369,11 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   const { callsign, opts, resolvedTargetDir, gitRootFn, remotesFn } = ctx;
   const warnings: string[] = [];
 
-  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath });
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
   if (!registryFilePath) {
-    throw new ConfigurationError(
-      'ERR_ASSIGN_NO_REGISTRY: Cannot locate registry. Set SQUAD_REGISTRY_PATH or run squad init first.',
-      { timestamp: new Date() },
+    throw new AssignError(
+      'ERR_ASSIGN_NO_REGISTRY',
+      'Cannot locate registry. Set SQUAD_REGISTRY_PATH or run squad init first.',
     );
   }
 
@@ -343,36 +385,36 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   if (!entry) {
     const allCallsigns = existingSquads.map(s => s.callsign).filter((c): c is string => typeof c === 'string');
     const suggestion = _findCloseMatch(callsign, allCallsigns);
-    throw new ConfigurationError(
-      `ERR_ASSIGN_UNKNOWN_CALLSIGN: No squad registered as "${callsign}".` +
+    throw new AssignError(
+      'ERR_ASSIGN_UNKNOWN_CALLSIGN',
+      `No squad registered as "${callsign}".` +
       (suggestion ? `\n  Did you mean "${suggestion}"?` : '') +
       '\n  Run "squad list" to see registered squads.',
-      { timestamp: new Date() },
     );
   }
 
   // Guard 2: Host path exists and contains a squad host.
   const hostSquadDir = entry.path;
   if (!fs.existsSync(hostSquadDir)) {
-    throw new ConfigurationError(
-      `ERR_ASSIGN_HOST_PATH_MISSING: The squad host path "${hostSquadDir}" does not exist.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_HOST_PATH_MISSING',
+      `The squad host path "${hostSquadDir}" does not exist.\n` +
       '  Update the registry entry or re-run squad init to recreate the host.',
-      { timestamp: new Date() },
     );
   }
   const teamMdPath = path.join(hostSquadDir, 'team.md');
   if (!fs.existsSync(teamMdPath)) {
-    throw new ConfigurationError(
-      `ERR_ASSIGN_HOST_PATH_MISSING: "${hostSquadDir}" does not contain team.md.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_HOST_PATH_MISSING',
+      `"${hostSquadDir}" does not contain team.md.\n` +
       '  The path may not be a valid squad host.',
-      { timestamp: new Date() },
     );
   }
 
   // Guard 3: Host-path guard — assigning from the squad host itself is a no-op.
   const hostParentDir = path.dirname(hostSquadDir);
   if (normalisedPathKey(resolvedTargetDir) === normalisedPathKey(hostParentDir)) {
-    return { kind: 'noOp', callsign, hostPath: hostSquadDir, warnings: [] };
+    return { kind: 'noOp', callsign, hostPath: hostSquadDir };
   }
 
   // Guard 4: Containment guard — assigning from inside an already-assigned clone.
@@ -387,10 +429,10 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
         continue;
       }
       if (isChild) {
-        throw new ConfigurationError(
-          `ERR_ASSIGN_CONTAINMENT: The target directory is inside a registered clone root "${clone}".\n` +
+        throw new AssignError(
+          'ERR_ASSIGN_CONTAINMENT',
+          `The target directory is inside a registered clone root "${clone}".\n` +
           '  Run squad assign from the clone root directory.',
-          { timestamp: new Date() },
         );
       }
     }
@@ -399,10 +441,10 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   // Guard 5: Git-root resolution for the target clone.
   const gitRoot = gitRootFn(resolvedTargetDir);
   if (!gitRoot) {
-    throw new ConfigurationError(
-      `ERR_ASSIGN_NOT_GIT_REPO: "${resolvedTargetDir}" is not inside a Git repository.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_NOT_GIT_REPO',
+      `"${resolvedTargetDir}" is not inside a Git repository.\n` +
       '  Run squad assign from the root of your product clone.',
-      { timestamp: new Date() },
     );
   }
   const clonePath = gitRoot;
@@ -410,7 +452,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   // Guard 6: Idempotency — same callsign and same git root already assigned.
   const existingClones = entry.clones ?? [];
   if (existingClones.some(c => normalisedPathKey(c) === normalisedPathKey(clonePath))) {
-    return { kind: 'alreadyAssigned', callsign, hostPath: hostSquadDir, clonePath, warnings: [] };
+    return { kind: 'alreadyAssigned', callsign, hostPath: hostSquadDir, clonePath };
   }
 
   // Guard 7: Cross-entry clone collision — git root already in another entry's clones[].
@@ -418,17 +460,18 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     if (e.callsign === callsign) continue;
     const otherClones = e.clones ?? [];
     if (otherClones.some(c => normalisedPathKey(c) === normalisedPathKey(clonePath))) {
-      throw new ConfigurationError(
-        `ERR_ASSIGN_CROSS_CALLSIGN: "${clonePath}" is already assigned to squad "${e.callsign ?? e.path}".\n` +
+      throw new AssignError(
+        'ERR_ASSIGN_CROSS_CALLSIGN',
+        `"${clonePath}" is already assigned to squad "${e.callsign ?? e.path}".\n` +
         '  Run "squad unassign" to remove the existing assignment before re-assigning.',
-        { timestamp: new Date() },
       );
     }
   }
 
   // Guard 8: Origin collision check.
   const rawRemotes = remotesFn(resolvedTargetDir);
-  const normalizedNewOrigins = rawRemotes.map(normalizeRemoteUrl);
+  // Deduplicate within the incoming set before comparing against existing origins.
+  const normalizedNewOrigins = Array.from(new Set(rawRemotes.map(normalizeRemoteUrl)));
 
   const originMatchingEntries = existingSquads.filter(e => {
     if (e.callsign === callsign) return false;
@@ -438,10 +481,10 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
 
   if (originMatchingEntries.length >= 2) {
     const names = originMatchingEntries.map(e => `"${e.callsign ?? e.path}"`).join(', ');
-    throw new ConfigurationError(
-      `ERR_ASSIGN_ORIGIN_AMBIGUITY: The current fetch remotes match origins in multiple squads: ${names}.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_ORIGIN_AMBIGUITY',
+      `The current fetch remotes match origins in multiple squads: ${names}.\n` +
       '  Use an explicit --callsign to disambiguate.',
-      { timestamp: new Date() },
     );
   }
   if (originMatchingEntries.length === 1) {
@@ -461,7 +504,8 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   const updatedEntry: RegistryEntry = {
     ...entry,
     clones: [...existingClones, clonePath],
-    origins: [...existingOrigins, ...originsToAdd],
+    // Defensive dedup at write boundary: deduplicate origins regardless of source.
+    origins: Array.from(new Set([...existingOrigins, ...originsToAdd])),
     ...(wasInactive ? { status: 'active' as const } : {}),
   };
 
@@ -491,34 +535,39 @@ interface _ColdStartCtx {
   gitRootFn: (dir: string) => string | null;
   remotesFn: (dir: string) => string[];
   cloneFn: (url: string, dest: string) => Promise<void>;
+  /** Resolved clone destination — non-optional so _coldStart operates on a concrete string. */
+  cloneTo: string;
+  /** Registry write function — injectable for testing failure paths. */
+  writeRegistryFn: (filePath: string, registry: Registry) => void;
 }
 
 async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
-  const { rawArg: url, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn } = ctx;
+  const { rawArg: url, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn } = ctx;
 
   // Derive or accept callsign.
   const callsign = opts.callsign ?? _deriveCallsignFromUrl(url);
 
   // Resolve and validate the clone destination.
-  const cloneDest = path.resolve(cwd, opts.cloneTo!);
+  // cloneTo is already a concrete string (resolved at the runAssign call site).
+  const cloneDest = path.resolve(cwd, cloneTo);
   if (fs.existsSync(cloneDest)) {
     let isEmpty = true;
     try { isEmpty = fs.readdirSync(cloneDest).length === 0; } catch { isEmpty = false; }
     if (!isEmpty) {
-      throw new ConfigurationError(
-        `ERR_ASSIGN_CLONE_DEST_NOT_EMPTY: "${cloneDest}" already exists and is not empty.\n` +
+      throw new AssignError(
+        'ERR_ASSIGN_CLONE_DEST_NOT_EMPTY',
+        `"${cloneDest}" already exists and is not empty.\n` +
         '  Choose a different --clone-to path.',
-        { timestamp: new Date() },
       );
     }
   }
 
   // Load existing registry entries for pre-clone checks.
-  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath });
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
   if (!registryFilePath) {
-    throw new ConfigurationError(
-      'ERR_ASSIGN_NO_REGISTRY: Cannot locate registry. Set SQUAD_REGISTRY_PATH or run squad init first.',
-      { timestamp: new Date() },
+    throw new AssignError(
+      'ERR_ASSIGN_NO_REGISTRY',
+      'Cannot locate registry. Set SQUAD_REGISTRY_PATH or run squad init first.',
     );
   }
   const { registry } = loadRegistryFromDisk({ registryPath: registryFilePath });
@@ -529,10 +578,10 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   if (existingEntry) {
     const expectedPath = path.join(cloneDest, '.squad');
     if (normalisedPathKey(existingEntry.path) !== normalisedPathKey(expectedPath)) {
-      throw new ConfigurationError(
-        `ERR_ASSIGN_CALLSIGN_COLLISION: Callsign "${callsign}" is already registered at a different host path.\n` +
+      throw new AssignError(
+        'ERR_ASSIGN_CALLSIGN_COLLISION',
+        `Callsign "${callsign}" is already registered at a different host path.\n` +
         '  Choose a different --callsign.',
-        { timestamp: new Date() },
       );
     }
   }
@@ -541,11 +590,14 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   try {
     await cloneFn(url, cloneDest);
   } catch (err) {
+    // fs.rmSync({ recursive: true }) removes symlinks as symlink entries — it does
+    // not follow symlinks out of the clone directory, so outbound symlinks in the
+    // partially-cloned tree cannot cause files outside cloneDest to be deleted.
     try { fs.rmSync(cloneDest, { recursive: true, force: true }); } catch { /* ignore */ }
-    throw new ConfigurationError(
-      `ERR_ASSIGN_CLONE_FAILED: Failed to clone "${url}" to "${cloneDest}".\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_CLONE_FAILED',
+      `Failed to clone "${url}" to "${cloneDest}".\n` +
       `  ${err instanceof Error ? err.message : String(err)}`,
-      { timestamp: new Date() },
     );
   }
 
@@ -554,26 +606,27 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   const teamMdPath = path.join(squadDir, 'team.md');
   if (!fs.existsSync(teamMdPath)) {
     try { fs.rmSync(cloneDest, { recursive: true, force: true }); } catch { /* ignore */ }
-    throw new ConfigurationError(
-      `ERR_ASSIGN_NO_TEAM_MD: "${cloneDest}" does not contain .squad/team.md. ` +
+    throw new AssignError(
+      'ERR_ASSIGN_NO_TEAM_MD',
+      `"${cloneDest}" does not contain .squad/team.md. ` +
       'This repository is not a squad host. Clone directory has been removed.',
-      { timestamp: new Date() },
     );
   }
 
   // Bind the product clone (git-root of resolvedTargetDir).
   const gitRoot = gitRootFn(resolvedTargetDir);
   if (!gitRoot) {
-    throw new ConfigurationError(
-      `ERR_ASSIGN_NOT_GIT_REPO: "${resolvedTargetDir}" is not inside a Git repository.\n` +
+    throw new AssignError(
+      'ERR_ASSIGN_NOT_GIT_REPO',
+      `"${resolvedTargetDir}" is not inside a Git repository.\n` +
       '  Run squad assign from the root of your product clone.',
-      { timestamp: new Date() },
     );
   }
   const clonePath = gitRoot;
 
   const rawRemotes = remotesFn(resolvedTargetDir);
-  const normalizedNewOrigins = rawRemotes.map(normalizeRemoteUrl);
+  // Deduplicate within the incoming set before comparing against existing origins.
+  const normalizedNewOrigins = Array.from(new Set(rawRemotes.map(normalizeRemoteUrl)));
 
   const reactivating = existingEntry !== undefined;
   const baseEntry: RegistryEntry = existingEntry
@@ -594,7 +647,8 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     clones: existingClones.some(c => normalisedPathKey(c) === normalisedPathKey(clonePath))
       ? existingClones
       : [...existingClones, clonePath],
-    origins: [...existingOrigins, ...originsToAdd],
+    // Defensive dedup at write boundary: deduplicate origins regardless of source.
+    origins: Array.from(new Set([...existingOrigins, ...originsToAdd])),
     ...(reactivating ? { status: 'active' as const } : {}),
   };
 
@@ -605,7 +659,16 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   };
 
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
-  writeRegistry(registryFilePath, newRegistry);
+
+  // Wrap the registry write: if it fails after a successful clone, remove the
+  // orphan clone directory before re-throwing so it doesn't persist without a
+  // registry reference.
+  try {
+    writeRegistryFn(registryFilePath, newRegistry);
+  } catch (writeErr) {
+    try { fs.rmSync(cloneDest, { recursive: true, force: true }); } catch { /* ignore */ }
+    throw writeErr;
+  }
 
   return {
     kind: reactivating ? 'reactivated' : 'assigned',

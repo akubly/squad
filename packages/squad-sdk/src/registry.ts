@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
 import { resolveSquadHome } from './resolution.js';
 import { normalisedPathKey } from './path-utils.js';
@@ -225,9 +226,16 @@ export function writeRegistry(filePath: string, registry: Registry): void {
   const validated = validateRegistry(registry);
   const json = `${JSON.stringify(validated, null, 2)}\n`;
 
+  // Atomic write: write to a temp sibling file then rename into place.
+  // rename(2) is atomic on POSIX and effectively atomic on NTFS, so an
+  // interrupted write cannot leave the registry in a partially-written state.
+  // mode 0o600 restricts read access to the owning user on POSIX.
+  const tmpPath = `${filePath}.tmp-${randomBytes(4).toString('hex')}`;
   try {
-    fs.writeFileSync(filePath, json, 'utf8');
+    fs.writeFileSync(tmpPath, json, { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmpPath, filePath);
   } catch (error) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore — best-effort cleanup */ }
     const originalError = error instanceof Error ? error : undefined;
     throw validationError(
       `Unable to write registry file ${filePath}. Check file permissions and try again.`,
