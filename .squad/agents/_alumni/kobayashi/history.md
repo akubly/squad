@@ -13,91 +13,11 @@
 
 **Release & Merge Coordinator:** Kobayashi owns PR merge strategy, release versioning, branch infrastructure, orphaned PR detection, cross-branch synchronization. Specialized in conflict resolution, rebase strategy, merge-driver constraints.
 
-**Pre-Phase-1 Foundations (2026-02-21 to 2026-03-04):**
-- Established @changesets/cli for monorepo versioning (Issue #208)
-- Insider channel publish scaffolds (Issue #215)
-- Version model clarification: npm vs Public Repo separation
-- Migration strategy for squad-pr (public) → squad (beta): v0.8.17 target
-- PR #582 merge (Consult mode) to migration branch
-- Branch infrastructure: 3-branch model (main/dev/migration) implemented
-- Versioning progression: 0.7.0 stubs → 0.8.0–0.8.5.1 production releases
-- Key Learning: Worktree parallelism, .squad/ state safety via merge=union, multi-repo coordination patterns
+## Archive
 
-**Pre-Phase-1 PR Merges & Releases (2026-02-22 to 2026-03-05):**
-- Released v0.8.2, v0.8.3, v0.8.4, v0.8.5, v0.8.5.1 (incremental bug fixes)
-- Released v0.8.19: Nap & Doctor commands, template path fix (PR #185 merged, @williamhallatt)
-- Closed public repo issues #175 & #182: Verified superseding v1 implementations, credited @KalebCole and @uvirk
-- CI/CD readiness assessment complete
-- Branch cleanup and dev branch setup
-- Comprehensive remote branch audit
-- Merge workflows: dev→main→dev cycles
+Release and merge coordination learnings prior to 2026-03-07 archived to history-archive.md. See that file for release sequence validation, branch merge patterns, conflict resolution strategies, and version management learnings from Pre-Phase-1.
 
-## Learnings
-
-### Release v0.8.21 — GitHub Release Published, NPM Publish Still Blocked (2026-03-07T20:30:00Z)
-
-**ROOT CAUSE IDENTIFIED & RELEASE PUBLISHED.** GitHub Release was still in DRAFT status - this prevented the `release.published` event from triggering the npm publish workflow. Release is now published, but npm publish still blocked on NPM_TOKEN 2FA requirement.
-
-#### Execution Summary
-- **✅ Merge strategy:** Local merge (git checkout main && git merge origin/dev) with conflict resolution
-- **✅ Conflicts resolved:** 5 files (cli-entry.ts, package.json files, test files) — used `git checkout --theirs` strategy
-- **✅ Push success:** Main branch updated (commit 59b0c7a)
-- **✅ Lock file sync:** Fixed package-lock.json sync issue (commit 543bc1a)
-- **✅ Build script fix:** Added CI env check to skip version bump during publish (commit 344bb2b)
-- **✅ Tag verified:** v0.8.21 points to bf86a32 on main branch (correct)
-- **✅ Release published:** Changed from draft to published (2026-03-07T20:30:14Z)
-- **✅ Workflow triggered:** publish.yml workflow run #22806664280 triggered by release.published event
-- **❌ NPM Publish blocked:** Workflow requires 2FA/OTP; NPM_TOKEN needs to be automation token (error code EOTP)
-
-#### NPM Publishing Blocker — Action Required
-**CRITICAL:** NPM_TOKEN secret is a user token with 2FA enabled. Automated publishing requires an **automation token** or **granular access token** with 2FA bypass.
-
-**Resolution path:**
-1. Go to https://www.npmjs.com/settings/bradygaster/tokens
-2. Create a new **Automation Token** (classic) or **Granular Access Token** with publish permissions
-3. Update the `NPM_TOKEN` secret in repo settings with the new token
-4. Workflow will automatically retry on next push, OR manually trigger: `gh workflow run publish.yml --ref v0.8.21`
-
-**Workflow runs attempted:** 5 (all failed at npm publish step with EOTP error)
-- Run 1-3: Previous attempts with package-lock and version issues (fixed)
-- Run 4-5: Manual dispatch attempts (2FA/OTP required)
-- Run #22806664280: Triggered by release.published event (2FA/OTP required)
-
-**Error message:**
-```
-npm error code EOTP
-npm error This operation requires a one-time password from your authenticator.
-```
-
-#### Post-Publish Prep Complete
-✅ Version bumped on dev to 0.8.22-preview.1 (commit 9473fa1)
-
-#### Key Learnings
-1. **Conflict resolution for release merges:** Use `git checkout --theirs` on all conflicts when merging dev → main for release
-2. **Workflow dispatch inputs:** Always check workflow file for required inputs; publish.yml needs explicit version string
-3. **Protected branch constraints:** Rebase strategies fail on force-push-protected branches; use merge + conflict resolution
-4. **Post-release discipline:** Immediately bump dev to next preview version after triggering publish (prevents version collisions)
-5. **CI build scripts:** Disable local dev tooling (version bumps, etc.) in CI with env checks (`process.env.CI === 'true'`)
-6. **NPM automation tokens:** User tokens with 2FA enabled CANNOT be used for CI/CD; must use automation tokens or granular access tokens
-7. **GitHub Release draft status:** Draft releases do NOT trigger `release.published` event - must explicitly publish the release for automation to trigger
-
-#### Release Sequence Validation
-✅ Pre-release version: 0.8.21-preview.X
-✅ Publish version: 0.8.21 (tagged, released on GitHub)
-✅ GitHub Release: Published (2026-03-07T20:30:14Z) — was draft, now published
-✅ Publish workflow: Triggered successfully (run #22806664280)
-⏸️ NPM publish: BLOCKED (awaiting automation token configuration)
-✅ Post-publish dev bump: 0.8.22-preview.1
-
-### Release v0.8.21 — Dev → Main Merge & NPM Publish Trigger (Initial Log)
-
-**RELEASE GATE MERGE EXECUTED.** Dev branch merged to main, publish workflow triggered successfully.
-
-#### Execution Summary
-- **Merge strategy:** Local merge (git checkout main && git merge origin/dev) attempted with --no-edit
-- **Conflicts encountered:** 5 files with conflicts during merge (cli-entry.ts, package.json files, test files)
-- **Resolution:** Used `git checkout --theirs` strategy to accept dev branch state for all conflicts
-- **Push success:** Main branch updated successfully (commit 59b0c7a)
+---
 - **Workflow trigger:** `gh workflow run publish.yml --ref main -f version=0.8.21` executed successfully
 - **Post-publish:** Version bumped on dev to 0.8.22-preview.1 across all 3 package.json files (commit 9473fa1)
 

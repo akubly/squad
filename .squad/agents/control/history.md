@@ -2,6 +2,8 @@
 
 > Control System Engineer
 
+📌 **Team update (2026-05-18T19:19:14Z — Piece 14 Complete):** Piece 14 squad assign (EECOM implementation + FIDO review, APPROVED) landed successfully. SDK registry schema extended: added `status`, `initUri`, `stateBackend` fields to RegistryEntry, plus unknown-field passthrough via `[key: string]: unknown`. Existing registry files forward-compatible. If you're working on registry-touching features (pieces 15+), the extended schema is now canonical.
+
 ## Current Session Learnings
 
 ### Piece 10 revision — init validation path (2026-05-15T23:15:56Z)

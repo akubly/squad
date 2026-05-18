@@ -1678,6 +1678,20 @@ Orchestration logs and agent histories leaked prohibited preview-channel termino
 
 ### 2026-05-18: Commit Messages with Backticks — Safe Quoting Pattern
 
+---
+
+### 2026-05-18: Piece 14 Quality Review — squad assign
+
+**Verdict:** APPROVED
+
+**Build:** CLEAN. **Tests:** 21/21 GREEN. All 21 spec scenarios covered (A1–A21). Each test asserts structured behavior: registry state on disk, `result.kind`, error code/text. No test is a bare exit-code check.
+
+**Commit hygiene:** 7 files only (`.changeset`, `packages/squad-cli/package.json`, `cli-entry.ts`, `assign.ts`, `assign.test.ts`, `registry.ts`, `vitest.config.ts`). No `.squad/` state files in the code commit. PASS.
+
+**Scrub gate:** Gate 1 (strip-listed paths) and Gate 2 (wifi-aware mention in `.squad/reviews/piece-13-adversarial-review.md`) FAIL — both confirmed pre-existing at HEAD~1. No new strip-listed paths or wifi-aware content introduced by piece 14 diff. Not attributable to piece 14.
+
+**Observable:** Injectable-seam guard-order test pattern — when a command has ordered guards where guard N uses raw `cwd` and guard N+1 normalizes via git/FS, the guard N test mock must simulate the normalized output guard N+1 would produce, to prove guard N intercepts BEFORE that normalization occurs. Test A15 uses `getGitRoot: (dir) => dir` (returns subdir as-is). This proves the containment guard fires for a subdir, but does NOT demonstrate the most dangerous ordering failure: if `getGitRoot` were called first and returned the parent clone root (as real git would), Guard 6 idempotency would match the clone root and return a spurious `alreadyAssigned`. A companion variant using `getGitRoot: () => cloneDir` would prove the guard runs before git-root resolution and prevents that false positive. For future pieces with ordered guards, apply this pattern.
+
 **Status:** APPROVED  
 **By:** Surgeon (Release Manager)  
 **Impact:** All contributors writing commit messages with code backticks
