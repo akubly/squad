@@ -78,7 +78,7 @@ export async function runAssignToCopilot(opts: RunAssignOpts): Promise<void> {
   if (resolved === null) {
     fatal(
       'No squad found.\n' +
-        '   Run "squad register --callsign <name>" to register a squad first,\n' +
+        '   Run "squad init --callsign <name>" to create a new squad host,\n' +
         '   or pass --callsign to specify the target squad.',
     );
     return;
@@ -153,7 +153,6 @@ export async function runAssignToCopilot(opts: RunAssignOpts): Promise<void> {
 
 /**
  * Best-effort coordinator agent install. Silently warns on failure.
- * Mirrors the pattern in commands/register.ts.
  */
 function _installCoordinatorAgent(home: string): void {
   const targetDir = path.join(home, '.copilot', 'agents');

@@ -29,7 +29,7 @@ export async function runList(opts?: RunListOpts): Promise<string> {
 
   if (!registryFilePath || !fs.existsSync(registryFilePath)) {
     return (
-      'No registry found. Run "squad init" or "squad register" to create one.\n' +
+      'No registry found. Run "squad init --callsign <name>" to create one.\n' +
       'Default location: ~/.config/squad/registry.json (or %APPDATA%\\squad\\registry.json on Windows).'
     );
   }
@@ -38,7 +38,7 @@ export async function runList(opts?: RunListOpts): Promise<string> {
 
   if (!registry || registry.squads.length === 0) {
     return (
-      'Registry is empty. Run "squad init" or "squad register --callsign <name> --path <dir>" to add a squad.'
+      'Registry is empty. Run "squad init --callsign <name>" to add a squad.'
     );
   }
 

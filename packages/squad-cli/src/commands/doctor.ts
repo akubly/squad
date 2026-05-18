@@ -85,7 +85,7 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
 
   if (!registry) {
     findings.push(
-      'No registry found. Run "squad register" to add this squad to the registry.',
+      'No registry found. Run "squad init --callsign <name>" to create one, or "squad assign <callsign>" to bind this checkout.',
     );
     return { severity: 'info', findings };
   }

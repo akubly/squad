@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     console.log(`Commands:`);
     console.log(`  ${b}(default)${r}  Launch interactive shell`);
     console.log(`  ${b}init${r}       Initialize squad in current directory`);
-    console.log(`  ${b}register${r}   Register a squad path in the registry`);
+    console.log(`  ${b}assign${r}     Bind this checkout to a registered squad`);
     console.log(`  ${b}list${r}       List registered squads`);
     console.log(`  ${b}doctor${r}     Validate setup and registry health`);
     console.log(`  ${b}upgrade${r}    Update Squad-owned files to latest`);
@@ -266,19 +266,6 @@ async function main(): Promise<void> {
       console.log(`  --mode remote <p> Link to remote team root\n`);
       return;
     }
-    if (cmd === 'register') {
-      console.log(`\n${b}squad register${r} — Register a squad\n`);
-      console.log(`Usage: squad register --callsign <n> [--path <dir>]\n`);
-      console.log(`Options:`);
-      console.log(`  --callsign <name>  Name in registry (required)`);
-      console.log(`  --path <dir>       Project directory (optional; inferred from Git root if omitted)`);
-      console.log(`  --origin <url>     Append a remote URL to an existing entry (deduplicates by canonical form)`);
-      console.log(`  --clone <path>     Append a clone root path to an existing entry (deduplicates by path)`);
-      console.log(`  --registry-path    Alternate registry file`);
-      console.log(`  --no-install-agent Skip installing ~/.copilot/agents/squad.agent.md`);
-      console.log(`  --home <dir>       Override home dir for agent install\n`);
-      return;
-    }
     if (cmd === 'list') {
       console.log(`\n${b}squad list${r} — List registered squads\n`);
       console.log(`Usage: squad list [--registry-path <path>]\n`);
@@ -304,7 +291,7 @@ async function main(): Promise<void> {
     if (positional && isUrlLikeArg(positional)) {
       fatal(
         `"squad init" does not accept URL arguments.\n` +
-        `  To register an existing squad, use "squad register --callsign <name> --path <dir>".\n` +
+        `  To bind this checkout to a registered squad, use "squad assign <callsign>".\n` +
         `  To link to a remote team root, use "squad init --mode remote <team-repo-path>".`,
       );
       return;
@@ -871,7 +858,7 @@ async function main(): Promise<void> {
     if (!resolvedForStart) {
       fatal(
         'No squad found.\n' +
-          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
       );
       return;
     }
@@ -908,61 +895,17 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'register') {
-    const { runRegister } = await import('./commands/register.js');
-    const callsignIdx = args.indexOf('--callsign');
-    const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1]! : '';
-    const pathIdx = args.indexOf('--path');
-    const squadPath = (pathIdx !== -1 && args[pathIdx + 1]) ? args[pathIdx + 1]! : '';
-    const registryPathIdx = args.indexOf('--registry-path');
-    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
-    const installAgent = !args.includes('--no-install-agent');
-    const homeIdx = args.indexOf('--home');
-    const home = (homeIdx !== -1 && args[homeIdx + 1]) ? args[homeIdx + 1] : undefined;
-
-    if (!callsign) {
-      fatal(
-        '--callsign is required\n' +
-        'Try: squad register --callsign <name> --path <path>',
-      );
-      return;
-    }
-    const originIdx = args.indexOf('--origin');
-    const originUrl = (originIdx !== -1 && args[originIdx + 1]) ? args[originIdx + 1] : undefined;
-    const cloneArgIdx = args.indexOf('--clone');
-    const clonePath = (cloneArgIdx !== -1 && args[cloneArgIdx + 1]) ? args[cloneArgIdx + 1] : undefined;
-
-    try {
-      const result = await runRegister({
-        callsign,
-        path: squadPath || undefined,
-        registryPath,
-        installAgent,
-        home,
-        origin: originUrl,
-        clone: clonePath,
-      });
-      const ok = noColor ? 'OK' : `${GREEN}✓${RESET}`;
-      switch (result.outcome) {
-        case 'registered':
-          console.log(`${ok} Registered: ${result.registered.callsign} → ${result.registered.path}`);
-          break;
-        case 'merged':
-          console.log(`${ok} Updated: ${result.registered.callsign} → ${result.registered.path}`);
-          break;
-        default: {
-          const _exhaustive: never = result.outcome;
-          throw new Error(`Unexpected register outcome: ${_exhaustive}`);
-        }
-      }
-      if (result.agentInstalledAt) {
-        console.log(`Installed coordinator agent: ${result.agentInstalledAt}`);
-      }
-    } catch (err) {
-      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
-      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
-    return;
+    // BREAKING: the `register` subcommand was removed. Emit the teaching error
+    // before any unknown-command handling, ignore additional flags, and exit
+    // with a command-usage failure code so scripted callers can detect the
+    // removal condition specifically.
+    console.error(
+      'ERR_SQUAD_REGISTER_REMOVED: squad register has been removed.\n' +
+      'Use squad assign <callsign> to bind this checkout to a registered squad.\n' +
+      'For a new squad host, run squad init --callsign <name>.\n' +
+      'Run squad list to see registered squads.',
+    );
+    process.exit(2);
   }
 
   if (cmd === 'list') {
@@ -1021,7 +964,7 @@ async function main(): Promise<void> {
       if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
         fatal(
           'No squad found.\n' +
-            '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+            '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
         );
         return;
       }
@@ -1050,7 +993,7 @@ async function main(): Promise<void> {
     if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
       fatal(
         'No squad found.\n' +
-          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
       );
       return;
     }
@@ -1095,7 +1038,7 @@ async function main(): Promise<void> {
     if (!resolvedForRc) {
       fatal(
         'No squad found.\n' +
-          '   Run "squad init" to set up a squad, or "squad register" to register an existing one.',
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
       );
       return;
     }
@@ -1208,7 +1151,7 @@ async function main(): Promise<void> {
     if (!guardResult) {
       fatal(
         'No squad found.\n' +
-          '   Run "squad register --callsign <name>" to register a squad first,\n' +
+          '   Run "squad assign <callsign>" to bind this checkout first,\n' +
           '   or pass --callsign to specify the target squad.',
       );
       return;

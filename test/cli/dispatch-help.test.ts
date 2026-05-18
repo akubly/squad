@@ -13,7 +13,6 @@ import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { spawn } from 'child_process';
 import { resolve } from 'path';
-import { tmpdir } from 'os';
 import { runDoctor } from '@bradygaster/squad-cli/commands/doctor';
 import type { RunDoctorResult } from '@bradygaster/squad-cli/commands/doctor';
 
@@ -79,13 +78,6 @@ describe('CLI --help is side-effect-free', { timeout: 60_000 }, () => {
     expect(existsSync(join(TEST_ROOT, '.squad'))).toBe(false);
   });
 
-  it('squad register --help exits 0 and prints usage', async () => {
-    const result = await runCli(['register', '--help']);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('squad register');
-    expect(result.stdout).toContain('--callsign');
-  });
-
   it('squad list --help exits 0 and prints usage', async () => {
     const result = await runCli(['list', '--help']);
     expect(result.exitCode).toBe(0);
@@ -122,27 +114,11 @@ describe('CLI dispatch reaches command modules', { timeout: 60_000 }, () => {
     expect(existsSync(tempRegistry())).toBe(true);
   });
 
-  it('squad register fails with missing --callsign', async () => {
+  it('squad register exits 2 with the teaching error (removal contract)', async () => {
     const result = await runCli(['register', '--path', TEST_ROOT]);
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain('--callsign');
-  });
-
-  it('squad register without --path in a non-git directory exits with error', async () => {
-    const noGitDir = join(tmpdir(), `squad-no-git-${randomBytes(4).toString('hex')}`);
-    await mkdir(noGitDir, { recursive: true });
-    const cleanRegistry = join(noGitDir, 'clean-registry.json');
-    try {
-      const result = await runCli(
-        ['register', '--callsign', 'x', '--registry-path', cleanRegistry],
-        undefined,
-        noGitDir,
-      );
-      expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toMatch(/no Git repository|Pass --path/i);
-    } finally {
-      await rm(noGitDir, { recursive: true, force: true });
-    }
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('ERR_SQUAD_REGISTER_REMOVED');
+    expect(result.stderr).toMatch(/squad assign\s+<callsign>/);
   });
 
   it('squad list with missing registry prints guidance', async () => {
@@ -150,7 +126,7 @@ describe('CLI dispatch reaches command modules', { timeout: 60_000 }, () => {
       'list', '--registry-path', tempRegistry(),
     ]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toMatch(/no registry|init|register/i);
+    expect(result.stdout).toMatch(/no registry|init|assign/i);
   });
 
   it('squad doctor runs and exits 0 on clean state', async () => {
@@ -207,10 +183,11 @@ describe('stdout/stderr discipline', { timeout: 60_000 }, () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('register validation errors go to stderr', async () => {
+  it('register removal teaching error goes to stderr', async () => {
     const result = await runCli(['register', '--path', TEST_ROOT]);
     expect(result.stderr.length).toBeGreaterThan(0);
-    expect(result.stderr).toContain('--callsign');
+    expect(result.stderr).toContain('ERR_SQUAD_REGISTER_REMOVED');
+    expect(result.exitCode).toBe(2);
   });
 
   it('list data goes to stdout', async () => {
@@ -288,74 +265,8 @@ describe('runDoctor: origin and clone resolution', () => {
   });
 });
 
-// ── register path existence (FIDO A3) ──────────────────────────────────────
-
-describe('runRegister: path existence check', () => {
-  beforeEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-    await mkdir(TEST_ROOT, { recursive: true });
-  });
-  afterEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-  });
-
-  it('throws when .squad/ directory does not exist', async () => {
-    const { runRegister } = await import('@bradygaster/squad-cli/commands/register');
-    const noSquadDir = join(TEST_ROOT, 'empty-project');
-    await mkdir(noSquadDir, { recursive: true });
-    await expect(
-      runRegister({
-        callsign: 'missing',
-        path: noSquadDir,
-        registryPath: tempRegistry(),
-      }),
-    ).rejects.toThrow(/\.squad/);
-  });
-});
-
-// ── register differentiation (INCO B3) ─────────────────────────────────────
-
-describe('runRegister: outcome differentiation', () => {
-  beforeEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-    await mkdir(TEST_ROOT, { recursive: true });
-  });
-  afterEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-  });
-
-  it('returns outcome=registered for a new entry', async () => {
-    const { runRegister } = await import('@bradygaster/squad-cli/commands/register');
-    const squadDir = join(TEST_ROOT, '.squad');
-    await mkdir(squadDir, { recursive: true });
-    const result = await runRegister({
-      callsign: 'new-squad',
-      path: TEST_ROOT,
-      registryPath: tempRegistry(),
-    });
-    expect(result.outcome).toBe('registered');
-  });
-
-  it('throws on callsign collision at different path', async () => {
-    const { runRegister } = await import('@bradygaster/squad-cli/commands/register');
-    const squadDirA = join(TEST_ROOT, 'a', '.squad');
-    const squadDirB = join(TEST_ROOT, 'b', '.squad');
-    await mkdir(squadDirA, { recursive: true });
-    await mkdir(squadDirB, { recursive: true });
-    await runRegister({
-      callsign: 'shared',
-      path: join(TEST_ROOT, 'a'),
-      registryPath: tempRegistry(),
-    });
-    await expect(
-      runRegister({
-        callsign: 'shared',
-        path: join(TEST_ROOT, 'b'),
-        registryPath: tempRegistry(),
-      }),
-    ).rejects.toThrow(/already registered/i);
-  });
-});
+// ── (register success-flow describes removed; see test/cli/register.test.ts
+//    for the current removal contract.) ──────────────────────────────────────
 
 // ── dual-doctor coherence (INCO B5 / FIDO A5) ─────────────────────────────
 
@@ -455,37 +366,5 @@ describe('runInit: clone/path collision', () => {
   });
 });
 
-// ── register validation copy (INCO B2) ─────────────────────────────────────
-
-describe('CLI register: validation copy', { timeout: 60_000 }, () => {
-  beforeEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-    await mkdir(TEST_ROOT, { recursive: true });
-  });
-  afterEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
-  });
-
-  it('missing --callsign shows which flag and a complete example', async () => {
-    const result = await runCli(['register', '--path', TEST_ROOT]);
-    expect(result.stderr).toContain('--callsign');
-    expect(result.stderr).toContain('squad register');
-  });
-
-  it('missing --path shows which flag and a complete example', async () => {
-    const noGitDir = join(tmpdir(), `squad-no-git-${randomBytes(4).toString('hex')}`);
-    await mkdir(noGitDir, { recursive: true });
-    const cleanRegistry = join(noGitDir, 'clean-registry.json');
-    try {
-      const result = await runCli(
-        ['register', '--callsign', 'x', '--registry-path', cleanRegistry],
-        undefined,
-        noGitDir,
-      );
-      expect(result.stderr).toContain('--path');
-      expect(result.stderr).toContain('squad register');
-    } finally {
-      await rm(noGitDir, { recursive: true, force: true });
-    }
-  });
-});
+// ── (CLI register validation describe removed; the removal contract is
+//    covered by test/cli/register.test.ts.) ──────────────────────────────────

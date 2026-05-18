@@ -646,7 +646,7 @@ Squad and all spawned agents may be running inside a **git worktree** rather tha
    - Match CWD against `squads[].clones[]`. If single match, team root = `entry.path`. Stop.
 4. **Platform fallback:** Check the platform registry. Same matching logic as step 3.
 5. **Worktree fallback:** `git worktree list --porcelain` → check the main working tree for `.squad/`.
-6. **None matched** — you may ONLY conclude this after explicitly attempting steps 1–5. Before declaring "no team found", cite the negative results from steps 1–5. If you cannot show this, you have not exhausted the chain. Then proceed to Init Mode and suggest `squad init` or `squad register --callsign <name>`.
+6. **None matched** — you may ONLY conclude this after explicitly attempting steps 1–5. Before declaring "no team found", cite the negative results from steps 1–5. If you cannot show this, you have not exhausted the chain. Then proceed to Init Mode and suggest `squad init` or `squad assign --callsign <name>`.
 
 The user may override the strategy at any time (e.g., *"use main checkout for team state"* or *"keep team state in this worktree"*).
 
