@@ -10,6 +10,21 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Piece 13 Adversarial Review — REJECT → Fixed → APPROVE (2026-05-18)
+
+📌 **PowerShell backtick corruption in commit messages caught by byte-level verification. Static spec-parity checks alone would have missed this.**
+
+Review of hard-remove-register feature identified a critical commit-message corruption: PowerShell's backtick escape processing in double-quoted heredocs consumed backticks and following characters before git received the message. The message text shipped corrupted (`` `register` `` → `register` missing backtick). This manifests only at commit-write time — no code diff visibility, no spec-parity check would catch it.
+
+**Key insight:** Adversarial reviewers must verify commit message bytes directly, not just tree content. The static spec-diff analysis was clean; the blockeroccurred purely in metadata. Surgeon applied a targeted message-only amend under reviewer-lockout, force-pushing with tree preservation and trailer intact.
+
+**Non-blocking findings:**
+- HIGH: Baseline contamination (lingering `register` references in test fixture data); accepted as upstream cleanup.
+- MEDIUM: Test rigor gap (static spec-parity vs. behavioral removal lifecycle verification).
+- LOW: Missing `squad register --help` refusal test.
+
+**Decision recorded:** New PowerShell-backtick safety decision captured in `.squad/decisions/inbox/surgeon-commit-msg-backtick-safety.md`; new skill `.squad/skills/commit-message-quoting/SKILL.md` published team-wide.
+
 ### Piece 10 Review — APPROVE (2026-05-15)
 
 📌 **Init fail-fast approved. Solid validation-before-write pattern with one forward-looking concern.**

@@ -1503,3 +1503,248 @@ Aaron Kubly issued a user directive (recorded in `2026-05-15: User Directive —
 ### Status
 
 **DISMISSED** — User directive supersedes the MAJOR finding. Recorded here as historical context.
+
+---
+
+### 2026-05-17: Platform Adapter Seam — Piece 12
+
+**Status:** Accepted  
+**By:** CAPCOM (SDK Expert)  
+**Branch:** `akubly/upstream-12-platform-adapter`  
+**Commit:** `30e7602c`
+
+#### Decisions Made
+
+**1. `detectPlatform` throws on unknown origin (breaking change accepted)**
+
+Changed `detectPlatform` from silently returning `'github'` on failure to throwing a typed `Error` with a `SQUAD_PLATFORM` env var remediation hint.
+
+**Rationale:** Spec requires honoring `SQUAD_PLATFORM` env var and explicit failure signaling. Callers that need a safe fallback (e.g., `comms.ts`, `detectWorkItemSource`) have been updated with try/catch guards. Silent fallback to `'github'` masked misconfiguration.
+
+**2. `createAdapterForOrigin` factory "fails closed" for unknown hosts**
+
+Factory throws `Error` for unrecognized hosts (returning PlatformType `'unknown'`), rather than returning a no-op adapter or defaulting to GitHub.
+
+**Rationale:** Spec requirement. A no-op adapter would silently swallow work item operations. Explicit failure at construction time is safer — callers can catch and fall back to FileLog or display user-facing guidance.
+
+**3. `@me` sentinel no-ops silently when `az` CLI unavailable**
+
+`AzureDevOpsAdapter.assignWorkItem('@me')` calls `getCurrentUser()`, but if `getCurrentUser()` returns `undefined` (az CLI absent or unauthenticated), the assignment is silently skipped rather than throwing.
+
+**Rationale:** Spec says `@me` resolves the current authenticated user. In offline/unauthenticated environments, failing loudly on assignment would block all work item operations. Silent no-op degrades gracefully and matches the existing ADO pattern for unavailable CLI features (e.g., `getAvailableWorkItemTypes` fallback).
+
+**4. Optional methods on `PlatformAdapter` — callers use optional chaining**
+
+`assignWorkItem?()` and `getCurrentUser?()` are declared as optional on the interface. All callers must use `adapter.assignWorkItem?.()`.
+
+**Rationale:** Existing adapter implementations (e.g., `FileLog`) are not required to implement these methods. Optional interface keeps backward compatibility. Piece 13+ can implement them as needed.
+
+---
+
+### 2026-05-17: Platform Adapter Revision — Type System Tightening
+
+**Status:** Accepted  
+**By:** EECOM  
+**Branch:** `akubly/upstream-12-platform-adapter`  
+**Commit:** `6f1251cb`
+
+#### Decision 1: Remove `'planner'` from `PlatformType`
+
+**Question:** Should `'planner'` be removed from `PlatformType` (option a) or kept as `'unknown'` (option b)?
+
+**Decision:** Option a — remove `'planner'` entirely from `PlatformType`.
+
+**Rationale:** `PlatformType` represents a _git hosting platform_ (GitHub, Azure DevOps). A git platform must have a detectable remote URL pattern and a corresponding `PlatformAdapter` that can be constructed from that URL. Planner has no git remote URL form — no factory can create a planner adapter from a URL. `PlannerAdapter` is a _work-item source_ adapter, not a git platform adapter.
+
+**Impact:** `PlannerAdapter.type` is now `'planner' as const` — not typed as `PlatformType`. All structural typing constraints are satisfied. `SQUAD_PLATFORM=planner` now throws a `PlatformConfigError` with a remediation message pointing users to configure a work-item source separately.
+
+#### Decision 2: Introduce `PlatformConfigError` typed error class
+
+**Question:** Should platform configuration failures use `new Error(...)` or a typed subclass?
+
+**Decision:** Use `PlatformConfigError extends Error` with `name = 'PlatformConfigError'`.
+
+**Rationale:** Callers (e.g. `comms.ts`, CLI commands) need to distinguish "platform not configured" errors from unexpected runtime errors to provide actionable diagnostics and graceful fallback paths. A typed class enables `catch (e) { if (e instanceof PlatformConfigError) { ... } }` at call sites.
+
+**Impact:** `detectPlatform`, `createAdapterForOrigin`, and future factory functions throw `PlatformConfigError`. Tests assert `toThrow(PlatformConfigError)` for typed coverage. The class is exported from the `@bradygaster/squad-sdk/platform` barrel.
+
+---
+
+### 2026-05-17: Mock-Typing Pattern for CLI Spawn Tests
+
+**Status:** Accepted  
+**By:** FIDO (Quality)  
+**Scope:** Piece 12 test-quality pass; pattern applies to all future platform-adapter and CLI-spawn test files
+
+#### Context
+
+Piece 12 introduced two test files that mock `node:child_process.execFileSync` to drive the ADO and GitHub adapter implementations. The initial mock setup used `vi.mocked(execFileSync)` and scattered `as any` on every `.mockReturnValue` and `.mockReturnValueOnce` call site — 37 occurrences. This was a quality concern flagged in the prior review round.
+
+#### Decision
+
+**Use strategy A (typed `MockedFunction<>` cast at declaration) for all CLI-spawn mock surfaces.**
+
+At the mock declaration, cast once to a simplified single-overload type:
+
+```ts
+const mockedExecFileSync = vi.mocked(execFileSync) as MockedFunction<
+  (file: string, args?: readonly string[], options?: object) => string
+>;
+```
+
+This collapses the multi-overload signature to the string-returning form actually used in tests, giving full mock API (chaining, `mock.calls` access, full `MockedFunction<>` surface) with zero `as any` at call sites.
+
+**When to prefer strategy A vs B:**
+
+- **Strategy A** (`MockedFunction<simplified-sig>` cast): Use when the mock needs to chain (`mockReturnValueOnce(...).mockReturnValueOnce(...)`) and when more than ~5 call sites would otherwise need `as any`. The cast is a one-liner and the type is self-documenting.
+- **Strategy B** (local typed interface): Use when the mock surface is narrow (1-2 methods), the function is not overloaded, or the test file is short-lived. Writing a full interface for a function with 8 overloads is busywork.
+
+The `as unknown as MockedFunction<...>` cast is intentional and documented; it is NOT an `as any` escape — the `as unknown as` pattern pinpoints "I know the runtime value is this type; TypeScript's overload inference cannot follow." A comment explaining why belongs at the declaration site, not on every call.
+
+**Applies To:** Any future test file that mocks an overloaded Node.js built-in (`execFileSync`, `spawnSync`, `readFileSync` with encoding overloads), uses Vitest 2.x+ with TypeScript strict mode, and has more than 3 mock call sites that would otherwise need `as any`.
+
+**Rationale:** `as any` in test mocks is not a "good enough for tests" exception — it silently defeats TypeScript's return-type checking on the mock return value. A mock returning `42 as any` where `string` is expected passes the compiler but makes the test wrong. Typed mocks catch mismatches between test fixture data and the types the implementation consumes.
+
+---
+
+### 2026-05-17: Piece 12 Platform Adapter — Package Export Strategy
+
+**Status:** Accepted  
+**By:** GNC (Compiler)  
+**Branch:** `akubly/upstream-12-platform-adapter`  
+**Commit:** `93f64716`
+
+#### Package export choice: Option (a) — add `./adapter-factory` subpath
+
+The spec (12-platform-adapter.md) states: "The SDK package exports the platform barrel and the adapter-factory subpath." This is unambiguous. `./adapter-factory` was added to `package.json` exports, wired to `dist/platform/adapter-factory.js`.
+
+`./platform` already re-exports `createAdapterForOrigin`, so callers that import through the platform barrel continue to work. The `./adapter-factory` subpath gives direct entry-point access for tree-shaking or callers that want only the factory without the full platform barrel.
+
+#### Barrel scope decision
+
+The `packages/squad-sdk/src/platform/index.ts` barrel was narrowed to the spec public surface:
+- `PlatformType`, `WorkItem`, `PullRequest`, `PlatformAdapter`
+- `PlatformConfigError`
+- `createAdapterForOrigin`, `normalizeRemoteUrl`
+- `parseGitHubRemote`, `parseAzureDevOpsRemote`
+- `createPlatformAdapter` (repoRoot convenience, used by squad-cli/loop.ts)
+
+Removed from barrel (not in spec surface):
+- Concrete adapter classes: `GitHubAdapter`, `AzureDevOpsAdapter`, `PlannerAdapter`
+- ADO-specific types: `AdoWorkItemConfig`, `WorkItemTypeInfo`
+- Detection helpers: `detectPlatform`, `detectPlatformFromUrl`, `detectWorkItemSource`, `getRemoteUrl`
+- Comms adapters: `FileLogCommunicationAdapter`, `GitHubDiscussionsCommunicationAdapter`, `ADODiscussionCommunicationAdapter`, `createCommunicationAdapter`
+- Ralph helpers: `getRalphScanCommands`, `getPlannerRalphCommands`, `RalphCommands`
+- Extra types: `WorkItemSource`, `HybridPlatformConfig`, `CommunicationChannel`, etc.
+
+No squad-cli code was importing these via the barrel, so no cross-package callers needed migration.
+
+---
+
+### 2026-05-17: Tone Leak Pattern — Gate Documentation Safety
+
+**Status:** Accepted  
+**By:** Scribe  
+**Topic:** Avoid reproducing prohibited terms when documenting tone gates
+
+#### Problem
+
+Orchestration logs and agent histories leaked prohibited preview-channel terminology by quoting scrub-gate check-point names verbatim. Gate 2 is designed to prevent this pattern from shipping; paradoxically, documenting what the gate filters can introduce the very terms the gate forbids.
+
+#### Root Cause
+
+- Scrub-gate check-point names may use prohibited terminology (the gate must know what to forbid).
+- When logging scrub-gate results, the natural documentation instinct is to quote the check name.
+- No guidance existed for safe gate documentation within tone constraints.
+
+#### Solution
+
+**Principle:** When documenting scrub-gate results or lessons in committed files, never reproduce prohibited terms even when explaining why those terms are forbidden. Instead:
+
+1. Describe the *check category* (e.g., "preview-channel terminology detection") instead of the check name.
+2. Refer readers to the authoritative source: `.docs/proposals/upstream-bradygaster/_scrub-gate.ps1` (Gate 2 section).
+3. When documenting gates, focus on the *result* and *pattern*, not the literal string being filtered.
+4. Use neutral placeholders: "the legacy preview-channel codename", "a prohibited term Gate 2 forbids", "preview-channel-specific language".
+
+#### Consequences
+
+- Lesson documentation itself can't violate what it teaches.
+- Scrub-gate audit becomes zero-false-positive for committed docs (no mention means no violation).
+- Clearer separation: gate internals can name things; committed prose cannot.
+
+**Owner:** Scribe — applies to all session logging and decision documentation going forward.
+
+---
+
+### 2026-05-18: Commit Messages with Backticks — Safe Quoting Pattern
+
+**Status:** APPROVED  
+**By:** Surgeon (Release Manager)  
+**Impact:** All contributors writing commit messages with code backticks
+
+#### Problem
+
+PowerShell double-quoted strings and heredocs parse backticks (`) as escape sequences. When a commit message contains backticks (e.g., `` `register` ``), PowerShell silently consumes the backtick AND the following character before the message reaches git. This corrupts the message irreversibly and ships broken history to upstream.
+
+**Example Failure:**
+- Input: `The \`register\` subcommand has been removed`
+- PowerShell parsed: `The register` (backtick + 'r' eaten)
+- Committed: `The egister subcommand has been removed` ✗
+
+This happened in Piece 13 (commit 01ae3060), requiring a message-only amend and force-push to fix.
+
+#### Decision
+
+**Commit messages with backticks MUST be written using one of these patterns:**
+
+1. **PRIMARY (Recommended):** Use the `create` tool with `file_text` parameter
+   - Avoids all PowerShell quoting/escaping
+   - Message written directly to file, git reads raw bytes
+   - Works for all markdown/code-containing messages
+
+2. **SECONDARY (Manual fallback):** Single-quoted PowerShell Here-String
+   ```powershell
+   $msg = @'
+   feat: remove `register` command
+   
+   The `register` subcommand has been removed.
+   '@
+   git commit -m $msg
+   ```
+   - Single quotes prevent backtick escape processing
+   - Manual but reliable
+
+3. **TERTIARY (Last resort):** `git commit --amend` with editor
+   ```bash
+   EDITOR=vim git commit --amend
+   ```
+   - Editor receives message bytes directly (no shell parsing)
+
+#### Forbidden Pattern
+
+❌ **NEVER use double-quoted PowerShell heredocs:**
+```powershell
+git commit -m "feat: remove `register` command"  # ✗ Backtick eaten
+```
+
+#### Verification Before Push
+
+After writing a commit message with backticks, always verify:
+```bash
+git log -1 --format="%b" HEAD | findstr /C:"exact string with backticks"
+```
+
+Example:
+```bash
+git --no-pager log -1 --format="%B" HEAD | Out-File -NoNewline $env:TEMP\verify.txt -Encoding utf8
+Get-Content $env:TEMP\verify.txt -Raw
+# MUST show: The `register` subcommand, `squad assign`, etc. — all backticks intact
+```
+
+#### References
+
+- **Incident:** Piece 13 commit message corruption (2026-05-18)
+- **Fix Applied:** Message-only amend via `git commit --amend --only -F <file>` (SHA 01ae3060 → 9a9c7b06)
+- **Skill Documentation:** `.squad/skills/commit-message-quoting/SKILL.md`
+- **Surgeon History:** `.squad/agents/surgeon/history.md` (2026-05-18 learning entry)
+

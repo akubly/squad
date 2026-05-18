@@ -172,3 +172,25 @@ Prepared comprehensive release playbook and CI improvement plan for Brady's revi
 - No concurrent modifications detected
 
 **Key Decision:** Baseline scrub gate failures are piece-diff-scoped and non-blocking per established Phase B protocol. All gates that could be introduced by piece-10 passed; pre-existing contamination from upstream baseline is a separate concern.
+
+### PowerShell Backtick Hazard in Commit Messages (2026-05-18)
+
+**Context:** Piece 13 commit (01ae3060) rejected by Flight (BLOCKER) due to corrupted commit message. PowerShell double-quoted heredocs parse backtick (`) as escape sequences, silently consuming the backtick AND the following character. Result: "The `register`" became "The egister", "covered by `assign`" became "covered by ssign", all code spans lost backticks + first letter, and all newlines collapsed to single line.
+
+**Root Cause:** Double-quoted PowerShell Here-String or heredoc used to write multi-line commit message containing backticks. PowerShell's backtick-escape parsing ran before git commit received the message.
+
+**Fix Applied:** 
+- Used `create` tool to write corrected message to `C:\Users\akubly\AppData\Local\Temp\2\piece13-commit.txt` (file write avoids PowerShell quoting entirely)
+- Verified `git diff --cached` empty (nothing staged)
+- Amended commit with `git commit --amend --only -F <file>` (message-only amend, tree unchanged)
+- Verified all backticks, newlines, code spans present and correct
+- Force-pushed with `--force-with-lease` (SHA changed from 01ae3060 → 9a9c7b06)
+- Confirmed trailer `Co-authored-by: Copilot` survived amend
+
+**Safe Patterns for Commit Messages with Backticks:**
+1. **Best:** Use `create` tool with `file_text` parameter (avoids all shell quoting)
+2. **Alternative:** Single-quoted PowerShell Here-String: `$msg = @'...'@` (no escape processing in single quotes)
+3. **Fallback:** `git commit --amend` with editor (EDITOR env var or `--allow-empty-message -e`)
+4. **Never:** Double-quoted heredocs with backticks — backtick-escape parsing is silent and destructive
+
+**Skill Created:** `.squad/skills/commit-message-quoting/SKILL.md` with full pattern, verification steps, and safe examples.
