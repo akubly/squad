@@ -334,42 +334,6 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 
 ---
 
-### 2026-03-26: CI deletion guard and source tree canary
-**By:** Booster (CI/CD)
-**What:** Added two safety checks to squad-ci.yml: (1) source tree canary verifying critical files exist, (2) large deletion guard failing PRs that delete >50 files without 'large-deletion-approved' label. Branch protection on dev requested (may need manual setup).
-**Why:** Incident #631 — @copilot deleted 361 files on dev with no CI gate catching it.
-
----
-
-### 2026-03-26: Copilot git safety rules
-**By:** RETRO (Security)
-**What:** Added mandatory Git Safety section to copilot-instructions.md: prohibits `git add .`, requires feature branches and PRs, adds pre-push checklist, defines red-flag stop conditions.
-**Why:** Incident #631 — @copilot used destructive staging on an incomplete working tree, deleting 361 files.
-
----
-
-### 2026-03-29: Versioning Policy — No Prerelease Versions on dev/main
-**By:** Flight (Lead)
-**Status:** DECIDED
-**Confidence:** Medium (confirmed by PR #640 incident, PR #116 prerelease leak, CI gate implementation)
-
-**Decision:**
-1. All packages use strict semver (`MAJOR.MINOR.PATCH`). No prerelease suffixes on `dev` or `main`.
-2. Prerelease versions are ephemeral. `bump-build.mjs` creates `-build.N` for local testing only — never committed.
-3. SDK and CLI versions must stay in sync. Divergence silently breaks npm workspace resolution.
-4. Surgeon owns version bumps. Other agents must not modify `version` fields in `package.json` unless fixing a prerelease leak.
-5. CI enforcement via `prerelease-version-guard` blocks PRs with prerelease versions. `skip-version-check` label is Surgeon-only.
-
-**Why:** The repo had no documented versioning policy. This caused two incidents:
-- **PR #640:** Prerelease version `0.9.1-build.4` silently broke workspace resolution. The semver range `>=0.9.0` does not match prerelease versions, causing npm to install a stale registry package instead of the local workspace link. Four PRs (#637–#640) patched symptoms before the root cause was found.
-- **PR #116:** Surgeon set versions to `0.9.1-build.1` instead of `0.9.1` on a release branch because there was no guidance on what constitutes a clean release version.
-
-**Skill Reference:** Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
-
-**Impact:** All agents must follow the versioning policy when touching `package.json`. Surgeon charter should reference this skill for release procedures. CI pipeline enforces the policy via automated gate.
-
----
-
 ### 2026-04-25: Release Process Skill Update — v0.9.4 Learnings
 **Author:** Booster (CI/CD Engineer)
 **Status:** Implemented
@@ -443,4 +407,100 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 **Suggested Doc Action:** Add a short README/FAQ comparison with scenarios:
 - **Use Squad directly** when your project can adopt team files and wants the workflow in-repo.
 - **Use Rally with Squad** when you want Squad's team memory and roles, but need worktree-driven, externalized state for shared or third-party repositories.
+
+---
+
+## 2026-05-18: Directives from Multi-Squad Design Phase
+
+### User directive — Identity reset (Aaron, not Brady)
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:** For the purposes of this proposal and all multi-squad design work, the user/requester is **Aaron**. Brady owns the upstream Squad project (`bradygaster/squad`). All future spawn prompts, log entries, and decision records should reference Aaron as the requester and Brady as the upstream maintainer. Existing prior records that name Brady as requester remain accurate for their date — do not retroactively rewrite history.
+**Why:** User request — clarifies relationship between the org-side proposal author (Aaron) and the upstream maintainer (Brady) for any future contribution conversations.
+
+---
+
+### User directive — Self-contained documents
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:** Proposal documents and downstream artifacts MUST be entirely self-contained and standalone. Do NOT reference earlier versions, the design / review process, internal version numbers ("v1.1", "v1.2"), or framing like "third path" / "Round N" / "in the prior version we…". The only exceptions are when narrating evolution adds clear value to the reader (e.g., a deliberate "Alternatives Considered" section if it teaches something). Default: write as if the reader is a stakeholder seeing this for the first time and has no context on how we got here.
+**Why:** User request — proposals are for new readers, not artifacts of the design conversation. The decision trail belongs in our internal archive (`.squad/decisions/multisquad-design/`), not in the proposal body.
+
+---
+
+### User directive — Zero-impact P0 + default behavior is out-of-the-box, not "personal-only"
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:**
+
+1. **New P0 (must-have):** Zero impact to existing users of squad-sdk and squad-cli or their default workflows. Basic squad-cli usage for a single-squad / single-repo project MUST continue to work, as-is, out-of-the-box. The multi-squad work is **additive**, never a default-changing migration.
+
+2. **Default behavior is the existing "out-of-the-box" experience.** When a developer is not opted into the organizational features, Squad behaves exactly as it does today. The concept of "personal-only mode" is NOT the default and MUST NOT be forced or flagrantly surfaced. If a single-squad user never knew "personal-only" existed, that's correct — they didn't need to.
+
+3. The "personal-only" UX, where it exists, is reserved for situations where a developer is *also* exposed to organizational squads and needs to opt out for a given workspace. It is not the canonical day-1 experience.
+
+4. **Carefully think through interaction between organizational functionality and the default/classic/legacy squad behavior.** Anything that changes single-squad UX, prompts the user with new questions, adds new files to a fresh `squad init`, or alters existing CLI semantics is a violation of this P0 unless explicitly approved.
+
+**Why:** User request — preserves user trust and respects the existing audience. Aaron explicitly called out that "personal-only" had bled into the default story in the prior draft, which is a design smell to fix.
+
+---
+
+### User directive — Rally exclusion unless unique value
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:** Rally was fed into this design process as a source of inspiration and ideas (worktree mechanics, `~/rally/` central store pattern, dispatch UX). It was NOT meant to be a required component of the user story. If Rally does not add UNIQUE value to the proposal's user story or technical contract, do NOT mention it in the proposal at all. Internal references in the decision archive are fine; the public-facing proposal should focus on Squad's own surfaces (SDK, squad-cli, and any new tooling we explicitly propose).
+**Why:** User request — keeps the proposal scoped to what we're actually building and avoids confusing readers with peripheral projects that don't drive the design.
+
+---
+
+### User directive — P1: Minimize squad-cli semantic changes
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:** New P1 goal: modify `squad-cli` semantics as little as possible. Where new multi-squad functionality requires CLI surface, prefer **additive** new commands or flags over altering the meaning of existing commands. Where an existing command's behavior must change, prefer behavior that is **gated** on opt-in (e.g., presence of org config) so single-squad users see no change. This P1 sits alongside the existing P1s ("minimize custom code", "contribute upstream") and is consistent with the new P0 of zero-impact to existing users.
+**Why:** User request — preserves muscle memory and existing workflows for current users; lowers cost of upstream contribution by reducing the surface area of breaking changes.
+
+---
+
+### User directive — Chain-of-command is host/org policy, not SDK rule
+
+**By:** Aaron (via Copilot)
+**Date:** 2026-05-17
+**What:** When multiple squads are simultaneously active (collaboration), the SDK MUST NOT bake in a fixed answer to "who wins" non-safety, non-policy disagreements (e.g., tactical/local-implementation calls). That answer is situational — it depends on the nature of the decision, the nature of the involved squads/agents, and organizational/team norms. The SDK's job is to provide:
+
+1. A **mechanism** for declaring relationships between active squads (which squad is broader, which is narrower, which is advisory, etc.).
+2. A **seam** where host implementations and organizational policy can plug in to declare/resolve specific kinds of disagreements (e.g., "in this org, the broader squad's Lead may direct execution on architectural calls; the closer squad's Lead has final say on tactical calls").
+
+Safety- and policy-level constraints (compliance, security, enterprise-mandated behaviors) MAY still be modeled as broader-squad-constrains-narrower at the SDK level if a clean primitive exists. Beyond that, the SDK stays out of it.
+
+**Why:** User request — extends the existing layering principle. Trying to embed a universal chain-of-command would force one org's culture into all orgs and ignore the situational nature of inter-team collaboration. Aaron explicitly accepted the complexity tradeoff: SDK stays simple; org/host policy carries the situational nuance declaratively.
+
+---
+
+## 2026-05-18: Multi-Squad Management — Authoritative Proposal Landed
+
+**By:** Aaron (with the full team — Flight, Procedures, EECOM, RETRO, Network, PAO, Rubber-duck)
+
+**What:** Adopted the multi-squad management proposal as the authoritative design artifact. Key design choices:
+- **Collaboration model (not fallback):** Broader squads constrain, closer squads execute, personal squads are advisory; user is the final escalation link.
+- **Vocabulary:** `call-sign` (identifier string only), `squad` (the thing with personas/charters/history), `assign` (write the workspace ↔ squad relationship), `muster` (load assigned squads into a session at start), `report in` (what a squad does once mustered), `active roster` (the simultaneously-active squads).
+- **Personal squads:** Ambient attach via manifest-declared scope, with assignment ledger as explicit override; multiple personal squads supported (Phase 2 for full overlap diagnostics).
+- **Zero-impact P0:** Single-squad classic squad-cli UX is unchanged out-of-the-box.
+- **Layering:** SDK provides mechanism; organizational policy lives on top of Squad.
+- **Drift/re-entry:** Downscoped to a thin SDK comparison primitive only, not a headline feature.
+- **No hard dependency on third-party tooling.**
+
+**Authoritative artifact:** `.squad/decisions/multisquad-design/flight-multisquad-proposal.md`
+
+**Working artifacts archive:** `.squad/decisions/multisquad-design/` — contains the full design trail (design rounds, gap analysis, strategy proposals, reuse audits, day-in-life scenarios).
+
+**Directives from this cycle:** 6 user directives (identity, self-contained docs, zero-impact P0, rally exclusion, CLI semantic stability, chain-of-command layering) merged into decisions.md above.
+
+**Status:** Proposal — approved by Aaron. Ready for implementation phase.
+
+**Why:** Replaces all prior multi-squad design artifacts as the canonical reference. The older `flight-multisquad-proposal-and-spec-v1.0/1.1/1.2.md` files remain in the archive for historical context but are not authoritative.
 
