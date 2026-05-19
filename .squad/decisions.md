@@ -1267,6 +1267,61 @@ CONTROL's revision closes the seven UX blockers from the original INCO reject. H
 
 **Per-blocker verification:**
 - B1 `--help` side-effect-free: ✅ closed
+
+---
+
+### 2026-05-19: Piece 17 — Fuzzy-Match CLI Helper Quality Gate
+
+**Context:** Piece 17 adversarial review cycle completed. Parallel reviews by Flight (lead), CONTROL (TypeScript), FIDO (quality) with rejection → revision → re-verification protocol.
+
+## Decision
+
+Fuzzy-match helper for CLI command suggestions (Levenshtein distance ≤ maxDistance) is APPROVED for merge. Code commit 7c1c7e68 satisfies all spec requirements:
+
+- **Spec compliance:** Levenshtein distance-2 boundary case tested (distance-1 and distance-2 both verified)
+- **Algorithm:** DP optimization (two-row memory), O(min(|a|,|b|)) time, pure function
+- **Type safety:** Generic helper `levenshteinDistance<T extends string>()`, declarations emit correct
+- **Test coverage:** 25 tests (10 spec scenarios + boundary cases + mutation suite)
+- **Mutation resistance:** 25/25 kills verified by FIDO's full sweep (110/110 end-to-end tests pass)
+
+## Outcome
+
+All reviewers green:
+- Flight: APPROVE (spec parity, algorithm, purity, scope, architecture)
+- CONTROL: APPROVE (build, declarations, types)
+- FIDO: REJECT → (CONTROL revision) → APPROVE (mutation kill verified)
+
+Gate satisfied. Ready for integration; code commit 7c1c7e68 merged to akubly/upstream-17-fuzzy-match.
+
+---
+
+### 2026-05-19: Quality Gate Protocol — Rejection & Independent Revision
+
+**By:** Flight + CONTROL + FIDO  
+**Re-verification:** FIDO  
+**Date:** 2026-05-19
+
+## Decision
+
+During piece-17 adversarial review, FIDO identified critical test gap: distance-2 boundary condition untested (spec requires). Test only covered distance-1 (listt → list).
+
+**Rejection outcome triggers protocol:**
+- Author (EECOM) locked per reviewer-rejection rules
+- CONTROL reassigned as independent reviser
+- Revision: replaced distance-1 test with true distance-2 test (listxx → list)
+- FIDO independent re-verification: APPROVE (mutation suite 25/25 passes)
+
+## Rationale
+
+Mutation resistance verification requires executing BOTH boundary cases:
+- Distance 1: to ensure `<= maxDistance` includes 1
+- Distance 2: to ensure algorithm correctly counts and compares distance-2 strings
+
+Missing distance-2 test leaves gate vulnerable to mutations in comparison logic.
+
+## Applies to
+
+All spec-mandated boundary tests. If a spec says "test the ≤ N boundary," all values from 1 to N must be tested, not just N-1.
 - B2 validation copy: ✅ closed
 - B3 differentiated register outcomes: ✅ closed
 - B4 doctor severity prefixes: ✅ closed
@@ -1972,4 +2027,8 @@ Get-Content $env:TEMP\verify.txt -Raw
 - **Fix Applied:** Message-only amend via `git commit --amend --only -F <file>` (SHA 01ae3060 → 9a9c7b06)
 - **Skill Documentation:** `.squad/skills/commit-message-quoting/SKILL.md`
 - **Surgeon History:** `.squad/agents/surgeon/history.md` (2026-05-18 learning entry)
+
+
+---
+
 
