@@ -2,11 +2,18 @@
 
 > Control System Engineer
 
-📌 **Team update (2026-05-18T19:19:14Z — Piece 14 Complete):** Piece 14 squad assign (EECOM implementation + FIDO review, APPROVED) landed successfully. SDK registry schema extended: added `status`, `initUri`, `stateBackend` fields to RegistryEntry, plus unknown-field passthrough via `[key: string]: unknown`. Existing registry files forward-compatible. If you're working on registry-touching features (pieces 15+), the extended schema is now canonical.
+📌 **Team update (2026-05-19 — Piece 18 Revision Complete):** Piece 18 doctor enhancements (EECOM implementation) revised by CONTROL per adversarial review (F1–F7, N1–N5). All 33 unit tests and 7 CLI-layer subprocess tests pass. CRLF normalization applied to cli-entry.ts. Branch `akubly/upstream-18-doctor-enhancements` force-pushed to `c515745b`.
 
 ## Learnings
 
-### Piece 14 adversarial TypeScript review (2026-05-18)
+### Piece 18 adversarial revision — doctor enhancements (2026-05-19)
+
+- **`loadRegistryFromDisk` throws on corrupt JSON; don't assume null return.** When the registry file contains invalid JSON, the function throws a `SquadError` rather than returning `{ registry: null }`. Callers that need null-safe handling (like `noRegistry` guard) must wrap in try/catch.
+- **`git add --renormalize` is required to fix CRLF in mixed-line-ending files.** `core.autocrlf=true` alone does not normalize files that were already committed with CRLF. Use `git add --renormalize` to force LF normalization in the index; then fix any pre-existing trailing-whitespace lines exposed by the normalization.
+- **Async promptFn pattern prevents readline blocking in tests.** Replacing `readLine?: () => string` with `promptFn?: (question: string) => Promise<string>` lets test authors supply an async mock that doesn't block the event loop, and allows `_defaultPromptFn` to use `readline` properly with `Promise` resolution.
+- **CLI-layer subprocess tests must build first.** Tests that spawn `dist/cli-entry.js` require a current build of the binary. Ensure `npm run build` completes before running `test/cli/` subprocess tests or they'll exercise stale code.
+
+
 
 - **Error codes as message prefixes are a TypeScript anti-pattern.** All `ERR_ASSIGN_*` codes are embedded in the human-readable message string on `ConfigurationError`. No `.code` property, no exported `AssignErrorCode` type union. Programmatic callers must regex-parse the message. Future commands should declare a typed error code union and attach it as a discriminable property.
 - **`--key=value` arg parsing must be explicitly handled.** The `args.indexOf('--flag')` pattern silently ignores the `=`-delimited form (`--clone-to=./path`). This produces a misleading error for `squad assign url --clone-to=./path`. Shared arg-value helper needed in cli-entry.
