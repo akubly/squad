@@ -2,6 +2,10 @@
 
 *Fresh start — Apollo 13 rebirth. Previous session logs archived.*
 
+## Session Markers
+
+📌 2026-05-19 — Scrub-Gate Option A archival: decisions.md 136.8KB (no archival trigger). No inbox files. Orchestration log & session log written. RETRO history update staged.
+
 ## Learnings
 
 ### Piece 13 Adversarial Review Ceremony (2026-05-18)

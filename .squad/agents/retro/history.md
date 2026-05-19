@@ -52,4 +52,20 @@ Commit ea655861 implements template sync for optional package-local `squad.agent
 
 **Status:** No source commits made. Diagnostic decision drop filed for coordinator action.
 
+### Option A Applied — Scrub Gate .squad/ Exclusion (2026-05-19)
+
+**Task:** Apply coordinator-selected Option A: exclude `.squad/` and `.squad-templates/` from Gate 1 and Gate 2.
+
+**Changes made to `docs/proposals/upstream-bradygaster/_scrub-gate.ps1` on `akubly/upstream-specs` (commit `907d6026`):**
+
+- **Gate 1:** Inserted `Where-Object { $_ -notmatch '^\.squad(-templates)?/' }` filter between `git ls-files` and `Select-String`. Pipes away all `.squad/` and `.squad-templates/` paths before the strip-list pattern match. Two-line surgical edit preserves full script structure.
+- **Gate 2:** Added `':!.squad/'` and `':!.squad-templates/'` pathspec exclusions to the `git grep` invocation. Eliminates content scan of team infrastructure files.
+
+**Verified against `akubly/upstream-18-doctor-enhancements` HEAD:**
+
+- Gate 1: Reduced from 131+ violations to 31 (true baseline: 17 `docs/_internal/` files + 14 product template/source files). `.squad/` false-positives eliminated.
+- Gate 2: PASS — all 4 prior violations cleared.
+- Gates 3–6: Unchanged (WARN, WARN, PASS, PASS).
+
+**Key lesson:** When a scrub gate pattern is broad enough to match team-internal infrastructure files that were never upstream-destined, the correct fix is a targeted exclusion at the gate — not a rename or content change. The `.squad/` directory is canonical team state, not upstream content.
 
