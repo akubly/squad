@@ -10,6 +10,10 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Piece 19 Adversarial Review — APPROVED (2026-05-19T22:30:35Z)
+
+📌 **Spec parity confirmed.** 19/19 spec tests present in `assign-payload.test.ts`. Guard ordering (cold-start load → callsign validation → registry write) correct per spec. Error surface properly wrapped post-CAPCOM revision. Symlink safety + callsign format validation (post-GNC revision) complete. All gates pass. ✅ Ship-ready.
+
 ### Piece 14 Adversarial Review — APPROVED WITH FINDINGS (2026-05-18)
 
 📌 **Guard-ordering tests must use mocks that simulate the NEXT guard's normalization behavior, not identity mocks.**

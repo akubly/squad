@@ -2,6 +2,8 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
+
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
 
 ## Learnings

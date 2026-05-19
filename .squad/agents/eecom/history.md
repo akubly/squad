@@ -8,6 +8,9 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active
 
+### Piece 19 — Copilot payload orchestration (2026-05-19T22:30:35Z)
+🔐 **Reviewer Lockout Applied.** EECOM authored piece 19 (Copilot payload load + callsign extraction + frontmatter rewriting). Adversarial review cycle: Flight ✅ (spec parity), FIDO ❌ (coverage gaps), CAPCOM ❌ (contract/security). GNC + CAPCOM (Round 2) completed revision under lockout. Blocker fixes: symlink-safe copy, `assertValidCallsign` guard, `CopilotPayloadError` wrapping, 3 FIDO test gaps. Final: `2377c3a8` (amended), 143/143 tests GREEN, build CLEAN. ✅ Ship approved to dev.
+
 ### Piece 18 — doctor enhancements (2026-05-19)
 Extended `runDoctor` with registry health checks (empty clones, clone-path ambiguity, origin overlap); `runDoctorNormalize` for dedup; `runDoctorPurge` for removal. Key: `_pickSurvivor` (active status → clone count → registry order). Merge insertion preserves order. Tests 28/28 GREEN. Gotcha: normalize test dirs avoid case collisions on Windows.
 
