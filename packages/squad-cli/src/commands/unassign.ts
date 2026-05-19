@@ -18,6 +18,7 @@ import { normalizeRemoteUrl, normalisedPathKey, collectCwdRemoteUrls } from '@br
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
+import { uninstallCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getGitRoot as _libGetGitRoot } from '../lib/git-root.js';
 import { findCloseMatch as _findCloseMatch } from '../lib/close-match.js';
@@ -235,11 +236,6 @@ export async function runUnassign(opts: RunUnassignOpts): Promise<RunUnassignRes
 
   const demoted = remainingClones.length === 0;
 
-  // TODO(piece-15): wire payload cleanup helper when added.
-  // Spec: "When a consumer binding is removed, remove the user-scoped payload for that
-  // callsign through the existing payload cleanup helper." No such helper exists in
-  // packages/ yet; add it here once available.
-
   const updatedEntry: RegistryEntry = {
     ...matchedEntry,
     clones: remainingClones,
@@ -254,6 +250,18 @@ export async function runUnassign(opts: RunUnassignOpts): Promise<RunUnassignRes
 
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
   writeRegistryFn(registryFilePath, newRegistry);
+
+  // Best-effort payload cleanup — failure is a warning, not an error.
+  if (matchedEntry.callsign) {
+    try {
+      uninstallCopilotPayload({ callsign: matchedEntry.callsign, copilotHome: opts.copilotHome });
+    } catch (err) {
+      console.warn(
+        `⚠️  Could not clean up Copilot payload for "${matchedEntry.callsign}": ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   if (demoted) {
     console.log(

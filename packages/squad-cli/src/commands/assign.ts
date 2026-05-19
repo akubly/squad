@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync as _assignExecFileSync } from 'node:child_process';
 import { resolveSquad, upsertEntry, collectCwdRemoteUrls, normalizeRemoteUrl, clonesMatch, normalisedPathKey } from '@bradygaster/squad-sdk';
+import { installCopilotPayload, CopilotPayloadError } from '@bradygaster/squad-sdk/copilot-payload';
 import { findCloseMatch as _findCloseMatch } from '../lib/close-match.js';
 import type { ResolvedSquad } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
@@ -208,7 +209,8 @@ export type AssignErrorCode =
   | 'ERR_ASSIGN_CLONE_DEST_NOT_EMPTY'
   | 'ERR_ASSIGN_CALLSIGN_COLLISION'
   | 'ERR_ASSIGN_CLONE_FAILED'
-  | 'ERR_ASSIGN_NO_TEAM_MD';
+  | 'ERR_ASSIGN_NO_TEAM_MD'
+  | 'ERR_ASSIGN_INVALID_SKILLS_SOURCE';
 
 /** Structured error thrown by runAssign — carries a typed error code. */
 export class AssignError extends ConfigurationError {
@@ -228,7 +230,7 @@ export class AssignError extends ConfigurationError {
  * `alreadyAssigned` and `noOp` variants carry no warnings by design.
  */
 export type SquadAssignResult =
-  | { kind: 'assigned' | 'reactivated'; callsign: string; hostPath: string; clonePath?: string; warnings: string[] }
+  | { kind: 'assigned' | 'reactivated'; callsign: string; hostPath: string; clonePath?: string; warnings: string[]; coordinatorInstalled?: boolean }
   | { kind: 'alreadyAssigned' | 'noOp'; callsign: string; hostPath: string; clonePath?: string };
 
 export interface SquadAssignOpts {
@@ -242,6 +244,10 @@ export interface SquadAssignOpts {
   registryPath?: string;
   /** --target-dir: product clone to bind (defaults to cwd). */
   targetDir?: string;
+  /** --skills-from: skill source selector — 'host', 'none', or local path. */
+  skillsFrom?: string;
+  /** Override the user-scoped Copilot home for payload install (test seam). */
+  copilotHome?: string;
   /** Working directory for git and path operations (defaults to process.cwd()). */
   cwd?: string;
   /** Injectable environment — falls back to process.env for SQUAD_REGISTRY_PATH resolution. */
@@ -297,6 +303,26 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   const remotesFn = opts.getRemoteUrls ?? collectCwdRemoteUrls;
   const cloneFn = opts.cloneCommand ?? _defaultCloneCommand;
   const writeRegistryFn = opts._writeRegistryFn ?? writeRegistry;
+
+  // Early validation: --skills-from must be a recognized keyword or an existing local directory.
+  // This runs before any registry write so a bad source leaves no side effects.
+  if (opts.skillsFrom !== undefined && opts.skillsFrom !== 'none' && opts.skillsFrom !== 'host') {
+    if (_isUrlArg(opts.skillsFrom)) {
+      throw new AssignError(
+        'ERR_ASSIGN_INVALID_SKILLS_SOURCE',
+        `"${opts.skillsFrom}" looks like a URL. Use a local path, "host", or "none" for --skills-from.`,
+      );
+    }
+    const resolvedSource = path.isAbsolute(opts.skillsFrom)
+      ? opts.skillsFrom
+      : path.resolve(cwd, opts.skillsFrom);
+    if (!fs.existsSync(resolvedSource) || !fs.statSync(resolvedSource).isDirectory()) {
+      throw new AssignError(
+        'ERR_ASSIGN_INVALID_SKILLS_SOURCE',
+        `"${opts.skillsFrom}" does not resolve to an existing local directory.`,
+      );
+    }
+  }
 
   // Guard 1a: Missing argument.
   const rawArg = opts.callsignOrUrl?.trim() ?? '';
@@ -492,12 +518,35 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
   writeRegistry(registryFilePath, newRegistry);
 
+  // Install Copilot payload after successful registry write.
+  let coordinatorInstalled = false;
+  const hostDir = path.dirname(hostSquadDir);
+  try {
+    const installRes = installCopilotPayload({
+      hostDir,
+      callsign,
+      copilotHome: opts.copilotHome,
+      skillsFrom: opts.skillsFrom,
+      cwd: opts.cwd,
+    });
+    coordinatorInstalled = installRes.coordinatorInstalled;
+  } catch (err) {
+    if (err instanceof CopilotPayloadError && err.code === 'ERR_PAYLOAD_INVALID_SKILLS_SOURCE') {
+      throw new AssignError('ERR_ASSIGN_INVALID_SKILLS_SOURCE', err.message);
+    }
+    warnings.push(
+      `Could not install Copilot payload: ${err instanceof Error ? err.message : String(err)}. ` +
+      `Re-run "squad assign ${callsign}" after fixing the source or permissions.`,
+    );
+  }
+
   return {
     kind: wasInactive ? 'reactivated' : 'assigned',
     callsign,
     hostPath: hostSquadDir,
     clonePath,
     warnings,
+    coordinatorInstalled,
   };
 }
 
@@ -644,11 +693,34 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     throw writeErr;
   }
 
+  // Install Copilot payload after successful registry write.
+  let coordinatorInstalled = false;
+  const coldWarnings: string[] = [];
+  try {
+    const installRes = installCopilotPayload({
+      hostDir: cloneDest,
+      callsign,
+      copilotHome: opts.copilotHome,
+      skillsFrom: opts.skillsFrom,
+      cwd: opts.cwd ?? cwd,
+    });
+    coordinatorInstalled = installRes.coordinatorInstalled;
+  } catch (err) {
+    if (err instanceof CopilotPayloadError && err.code === 'ERR_PAYLOAD_INVALID_SKILLS_SOURCE') {
+      throw new AssignError('ERR_ASSIGN_INVALID_SKILLS_SOURCE', err.message);
+    }
+    coldWarnings.push(
+      `Could not install Copilot payload: ${err instanceof Error ? err.message : String(err)}. ` +
+      `Re-run "squad assign ${callsign}" after fixing the source or permissions.`,
+    );
+  }
+
   return {
     kind: reactivating ? 'reactivated' : 'assigned',
     callsign,
     hostPath: squadDir,
     clonePath,
-    warnings: [],
+    warnings: coldWarnings,
+    coordinatorInstalled,
   };
 }

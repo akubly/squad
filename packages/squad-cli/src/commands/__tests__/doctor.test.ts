@@ -72,6 +72,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     const hasHealthWarning = result.findings.some(
       f => f.toLowerCase().includes('empty clones') ||
@@ -93,9 +94,10 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('info');
-    const hasGuidance = result.findings.some(
+    const hasGuidance= result.findings.some(
       f => f.toLowerCase().includes('inactive') || f.toLowerCase().includes('assign'),
     );
     expect(hasGuidance).toBe(true);
@@ -113,6 +115,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
     const hasWarning = result.findings.some(
@@ -132,6 +135,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
     const hasWarning = result.findings.some(
@@ -163,6 +167,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
     const hasWarning = result.findings.some(
@@ -171,7 +176,7 @@ describe('runDoctor: registry health warnings', () => {
     expect(hasWarning).toBe(true);
   });
 
-  it('W06 containment clone-path overlap across entries produces a warning', async () => {
+  it('W06containment clone-path overlap across entries produces a warning', async () => {
     const subCloneDir = makeDir('clone/sub');
     const host2Dir = makeDir('host2');
     fs.mkdirSync(path.join(host2Dir, '.squad'), { recursive: true });
@@ -195,6 +200,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
     const hasWarning = result.findings.some(
@@ -203,7 +209,7 @@ describe('runDoctor: registry health warnings', () => {
     expect(hasWarning).toBe(true);
   });
 
-  it('W07 inactive entries are listed in findings without making the command fail', async () => {
+  it('W07inactive entries are listed in findings without making the command fail', async () => {
     writeRegistry(registryPath, [{
       callsign: 'alpha',
       path: path.join(hostDir, '.squad'),
@@ -215,6 +221,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).not.toBe('error');
     const mentionsInactive = result.findings.some(
@@ -247,6 +254,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
     const hasOriginWarning = result.findings.some(
@@ -279,6 +287,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: TEST_ROOT,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     const hasOriginOverlapWarning = result.findings.some(
       f => f.toLowerCase().includes('origin') && f.toLowerCase().includes('overlap'),
@@ -301,6 +310,7 @@ describe('runDoctor: registry health warnings', () => {
       cwd: cwdDir,
       registryPath,
       env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
     });
     expect(result.severity).toBe('warn');
   });
@@ -739,5 +749,58 @@ describe('runDoctorPurge', () => {
       yes: true,
     });
     expect(result.invalidCallsign).toBe(true);
+  });
+});
+
+// ============================================================
+// Fix 7 (FIDO gap G3): runDoctor orphan wiring integration
+// ============================================================
+
+describe('runDoctor: orphan payload wiring', () => {
+  let registryPath: string;
+  let copilotHome: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    copilotHome = makeDir('orphan-copilot-home');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('O01 orphaned skill directory escalates severity to warn and appears in findings', async () => {
+    // Populate copilotHome with an orphaned skill whose callsign is not in the registry.
+    const orphanSkillDir = path.join(copilotHome, 'skills', 'squad-ghost-old-skill');
+    fs.mkdirSync(orphanSkillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(orphanSkillDir, 'SKILL.md'),
+      '---\nname: squad-ghost-old-skill\ndescription: orphan test\n---\n# Ghost skill\n',
+    );
+
+    // Registry contains a different callsign — ghost is not registered.
+    const hostDir = makeDir('orphan-host');
+    fs.mkdirSync(path.join(hostDir, '.squad'), { recursive: true });
+    writeRegistry(registryPath, [{
+      callsign: 'other',
+      path: path.join(hostDir, '.squad'),
+      origins: [],
+      clones: [],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({
+      cwd: TEST_ROOT,
+      registryPath,
+      env: {},
+      copilotHome,
+    });
+
+    expect(result.severity).toBe('warn');
+    const orphanFinding = result.findings.find(
+      f => /orphan/i.test(f) && /ghost/i.test(f) && /not in the registry/i.test(f),
+    );
+    expect(orphanFinding).toBeDefined();
   });
 });

@@ -14,9 +14,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { clonesMatch, normalisedPathKey, normalizeRemoteUrl } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
+import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { findCloseMatch } from '../lib/close-match.js';
 
@@ -24,6 +26,8 @@ export interface RunDoctorOpts {
   cwd: string;
   registryPath?: string;
   env?: Record<string, string>;
+  /** Override user-scoped Copilot home for orphan detection (test seam). */
+  copilotHome?: string;
 }
 
 export interface RunDoctorResult {
@@ -277,6 +281,18 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
         }
       }
     }
+  }
+
+  // Orphaned user-scoped payload entries
+  const copilotHome = opts.copilotHome ?? path.join(os.homedir(), '.copilot');
+  const knownCallsigns = entries.map(e => e.callsign).filter((c): c is string => !!c);
+  const { orphans } = diagnoseCopilotPayload({ knownCallsigns, copilotHome });
+  for (const orph of orphans) {
+    findings.push(
+      `Orphan ${orph.kind} payload: "${orph.pathOnDisk}" belongs to callsign "${orph.callsign}" ` +
+      `which is not in the registry. Run "squad assign ${orph.callsign}" to re-bind, or remove manually.`,
+    );
+    escalate('warn');
   }
 
   return { severity, findings };

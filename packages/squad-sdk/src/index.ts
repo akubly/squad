@@ -80,6 +80,20 @@ export * from './sharing/index.js';
 export * from './upstream/index.js';
 export * from './remote/index.js';
 export * from './streams/index.js';
+export {
+  CopilotPayloadError,
+  installCopilotPayload,
+  uninstallCopilotPayload,
+  diagnoseCopilotPayload,
+} from './copilot-payload.js';
+export type {
+  InstallCopilotPayloadOpts,
+  InstallCopilotPayloadResult,
+  UninstallCopilotPayloadOpts,
+  UninstallCopilotPayloadResult,
+  DiagnoseCopilotPayloadOpts,
+  DiagnoseCopilotPayloadResult,
+} from './copilot-payload.js';
 
 // Builder functions (SDK-First Squad Mode)
 export {

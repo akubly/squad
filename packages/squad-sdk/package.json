@@ -233,6 +233,10 @@
     "./path-utils": {
       "types": "./dist/path-utils.d.ts",
       "import": "./dist/path-utils.js"
+    },
+    "./copilot-payload": {
+      "types": "./dist/copilot-payload.d.ts",
+      "import": "./dist/copilot-payload.js"
     }
   },
   "files": [

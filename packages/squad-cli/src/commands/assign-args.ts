@@ -13,9 +13,10 @@ export interface AssignCliArgs {
   callsign: string | undefined;
   registryPath: string | undefined;
   targetDir: string | undefined;
+  skillsFrom: string | undefined;
 }
 
-const NAMED_FLAGS = ['--clone-to', '--callsign', '--registry-path', '--target-dir'] as const;
+const NAMED_FLAGS = ['--clone-to', '--callsign', '--registry-path', '--target-dir', '--skills-from'] as const;
 
 /**
  * Extract a named argument value from an args array, handling both
@@ -52,6 +53,7 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     callsign: argValue(args, '--callsign'),
     registryPath: argValue(args, '--registry-path'),
     targetDir: argValue(args, '--target-dir'),
+    skillsFrom: argValue(args, '--skills-from'),
   };
 }
 
