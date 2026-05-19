@@ -4,32 +4,15 @@
 
 ## Learnings
 
-### Issue Triage (2026-03-22T06:44:01Z)
+### Early Pieces Summary (2026-03-22 through 2026-05-14)
 
-**Flight triaged 6 unlabeled issues and filed 1 new issue.**
+**Pieces 01–03 Foundation:** Established core security model — registry validation, callsign character-set restrictions, symlink defense via `lstatSync`. All git invocations injection-free (`execFileSync` array args, no shell).
 
-RETRO assigned:
-- **#479 (history-shadow race condition)** → squad:eecom + squad:retro (production bug; mitigation through StorageProvider atomicity)
+**Pieces 08–10 Lifecycle:** Hardened path validation. Piece 08b: added `path.isAbsolute()` and `..`-segment detection for `--home` and `--cwd`; env isolation. Piece 10: registry guards unified across all callsign sources (flag, env, default); symlink sentinel logic prevents redirect-escape. Result: fail-closed pattern established across init and assignment flows.
 
-Pattern: Critical production bug identified. Race condition in history-shadow requires atomicity guarantees from StorageProvider abstraction (CONTROL/EECOM).
+**Key hardening pattern:** Validation at resolver boundary + atomic file operations. Applied in 05bd332f (piece 02), revisions 1a47e601 (piece 14), ff55ecf7 (piece 08c), and piece 10 revisions.
 
-📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. RETRO owns #479 mitigation strategy. Production bug severity high; blocks stable history-shadow operation. Depends on StorageProvider PRD completion (#481). Coordinated rollout required.
-
-### Piece 03 adversarial review (2026-05-13T10:21:19-07:00)
-
-**Verdict:** APPROVE (no blocking issues)
-
-All git invocations use `execFileSync` with array args, no shell, stderr ignored — injection-free. Sentinel-bounded containment in `clonesMatch` correctly blocks sibling-prefix false positives; realpath fallbacks catch all exceptions. URL parsing avoids `new URL()` constructor entirely; credential stripping handles `user:pass@` form. Two non-blocking hardening candidates: (1) add `path.isAbsolute()` guard on worktree porcelain paths; (2) piece 01 schema should reject root-level clone entries (`C:\`, `/`).
-
-### Piece 02 adversarial review (2026-05-12T23:06:58-07:00)
-
-**Verdict:** CLEAR (no blocking issues, 2 hardening recommendations accepted)
-
-**Hardening recommendations implemented in commit `05bd332f`:**
-1. **Callsign character-set validation** — Restrict to `^[A-Za-z0-9_-]+$` at resolver boundary (both `opts.callsign` and `SQUAD_CALLSIGN` env var), max length 64.
-2. **Symlink defense** — Use `fs.lstatSync` (not `fs.statSync`) when checking registry entry stored paths. Prevents symlinks to nonexistent targets from silently being followed.
-
-**Risk assessment:** Low today (strict equality validation prevents injection). Future-proofing: if callsigns are used in file paths or URLs downstream, character validation acts as first-line defense.
+**Piece 11b mirror-sync:** All scans CLEAN (PII, path, tone, record). Established template sync safety. Changeset and history entries professional.
 
 ### Piece 14 Adversarial Review — Security Findings Landed (2026-05-18)
 
@@ -38,66 +21,6 @@ All git invocations use `execFileSync` with array args, no shell, stderr ignored
 Initial review identified git subprocess shell-injection vector (S1): `_defaultCloneCommand` invoked git clone without `--` separator before URL, enabling git-argument-injection attack when URL starts with `--`. Revision commit 1a47e601 added `--` separator to all git subprocess calls (clone, fetch, checkout). All 3 minor hardening recommendations also addressed: registered callsign validated as absolute paths with `..`-segment detection; test env isolation completed. Branch ready for Phase C. Security decision merged: git subprocess `--` separator convention now team-wide standard.
 
 **Cleared threat vectors:** Registry traversal, env-var trust boundary, symlink following, JSON injection, TOCTOU races — all non-exploitable from unprivileged inputs given current design. Validation at resolver boundary completes the security model begun in piece 01 registry validation.
-
-### Piece 08b adversarial review (2026-05-14T16:12:01.302-07:00)
-
-**Verdict:** APPROVE WITH NITS (no blocking issues, 4 hardening candidates)
-
-**PII/Secret scan:** CLEAN. Only `@.*\.com` hit is the standard git author/co-authored-by trailer. No tokens, no `ghp_`, no `github_pat_`. Zero committed artifact PII.
-
-**Risk inventory (all LOW):**
-
-1. **`--home` flag accepts arbitrary path without absolute-path or bounds check** — `assign.ts:81-82,129`. `home` from CLI args flows directly into `path.join(home, '.copilot', 'agents', ...)` with no validation. OS permissions generally block escalation and the written content is a fixed internal template; LOW. Mitigation: `path.isAbsolute(home)` guard; optionally reject paths outside `os.homedir()`.
-
-2. **`normalizedCwd` registered as clone without absolute-path guard** — `assign.ts:108`. `path.normalize(opts.cwd)` does not guarantee an absolute result if `opts.cwd` is relative; a relative clone path confuses future resolver comparisons. Echoes piece 03 hardening. Mitigation: `path.isAbsolute(opts.cwd)` check before normalize and write.
-
-3. **`consult --status` deliberately skips resolver guard** — `cli-entry.ts` `showStatus` bypass. Intentional per spec; `--status` is read-only and no registry or project writes occur. The inline comment documents the intent. LOW; no remediation required for approval.
-
-4. **Test fixture env isolation incomplete** — `legacy-resolver-migration.test.ts:44-68`. `runCli` spreads `process.env` but does not suppress `XDG_CONFIG_HOME`/`APPDATA`. The randomBytes suffix makes real-path collision very unlikely; LOW in practice. Mitigation: add `XDG_CONFIG_HOME`/`APPDATA` overrides to the env seam for resolver-guard tests.
-
-**Additional confirmed-clean vectors:** No dry-run output writes to `.squad/` files. `_installCoordinatorAgent` correctly uses `lstatSync` (not `statSync`) to detect and unlink symlinks before copying — consistent with piece 02 symlink hardening pattern. Template source is package-internal (`getTemplatesDir()` walk bounded to 6 levels); no user-controlled template path injection possible. Resolver guard in `assign.ts` fires before all side effects; the two-phase pattern (resolve → side-effects) is correctly implemented.
-
-### Piece 08a adversarial review (2026-05-14T14:19:34-07:00)
-
-**Verdict:** APPROVE
-
-**Scrub gate cross-reference:** Gate 1 flagged 80+ pre-existing strip-listed paths (orchestration-log, identity, casting, templates, docs/_internal). Gate 3 flagged 20+ pre-existing references in orchestration logs, decisions archive, and prior review entries. Cross-referencing against the 7 files touched by `fcb0cf1a`: **zero intersection**. No piece-08a file appears in any strip list or reference list. Coordinator's acceptance of Gate 1 FAIL + Gate 3 WARN as baseline contamination is valid.
-
-**Tone scan:** Four pattern classes flagged, all acceptable: (1) `upstream.json` — established data model field name used in 13+ files across packages/test, not fork residue; (2) `resolveSquadV2` and `resolution-v2` — actual module identifiers in `@bradygaster/squad-sdk`; (3) `@bradygaster/squad-cli` package namespace — the project's own npm scope; (4) "previously" — appears in pre-existing context line, not in 08a additions.
-
-**PII scan:** Zero emails, zero tokens, zero credential patterns. One false-positive absolute-path hit: a regex assertion `.*repo` in test output matching — not a real path.
-
-**Co-authored-by trailer:** Exact match confirmed: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
-
-**Decision entry review:** `.squad/decisions/inbox/control-08a-working-tree-drift.md` and the merged entry in `.squad/decisions.md` are both clean — no PII, no comparison framing, no version leaks.
-
-### Piece 08b Revision — Sims Applied RETRO Hardening (2026-05-14T16:12:01Z)
-
-📌 **Sims successfully applied all 4 RETRO LOW hardening candidates.**
-
-RETRO identified 4 LOW-severity hardening improvements during adversarial review. Sims applied all in the revision:
-
-1. **`--home` path validation (assign.ts):** Added `path.isAbsolute()` check and `..`-segment detection before `path.join(home, '.copilot', 'agents', ...)`. Prevents relative path confusion.
-
-2. **`--cwd` absolute-path guarantee (assign.ts):** Added `path.isAbsolute(opts.cwd)` check before `path.normalize()` and registry write. Ensures registered clone paths remain absolute.
-
-3. **`--status` read-only verification (cli-entry.ts):** Inline comment documents intentional bypass; confirmed via code inspection that `runConsult --status` never acquires write locks. No remediation needed; documentation added.
-
-4. **Test env isolation (legacy-resolver-migration.test.ts):** Added `XDG_CONFIG_HOME`/`APPDATA` overrides to resolver-guard tests. Eliminates potential fixture collision via real-path seam.
-
-**Pattern:** Path validation should be standard for all user-provided paths flowing into file operations. Resolved variable threading + hardened path checks establish the model for 08c+.
-
-### Piece 08c adversarial review (2026-05-14T17:54:18.903-07:00)
-
-**Verdict:** REJECT
-
-Lifecycle command dispatch now resolves before starting bridges, tunnels, PTYs, or child processes, and subprocess CWD stays on the user-facing start directory. However, clone/origin registry matches can return a registry path without checking that the resolved squad directory exists, and malformed registry content can be ignored for clone/origin matching. That is not fail-closed enough for long-running commands: a stale or malformed registry can still lead to a bridge session using the wrong squad identity or fallback squad. Revision should be owned by GNC, not the original author, and should add fail-closed lifecycle tests for stale resolved paths and explicit registry parse failures.
-
-### Piece 08c Revision — GNC Applied Fail-Closed Lifecycle Validation (2026-05-15T00:54:18Z)
-
-📌 **GNC successfully addressed RETRO blocker and both FIDO majors.**
-
-Blocker resolved: Added `lstatSync` stale-path guards after clone/origin registry matches (mirrors callsign pattern), and explicit registry parse errors now throw `REGISTRY_INVALID` before any state creation. FIDO major #1 (error assertion): `rc does not start bridge when resolution throws` now asserts error text visible. FIDO major #2 (dispatch passthrough): Dispatch-level copilot args passthrough now tested via `runCliShort(['start', '--extra-copilot-flag'])` subprocess, proving dispatch filter preserves non-squad args. Test count 27/27 GREEN, scrub gate passed, commit ff55ecf7.
 
 
 ### Piece 10 init fail-fast guard review (2026-05-15)
@@ -108,49 +31,25 @@ RETRO found two must-fix guard-correctness issues before upstream: registry conf
 
 📌 **Team update — Piece 10 Revision Complete (2026-05-15T23:15:56Z):** Per strict lockout protocol, EECOM locked out for this cycle. CONTROL + Sims assigned joint revision and delivered fix: CONTROL unified init validation routing through one path so registry from all sources (flag, env, default) receives same conflict checks; added lstat-based `.squad` symlink sentinel to prevent redirect-escape. All guards now execute before scaffold creation. Build CLEAN. 28/28 tests GREEN. Approved for Phase C.
 
-### Piece 11b mirror-sync adversarial review (2026-05-16T00:08:06.680-07:00)
+### Piece 11b mirror-sync (2026-05-16)
 
 **Verdict:** PASS
 
-Commit ea655861 implements template sync for optional package-local `squad.agent.md` mirrors. PII/secret scan: CLEAN (author email acceptable in git metadata; zero tokens, zero `ghp_`/`github_pat_` patterns; zero credentials). Path scan: CLEAN (no D:\, C:\, /home, /root; all paths via path.join or relative). Tone & Record scan: CLEAN across all 6 touched files — no fork residue, no comparison framing, no preview-channel terminology, no preview-channel language, no commit-history breadcrumbs. @bradygaster scope acceptable (project namespace). Changeset: professional tone, factual. History entry follows established 11a pattern (including "Gotchas:" terminology already in use). Decision file proper format, clear consequences, no leaks. Skills file adds constructive anti-pattern. Code comments professional, no residue. Test structure clean, no fork language, descriptive test names.
-
-All Tone & Record requirements (REPLAY-PROTOCOL § Tone & Record Enforcement): satisfied.
-
-### Piece 14 security review (2026-05-18)
-
-**Verdict:** APPROVED WITH HARDENING (3 minors, 4 hardening; no blockers)
-
-Two findings warrant pre-merge attention: (S1) `git clone` is invoked without a `--` argument separator, allowing a `--upload-pack=` or `--config=`-prefixed string passed as the URL to be interpreted by git as a flag rather than a URL — fix is one token (`--`); (S3) `writeRegistry` uses non-atomic `writeFileSync`, leaving the registry in an unreadable state if the process is killed between truncate and write — fix is write-temp-then-rename. S6 (case normalization inconsistency in `runAssignToCopilot` idempotency check) is an existing behavioral gap on case-insensitive filesystems. Hardening items: no boundary assertion on `--clone-to` resolved path (S2); registry created world-readable 0o644 on POSIX (S4); `fs.existsSync` follows symlinks at host-path and team.md guards while `_installCoordinatorAgent` correctly uses `lstatSync` (S5); no test covers URL input starting with `--` (S7). PII scan clean. Shell injection not possible — all git calls use `execFileSync` with argument arrays. `.npmrc` invariant satisfied. Rollback does not follow symlinks on POSIX.
-
-Pattern: the `--` separator before positional URL arguments should be a standing convention for all git subprocess calls in the codebase. Atomic registry writes should be a shared utility in `registry.ts` rather than a per-caller concern.
-
-### Branch akubly/upstream-11a-canonical-template-failshut review (2026-05-15T22:59:10.798-07:00)
-
-**Verdict:** REQUEST-CHANGES.
-
-One MAJOR governance risk: the branch edits `.github/agents/squad.agent.md` even though the source-of-truth table in that same file marks it as authoritative governance and human-maintainer-write-only. Clean checks: strip-listed path count stayed 121 on both compared branches, added lines in the branch diff introduced no banned-record terms or secret patterns, and git remote configuration remained single-origin only.
+Commit ea655861 implements template sync for optional package-local `squad.agent.md` mirrors. All scans CLEAN (PII, paths, tone, record). Established template sync safety pattern. Changeset and history entries professional. Decision file proper format, clear consequences, no leaks.
 
 ### Scrub Gate Cleanup — Pre-Phase C (2026-05-19)
 
 **Task:** Diagnose and fix Gate 1 (strip-listed paths) and Gate 2 (wifi-aware mentions) failures on `akubly/upstream-18-doctor-enhancements` before Phase C begins.
 
-**Finding: ALL violations are baseline contamination — zero introduced by piece 18.**
+**FINDING — All violations baseline, zero in piece-18 diff:**
 
-**Gate 1 — Strip-listed paths (131+ violations, all baseline):**
-Three categories, all pre-dating piece 18:
-1. **`docs/_internal/`** — 17 files. Born in commit `482fd58d` (docs: rewrite documentation site with Astro). The `_internal` directory name matches the strip pattern. These are design/PRD docs, not MS-internal content per se.
-2. **`packages/squad-sdk/src/casting/`** and **`templates/{casting,identity}/`** and **`packages/*/templates/{casting,identity}/orchestration-log.md`** — 15 files. Born in `df4fafe6` (feat: migrate SDK + CLI source files into workspace packages). These are Squad's own casting, identity, and orchestration-log features — legitimate product directories that share naming with the strip-list patterns.
-3. **`.squad/orchestration-log/`, `.squad/identity/`, `.squad/casting/`, `.squad-templates/`** — 99+ files. These are team infrastructure/history files. Piece 18 added 3 new `.squad/orchestration-log/2026-05-19T194800Z-*.md` files, but the directory pattern was already violated. Per task guidance: NOT silently rewritten.
+- **Gate 1 (131+ violations):** `docs/_internal/` (17 files from 482fd58d), product dirs `/casting/`, `/identity/` (15 files from df4fafe6), `.squad/` infrastructure (99+ files). **No Gate 1 violations from piece 18.**
+- **Gate 2 (4 violations):** All trace to `.squad/reviews/piece-13-adversarial-review.md:160` false positive (grep command in diagnostic block). **No Gate 2 violations from piece 18.**
 
-**Gate 2 — Wifi-aware mentions (1 root source, 3 derivative mentions, all baseline):**
-- Root source: `.squad/reviews/piece-13-adversarial-review.md:160` — contains `git grep -i 'wifi.aware'` as a shell command inside a scrub-gate report block. This is a **false positive** — the file recorded that the search returned 0 hits. The grep pattern `wifi.aware` in the review text triggers the gate.
-- Derivative mentions: `.squad/agents/fido/history.md`, `.squad/decisions.md`, `.squad/orchestration-log/2026-05-18T191914Z-fido.md` — all reference the piece-13 review as the source. None are in piece-18's diff.
+**Scrub gate boundary discovery:** The pattern `/identity/`, `/casting/`, `orchestration-log` matches Squad's own product directories (not just MS-internal content). The `.squad/` directory should be excluded from both Gate 1 (path scan) and Gate 2 (content scan), as these are team infrastructure files destined for team record-keeping, not upstream-destined code.
 
-**No source code violations from piece 18:** The four piece-18 source files (`doctor.ts`, `cli-entry.ts`, `doctor.test.ts`, `doctor-registry-cli.test.ts`) contain zero strip-list or wifi-aware content.
+**Proposed remedies:** (A) Exclude `.squad/` from gates [recommended, low-risk]; (B) Rename `docs/_internal/` → `docs/design/` [medium-risk]; (C) Refine product directory pattern [requires coordinator decision].
 
-**Actions taken:** None. All violations are baseline. Per procedure, STOP and report — do not silently modify earlier branches.
+**Status:** No source commits made. Diagnostic decision drop filed for coordinator action.
 
-**Scrub gate boundary discovery:** The gate pattern `/identity/`, `/casting/`, `orchestration-log` is too broad — it matches Squad's own product directories (not just internal MS content). The `.squad/` directory should be excluded from both Gate 1 (path scan) and Gate 2 (content scan), as these are team infrastructure files, not upstream-destined code. The `_scrub-gate.ps1` already excludes itself from Gate 2; the same exclusion logic should extend to `.squad/`.
-
-**Rebase strategy required:** Cleaning Gate 1 non-`.squad/` violations requires either (a) renaming `docs/_internal/` → `docs/design/` across all pieces 1-18, or (b) refining the strip-list pattern to exclude Squad's own product directory names. Gate 2 root cause requires either (a) editing `.squad/reviews/piece-13-adversarial-review.md` line 160 to escape the grep command (e.g., backtick or code fence language tag adjustment), or (b) excluding `.squad/` from Gate 2 in the scrub gate script.
 

@@ -1,4 +1,4 @@
-# Decisions
+﻿# Decisions
 
 > Team decisions that all agents must respect. Managed by Scribe.
 
@@ -2032,3 +2032,300 @@ Get-Content $env:TEMP\verify.txt -Raw
 ---
 
 
+
+
+---
+
+# Decision Drop — Scrub Gate Cleanup Policy (Pre-Phase C)
+
+**Author:** RETRO  
+**Date:** 2026-05-19  
+**Status:** Proposed — requires Scribe merge + coordinator action  
+**Requested by:** akubly
+
+---
+
+## Context
+
+Gate 1 (strip-listed paths) and Gate 2 (wifi-aware mentions) have failed on every Phase B piece. FIDO accepted this as pre-existing baseline contamination per decisions.md policy. The coordinator has now directed cleanup before Phase C regardless of that policy.
+
+RETRO performed a full scrub gate diagnosis on `akubly/upstream-18-doctor-enhancements` (HEAD `38cbc69e`). All violations are baseline — none were introduced by piece 18.
+
+---
+
+## Findings
+
+### Gate 1 — Strip-listed path violations (all baseline)
+
+The three violation categories and their earliest birth commits:
+
+| Category | Example paths | Birth commit | Count |
+|---|---|---|---|
+| `docs/_internal/` | 17 design/PRD docs | `482fd58d` | 17 |
+| Product dirs (`/casting/`, `/identity/`, `orchestration-log`) | `packages/squad-sdk/src/casting/`, `templates/identity/`, `**/orchestration-log.md` | `df4fafe6` | ~15 |
+| `.squad/` infrastructure | `.squad/orchestration-log/`, `.squad/identity/`, `.squad/casting/` | earliest pieces | ~99 |
+
+**Zero Gate 1 violations were introduced by piece 18.**
+
+### Gate 2 — Wifi-aware content (all baseline, all in `.squad/`)
+
+Single root source: `.squad/reviews/piece-13-adversarial-review.md` line 160 contains the literal text `git grep -i 'wifi.aware'` as a shell command in a scrub-gate report block. This is a **false positive** — the file records that the search returned 0 actual hits. Three downstream files (fido history, decisions.md, an orchestration log) mention this as the source of the failure; they do not contain wifi-aware content independently.
+
+**Zero Gate 2 violations were introduced by piece 18.**
+
+---
+
+## Proposed Decisions
+
+### Decision A — Scrub Gate `.squad/` exclusion (recommended, low risk)
+
+Update `_scrub-gate.ps1` to exclude `.squad/` from both Gate 1 (path scan) and Gate 2 (content scan). The gate already excludes itself (`':!docs/proposals/upstream-bradygaster/_scrub-gate.ps1'`). The `.squad/` directory is team infrastructure — history files, casting records, identity documents, orchestration logs. None of it is destined for the upstream push; it is not in the submission diff.
+
+**Effect:** Removes ~116 of the 131+ Gate 1 violations. Removes all 4 Gate 2 violations.  
+**Risk:** Low. Does not touch source code. `.squad/` content is already excluded from the upstream submission by convention.
+
+**Implementation:** In `_scrub-gate.ps1` Gate 1, filter out `.squad/` and `.squad-templates/` paths from `git ls-files` output before matching. In Gate 2, add `':!.squad/'` and `':!.squad-templates/'` to the `git grep` exclusion list.
+
+---
+
+### Decision B — `docs/_internal/` rename (required for full Gate 1 pass)
+
+Rename `docs/_internal/` → `docs/design/` to remove the `_internal` path component that matches the strip pattern.
+
+**Effect:** Removes 17 additional Gate 1 violations.  
+**Risk:** Medium. Requires a rebase-style cleanup commit touching 17 files + any cross-references to the `_internal/` path. Must be applied to a branch rebased on top of piece 18 (not a mid-stack edit).
+
+**Recommended vehicle:** A dedicated Phase C cleanup commit (`chore(docs): rename docs/_internal to docs/design for upstream scrub compliance`) on a new branch from `akubly/upstream-18-doctor-enhancements`, NOT an amendment to any piece-N commit.
+
+---
+
+### Decision C — Product directory strip-list refinement (requires coordinator input)
+
+Squad's own product directories — `/casting/`, `/identity/`, `orchestration-log` in `templates/` and `packages/squad-sdk/src/` — match the strip-list pattern. These are intended for the upstream push. The strip-list was designed to exclude MS-internal Windows wireless team artifacts, not Squad's own features.
+
+**Options:**
+1. **Refine the pattern** in `_scrub-gate.ps1` to anchor these terms more tightly (e.g., require a prefix like `windows-wireless/casting` rather than bare `/casting/`).
+2. **Accept as false positives** and exclude Squad product paths explicitly in the gate.
+3. **Coordinator confirms** that Squad's casting/identity/orchestration-log directories are NOT intended for the upstream push — in which case Gate 1 is correctly flagging them and a larger architectural scoping decision is needed.
+
+**This decision requires coordinator input before action.**
+
+---
+
+## Scrub Gate Boundary Discovery
+
+The scrub gate's path patterns are too broad for a codebase that uses `casting`, `identity`, and `orchestration-log` as product feature names. The `.squad/` exclusion is the highest-confidence, lowest-risk fix. The `docs/_internal/` rename is the next step. Product directory scoping requires a coordinator ruling.
+
+---
+
+## No Commit Required
+
+RETRO made no source changes. All violations are baseline. Per procedure: STOP and report. Do not silently modify earlier branches. This decision drop is the artifact for Scribe to process and the coordinator to act on.
+
+
+---
+
+# Decision: Piece 18 Doctor Enhancements Revision
+
+**Author:** CONTROL  
+**Date:** 2026-05-19  
+**Branch:** `akubly/upstream-18-doctor-enhancements` → `c515745b`
+
+## Context
+
+EECOM authored piece 18 (`feat(doctor)`) at commit `1a55178a`. The adversarial review (Flight + FIDO REJECT + RETRO) produced 7 blocking fixes and 5 nit fixes. EECOM is locked out per strict lockout protocol. CONTROL was assigned revision.
+
+## Decisions Made
+
+### 1. `noRegistry` variant for absent/corrupt registry
+
+**Decision:** `runDoctorPurge` now returns `{ noRegistry: true }` when the registry file is absent or corrupt, rather than bubbling a `SquadError` or returning `{ notFound: ... }`. CLI dispatch prints "No registry found." and exits 1.
+
+**Rationale:** Corrupt/absent registry is a different error class than "callsign not found in a valid registry." Callers (CLI and tests) need to distinguish these to provide actionable messages without catching exceptions in the dispatch layer.
+
+### 2. Try/catch around `loadRegistryFromDisk` in `runDoctorPurge`
+
+**Decision:** Wrap `loadRegistryFromDisk` in try/catch so corrupt JSON (which throws `SquadError`) is caught and mapped to `{ noRegistry: true }` rather than propagating.
+
+**Rationale:** `loadRegistryFromDisk` throws on malformed JSON by design (in `packages/squad-sdk/src/registry.ts`). The purge function must handle this gracefully rather than letting the CLI catch block print an unhandled error.
+
+### 3. Async `promptFn` replaces sync `readLine`
+
+**Decision:** `RunDoctorPurgeOpts.readLine?: () => string` is replaced by `promptFn?: (question: string) => Promise<string>`. Default implementation uses readline with a Promise.
+
+**Rationale:** Sync readline blocks the event loop in non-TTY test environments. The async pattern matches the promptFn convention used in `runDoctorNormalize` and allows proper test injection without blocking.
+
+### 4. CRLF normalization via `git add --renormalize`
+
+**Decision:** Applied `git add --renormalize` to force LF normalization in the index for all modified `.ts` files. Also cleaned up 7 pre-existing trailing-whitespace lines in `cli-entry.ts` that were exposed by the normalization.
+
+**Rationale:** `core.autocrlf=true` does not re-normalize files already committed as CRLF. `--renormalize` is the correct tool. Pre-existing trailing whitespace was a latent `git diff --check` failure that needed cleanup to pass the whitespace gate.
+
+### 5. Callsign validation regex `^[A-Za-z0-9_-]+$` (max 64 chars)
+
+**Decision:** Added `_CALLSIGN_RE = /^[A-Za-z0-9_-]+$/` validation in `runDoctorPurge` before any registry I/O. Returns `{ invalidCallsign: true }` for violations.
+
+**Rationale:** Prevents path traversal and injection attacks via crafted callsign arguments. Pattern matches the piece-02 callsign format constraint and mirrors the validation in `runInit`.
+
+
+---
+
+# Decision: Shared close-match helper — piece 15 revision
+
+**Date:** 2026-05-18T16:19:28-07:00  
+**Author:** EECOM  
+**Subject:** Extract `findCloseMatch` to shared `lib/close-match.ts`
+
+## Context
+
+Both `assign.ts` and `unassign.ts` independently contained a 25-line Levenshtein/prefix-suggestion helper (`_findCloseMatch`). The duplication was flagged by Flight (F7) during adversarial review of piece 15.
+
+## Decision
+
+Extract to `packages/squad-cli/src/lib/close-match.ts` as a named export `findCloseMatch`. Both commands import and alias it as `_findCloseMatch` to minimize call-site diff noise. The export surface is minimal — one function, no dependencies.
+
+## Rationale
+
+- Eliminates maintenance risk from divergent edits to two copies of the same algorithm.
+- `packages/squad-cli/src/lib/` is the established location for non-command utilities (compare `git-root.ts`).
+- The function has no side effects and no external dependencies; extraction is safe.
+
+## Applies to
+
+All future commands that need callsign suggestion should import from `../lib/close-match.js` rather than implementing their own Levenshtein variant.
+
+
+---
+
+# Decision: Piece 16 — scaffold-state behavior change and reactivation result shape
+
+**Date:** 2026-05-18  
+**Piece:** 16 — squad init refactor  
+
+## Topics
+
+### 1. Scaffold-state detection: no longer throws for existing `.squad/` directories
+
+**Decision:** `resolveScaffoldState` returns `'present'` (no throw) when `.squad/` exists and contains sentinel files. `ERR_SQUAD_INIT_EXISTING_SCAFFOLD` is only raised for **symbolic links**. Existing directories with sentinel files proceed to registration logic.
+
+**Rationale:** The spec (piece 16) requires "registering an existing scaffold" and "idempotent registration" as first-class flows. The prior throw-on-existing behavior blocked both. Symlinks remain rejected because writing through a symlink is a dangerous side-channel with no valid recovery path.
+
+**Impact:** Guard-order tests in `test/cli/init-scope.test.ts` that expected `ERR_SQUAD_INIT_EXISTING_SCAFFOLD` when scaffold + callsign conflict were both present now expect `ERR_SQUAD_INIT_CALLSIGN_EXISTS`. The scaffold-state check is no longer the first guard in the conflict chain; registry guards run first.
+
+### 2. Reactivation result shape
+
+**Decision:** `runInit` returns `{ reactivated: { callsign, path } }` for both:
+- Inactive-at-same-path (writes `status: 'active'` to registry), and  
+- Active-at-same-path (idempotent, no write).
+
+Callers that need to distinguish the two cases can check whether the registry file changed — the result shape intentionally does not expose this. Both cases represent "this squad is now registered and active."
+
+**Rationale:** Simplicity. Callers (CLI, tests) only need to know the final state, not whether a write occurred. The spread `{ ...entry, status: 'active' }` pattern ensures unknown future fields are preserved across reactivation round-trips.
+
+
+---
+
+# Decision: Piece 18 Revision Verification — FIDO
+
+**Author:** FIDO  
+**Date:** 2026-05-19  
+**Branch:** `akubly/upstream-18-doctor-enhancements` → `b7d669a4` (log commit over `c515745b`)
+
+## Verdict: APPROVE
+
+All three blocking items from FIDO's initial rejection are resolved.
+
+## F5 — CLI-layer tests
+
+7 subprocess tests in `test/cli/doctor-registry-cli.test.ts` (CLI1–CLI6b). All 6 required scenarios are covered:
+
+| Test | Scenario | Assertion |
+|------|----------|-----------|
+| CLI1 | `--help` output | contains `--normalize-callsigns` and `--purge` |
+| CLI2 | `--purge` no argument | exit code ≠ 0 |
+| CLI3 | `--purge` active entry with consumers | exit code = 2 |
+| CLI4 | Cancelled purge (stdin `n`) | exit 0; registry byte-identical |
+| CLI5 | `--normalize-callsigns` dry-run | exit 0; registry byte-identical |
+| CLI6a | `--apply` when collision pair exists | registry written, squads count = 1 |
+| CLI6b | `--apply` when no collision exists | registry byte-identical |
+
+## F6 — N03 origins dedup assertion
+
+`doctor.test.ts` lines 391–393 assert `origins[]` has length 1 after merge. Not just clone dedup — origins array directly verified.
+
+## F7 — N07 clone-count tiebreaker
+
+`doctor.test.ts` lines 445–461: equal `active` status, `'first'` 1 clone vs `'First'` 2 clones. Test asserts `survivor.callsign === 'First'`. Higher clone count wins the tie. ✅
+
+## Test Results
+
+- Doctor unit tests (`packages/squad-cli/src/commands/__tests__/doctor.test.ts`): **33 tests, all GREEN**
+- CLI-layer tests (`test/cli/doctor-registry-cli.test.ts`): **7 tests, all GREEN**
+- Build: **CLEAN** (exit 0)
+
+Full-suite failures (24 tests across `register.test.ts` and `team-root-resolution.test.ts`) confirmed pre-existing at upstream-17 baseline — not attributable to piece 18.
+
+## Scrub Gate
+
+2/6 passed. Gates 1 (strip-listed paths) and 2 (wifi-aware mentions) FAIL — pre-existing baseline contamination per `decisions.md` policy accepted across all Phase B pieces. No new strip-listed paths or wifi-aware content introduced in the piece-18 diff.
+
+
+---
+
+# Decision: Piece 18 Revision Verified — APPROVE
+
+**Author:** Flight  
+**Date:** 2026-05-19  
+**Branch:** `akubly/upstream-18-doctor-enhancements` → `b7d669a4` (code at `c515745b`)
+
+## Context
+
+Flight rejected piece 18 v1 with 4 blocking issues. CONTROL revised under lockout protocol. This decision records the verification outcome.
+
+## Verdict: APPROVE
+
+All 4 blocking items and all claimed nit fixes are confirmed resolved.
+
+## Blocking Items Resolved
+
+### F1 — CRLF normalization
+`git diff akubly/upstream-17-fuzzy-match..HEAD -- packages/squad-cli/src/cli-entry.ts | Select-String -Pattern "\`r$"` returns empty. LF-only confirmed. `git diff --check` flags only intentional Markdown trailing spaces in the decision file (not source code).
+
+### F2 — Mutual exclusion guard
+`cli-entry.ts` dispatch block:
+```
+if (hasApply && !hasNormalize) { fatal('--apply requires --normalize-callsigns') }
+if (hasNormalize && hasPurge) { fatal('--normalize-callsigns and --purge are mutually exclusive') }
+// --normalize-callsigns mode
+if (hasNormalize) { ... }
+// --purge mode
+if (hasPurge) { ... }
+```
+Both exclusion checks land before either mode branch executes.
+
+### F3 — copilotHome removed
+No `+` line containing `copilotHome` in doctor.ts diff. Field is absent from `RunDoctorOpts` and the exported API surface.
+
+### F4 — noRegistry variant
+`RunDoctorPurgeResult` carries `noRegistry?: true`. Two distinct return sites cover absent registry path and corrupt/unloadable registry. CLI dispatch:
+```typescript
+if (result.noRegistry) {
+  console.error('No registry found.');
+  process.exit(1);
+}
+```
+Cleanly separated from `result.notFound` path which prints "Callsign not found."
+
+## Nit Fixes Confirmed
+
+- **N1** async `promptFn?: (question: string) => Promise<string>` — replaces sync readline.
+- **N2** `insertAt` recomputed against mutated `currentEntries` array — drift fixed.
+- **N5** `--apply` without `--normalize-callsigns` emits `fatal('--apply requires --normalize-callsigns')`.
+
+## New Issues Introduced
+
+None that block merge. One observation: `git diff --check` exits 2 due to trailing spaces in `.squad/decisions/inbox/control-piece-18-revision-doctor.md`. These are intentional Markdown line-break spaces, not a source quality issue.
+
+## Pattern Recorded
+
+`noRegistry` as a dedicated result variant (not `notFound`, not thrown exception) is the correct disambiguation pattern when registry absence/corruption is a distinct error class from "entry not found in a valid registry." Future commands that read the registry should adopt this three-way result shape: `noRegistry | notFound | success`.
