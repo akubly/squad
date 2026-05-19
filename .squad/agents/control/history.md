@@ -14,6 +14,12 @@
 - **`RegistryEntry [key: string]: unknown` is safer than feared.** Named properties take precedence for direct property access; the index signature only affects bracket-form reads. The concern is real but lower-priority than it appears.
 - **`noUncheckedIndexedAccess` compliance throughout.** All array index reads in piece 14 code use the `!` operator correctly. Zero tsc errors.
 
+### Piece 16 URL guard revision (2026-05-18)
+
+- **CLI URL guards must scan every candidate token, not just the first positional.** Skip only recognized option values; otherwise a URL can hide after `--registry-path`, `--target-dir`, or another value-taking flag.
+- **Init URL detection should normalize before matching.** Trim the token first, then match `http(s)`, `ssh`, `git`, `git+http(s|ssh)`, `file://`, protocol-relative `//`, and SCP-style `user@host:path` while leaving Windows, UNC, and local relative paths untouched.
+- **Tone & Record scrubs should preserve facts and counts while dropping named author lines, named verdict labels, and named assignment breadcrumbs.** Keep the behavior, evidence, and outcome; remove personnel-style attribution.
+
 ## Current Session Learnings
 
 ### Piece 10 revision — init validation path (2026-05-15T23:15:56Z)

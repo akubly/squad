@@ -8,6 +8,12 @@ Sims owns end-to-end test coverage, integration test harnesses, cross-component 
 
 ## Learnings
 
+### 2026-05-18 — Init registry coverage
+
+- Atomic rename protects registry writes from partial-file corruption, but it does not prevent lost updates when two init operations both do load-modify-write against the same registry file.
+- Reactivation path matching depends on normalized absolute keys: trailing separators normalize cleanly, case-only variants normalize on Windows, and relative registry paths do not match reliably when they are resolved from a different base directory.
+- CLI URL-guard rehearsals should cover multiple URL forms and URLs that appear after value-taking options, and they should assert rejection before either the scaffold or the registry file is created.
+
 ### Piece 10 Revision — Init Fail-Fast Test Coverage (2026-05-15T23:15:56Z)
 
 📌 **Team update — Piece 10 Revision Complete:** EECOM locked out per strict lockout protocol after adversarial review split verdict (Flight APPROVE-3-notes, FIDO REJECT-6-gaps, RETRO APPROVE-WITH-FIXES). CONTROL + Sims assigned joint revision. Sims addressed all 6 FIDO test gaps: (1) guard-order CLI E2E via dispatch path with derived callsign conflict; (2) clone-collision tests for default+explicit registry scenarios; (3) `.squad` symlink collision with lstat rejection proof; (4) registry byte stability: snapshots after all conflict paths; (5) typed error assertions for `SquadError` and `ConfigurationError` instances; (6) test label/assertion alignment. Added scaffold-file assertions (no dir/file creation on conflict), CLI stderr contract assertions (specific conflict identification), exit code 2 verification on all paths. Surgeon squashed both revision commits into `331894e8`. Build CLEAN. 28/28 tests GREEN. Pattern reinforced: fail-fast guard tests should prove first guard, unchanged registry, unchanged scaffold surface, and process-visible error text in the same rehearsal. Ready for Phase C.

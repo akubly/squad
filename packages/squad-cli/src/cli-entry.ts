@@ -118,6 +118,41 @@ function getSquadStartDir(): string {
   return process.env['SQUAD_TEAM_ROOT'] || process.cwd();
 }
 
+const INIT_OPTIONS_WITH_VALUES = new Set([
+  '--target-dir',
+  '--registry-path',
+  '--callsign',
+  '--mode',
+  '--preset',
+  '--state-backend',
+]);
+
+function findInitUrlLikeArg(args: string[], isUrlLikeArg: (arg: string) => boolean): string | undefined {
+  let skipNext = false;
+
+  for (const token of args.slice(1)) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    if (token.startsWith('--')) {
+      const eqIdx = token.indexOf('=');
+      const flag = eqIdx === -1 ? token : token.slice(0, eqIdx);
+      if (eqIdx === -1 && INIT_OPTIONS_WITH_VALUES.has(flag)) {
+        skipNext = true;
+      }
+      continue;
+    }
+
+    if (isUrlLikeArg(token)) {
+      return token;
+    }
+  }
+
+  return undefined;
+}
+
 function resolveSquadDir(cwd: string): string | null {
   return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
 }
@@ -288,12 +323,13 @@ async function main(): Promise<void> {
   if (cmd === 'init') {
     // Reject URL-like positional arguments early with a clear usage message.
     const { isUrlLikeArg } = await import('./commands/init.js');
-    const positional = args.slice(1).find(a => !a.startsWith('-'));
-    if (positional && isUrlLikeArg(positional)) {
+    const urlLikeArg = findInitUrlLikeArg(args, isUrlLikeArg);
+    if (urlLikeArg) {
       fatal(
-        `"squad init" does not accept URL arguments.\n` +
-        `  To bind this checkout to a registered squad, use "squad assign <callsign>".\n` +
-        `  To link to a remote team root, use "squad init --mode remote <team-repo-path>".`,
+        `"squad init" does not accept repository URLs.\n` +
+        `  Clone the repository with git first, then run:\n` +
+        `    squad init --target-dir <local-dir>\n` +
+        `  To skip registry registration: squad init --target-dir <local-dir> --no-register`,
       );
       return;
     }

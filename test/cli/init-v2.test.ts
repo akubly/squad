@@ -56,17 +56,18 @@ describe('runInit: existing scaffold', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('throws ERR_SQUAD_INIT_EXISTING_SCAFFOLD when .squad/team.md already exists', async () => {
+  it('succeeds without overwriting sentinel file when .squad/team.md already exists', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     const teamMdPath = join(squadDir, 'team.md');
     await writeFile(teamMdPath, '# My Custom Team\n');
 
-    await expect(runInit({ cwd: TEST_ROOT })).rejects.toThrow(/ERR_SQUAD_INIT_EXISTING_SCAFFOLD/);
+    // Piece 16: existing scaffold is not an error — init skips scaffold creation and proceeds.
+    const result = await runInit({ cwd: TEST_ROOT, noRegister: true });
 
-    // Sentinel file must be unchanged after the conflict.
-    const content = readFileSync(teamMdPath, 'utf-8');
-    expect(content).toBe('# My Custom Team\n');
+    // Sentinel file must be preserved unchanged (no clobber).
+    expect(readFileSync(teamMdPath, 'utf-8')).toBe('# My Custom Team\n');
+    expect(result.registered).toBeUndefined();
   });
 });
 

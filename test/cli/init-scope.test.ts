@@ -1,19 +1,22 @@
 /**
- * init fail-fast contract tests.
+ * init conflict guard tests and existing-scaffold registration behavior.
  *
- * Covers the three conflict guards introduced to runInit:
- *   - ERR_SQUAD_INIT_EXISTING_SCAFFOLD
+ * Covers:
+ *   - ERR_SQUAD_INIT_EXISTING_SCAFFOLD (symlink case only)
  *   - ERR_SQUAD_INIT_CALLSIGN_EXISTS
  *   - ERR_SQUAD_INIT_CLONE_PATH_EXISTS
+ *   - Existing scaffold registration (no clobber)
+ *   - URL positional rejection at the CLI routing layer
  *
  * Each group verifies: error code in message, no filesystem mutation after
- * conflict, and correct CLI exit code (2) at the process boundary.
+ * conflict, and correct CLI exit code at the process boundary.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
+import fs from 'fs';
 import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import { randomBytes } from 'crypto';
 import { spawn } from 'child_process';
@@ -70,7 +73,7 @@ function runCli(args: string[], env?: Record<string, string>, cwd?: string): Pro
 // Scaffold conflict
 // ---------------------------------------------------------------------------
 
-describe('runInit: fail-fast — existing scaffold', () => {
+describe('runInit: existing scaffold behavior', () => {
   beforeEach(async () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
     await mkdir(TEST_ROOT, { recursive: true });
@@ -79,70 +82,68 @@ describe('runInit: fail-fast — existing scaffold', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('throws ERR_SQUAD_INIT_EXISTING_SCAFFOLD when .squad/team.md already exists', async () => {
+  it('succeeds without clobbering sentinel file when .squad/team.md already exists', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     await writeFile(join(squadDir, 'team.md'), '# Existing Team\n');
-    await expectRunInitConfigurationError(
-      runInit({ cwd: TEST_ROOT }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
-    );
+    await expect(
+      runInit({ cwd: TEST_ROOT, noRegister: true }),
+    ).resolves.toBeDefined();
+    expect(readFileSync(join(squadDir, 'team.md'), 'utf-8')).toBe('# Existing Team\n');
   });
 
-  it('does not create agents/ after sentinel conflict', async () => {
+  it('agents/ directory is not created when scaffold already exists', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     await writeFile(join(squadDir, 'team.md'), '# Existing Team\n');
-    await expectRunInitConfigurationError(
-      runInit({ cwd: TEST_ROOT }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
-    );
+    await runInit({ cwd: TEST_ROOT, noRegister: true });
     expect(existsSync(join(squadDir, 'agents'))).toBe(false);
   });
 
-  it('error message contains target directory and "will not overwrite"', async () => {
-    const squadDir = join(TEST_ROOT, '.squad');
-    await mkdir(squadDir, { recursive: true });
-    await writeFile(join(squadDir, 'team.md'), '# Team\n');
-    const err = await runInit({ cwd: TEST_ROOT }).catch(e => e as Error);
-    expect(err.message).toContain('.squad/ already exists at');
-    expect(err.message).toContain('will not overwrite');
-  });
-
-  it('sentinel file is unchanged after conflict', async () => {
+  it('sentinel file content is preserved when existing scaffold is reused', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     const teamMdPath = join(squadDir, 'team.md');
     await writeFile(teamMdPath, '# Preserved\n');
+    await runInit({ cwd: TEST_ROOT, noRegister: true });
+    expect(readFileSync(teamMdPath, 'utf-8')).toBe('# Preserved\n');
+  });
+
+  it('--no-register with existing scaffold succeeds without writing a registry entry', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await writeFile(join(squadDir, 'team.md'), '# Team\n');
+    const result = await runInit({ cwd: TEST_ROOT, noRegister: true, callsign: 'test', registryPath: tempRegistry() });
+    expect(existsSync(tempRegistry())).toBe(false);
+    expect(result.registered).toBeUndefined();
+  });
+
+  it('existing scaffold is registered without clobbering sentinel when callsign and registry are given', async () => {
+    const registryEntry = { callsign: 'baseline', path: join(TEST_ROOT, 'baseline', '.squad'), clones: [], origins: [], status: 'active' };
+    await seedRegistry([registryEntry]);
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await writeFile(join(squadDir, 'team.md'), '# Team\n');
+    const result = await runInit({ cwd: TEST_ROOT, callsign: 'alpha', registryPath: tempRegistry() });
+    expect(result.registered?.callsign).toBe('alpha');
+    expect(readFileSync(join(squadDir, 'team.md'), 'utf-8')).toBe('# Team\n');
+  });
+
+  it('ERR_SQUAD_INIT_EXISTING_SCAFFOLD is thrown when .squad/ is a symbolic link', async () => {
+    // Symlinks are the one case where init must still reject.
+    const realDir = join(TEST_ROOT, 'real-squad');
+    await mkdir(realDir, { recursive: true });
+    const linkPath = join(TEST_ROOT, '.squad');
+    try {
+      fs.symlinkSync(realDir, linkPath, 'dir');
+    } catch {
+      // Skip on platforms where symlink creation requires elevated privileges
+      return;
+    }
     await expectRunInitConfigurationError(
       runInit({ cwd: TEST_ROOT }),
       'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
     );
-    expect(readFileSync(teamMdPath, 'utf-8')).toBe('# Preserved\n');
-  });
-
-  it('--no-register does not bypass the existing scaffold guard', async () => {
-    const squadDir = join(TEST_ROOT, '.squad');
-    await mkdir(squadDir, { recursive: true });
-    await writeFile(join(squadDir, 'team.md'), '# Team\n');
-    await expectRunInitConfigurationError(
-      runInit({ cwd: TEST_ROOT, noRegister: true, callsign: 'test', registryPath: tempRegistry() }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
-    );
-  });
-
-  it('registry remains unchanged after scaffold conflict', async () => {
-    const registryEntry = { callsign: 'baseline', path: join(TEST_ROOT, 'baseline', '.squad'), clones: [], origins: [], status: 'active' };
-    await seedRegistry([registryEntry]);
-    const registryBefore = readFileSync(tempRegistry(), 'utf-8');
-    const squadDir = join(TEST_ROOT, '.squad');
-    await mkdir(squadDir, { recursive: true });
-    await writeFile(join(squadDir, 'team.md'), '# Team\n');
-    await expectRunInitConfigurationError(
-      runInit({ cwd: TEST_ROOT, callsign: 'alpha', registryPath: tempRegistry() }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
-    );
-    expect(readFileSync(tempRegistry(), 'utf-8')).toBe(registryBefore);
   });
 });
 
@@ -216,7 +217,7 @@ describe('runInit: fail-fast guard order', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('reports scaffold conflict before callsign conflict when both are present', async () => {
+  it('reports callsign conflict when scaffold already exists and callsign is taken at a different path', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     await writeFile(join(squadDir, 'team.md'), '# Team\n');
@@ -224,7 +225,7 @@ describe('runInit: fail-fast guard order', () => {
 
     await expectRunInitConfigurationError(
       runInit({ cwd: TEST_ROOT, callsign: 'alpha', registryPath: tempRegistry() }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
+      'ERR_SQUAD_INIT_CALLSIGN_EXISTS',
     );
   });
 
@@ -242,7 +243,7 @@ describe('runInit: fail-fast guard order', () => {
     );
   });
 
-  it('reports scaffold conflict before registry conflicts when all guards would match', async () => {
+  it('reports callsign conflict when scaffold and registry conflicts would both match', async () => {
     const cloneRoot = TEST_ROOT;
     const squadDir = join(cloneRoot, '.squad');
     await mkdir(squadDir, { recursive: true });
@@ -254,7 +255,7 @@ describe('runInit: fail-fast guard order', () => {
 
     await expectRunInitConfigurationError(
       runInit({ cwd: TEST_ROOT, callsign: 'alpha', registryPath: tempRegistry() }),
-      'ERR_SQUAD_INIT_EXISTING_SCAFFOLD',
+      'ERR_SQUAD_INIT_CALLSIGN_EXISTS',
     );
   });
 });
@@ -436,18 +437,17 @@ describe('CLI: init conflict errors exit with code 2', () => {
     if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('exits 2 and writes to stderr on ERR_SQUAD_INIT_EXISTING_SCAFFOLD', async () => {
+  it('exits 0 when existing .squad/ has sentinel files and registration is requested', async () => {
     const squadDir = join(TEST_ROOT, '.squad');
     await mkdir(squadDir, { recursive: true });
     await writeFile(join(squadDir, 'team.md'), '# Team\n');
     const result = await runCli(
-      ['init', '--registry-path', tempRegistry()],
+      ['init', '--callsign', 'existing-squad', '--registry-path', tempRegistry()],
       { SQUAD_REGISTRY_PATH: '' },
       TEST_ROOT,
     );
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain('Error: ERR_SQUAD_INIT_EXISTING_SCAFFOLD');
-    expect(result.stderr).toContain('will not overwrite');
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(squadDir, 'team.md'), 'utf-8')).toBe('# Team\n');
   });
 
   it('exits 2 and writes to stderr on ERR_SQUAD_INIT_CALLSIGN_EXISTS', async () => {
@@ -484,5 +484,67 @@ describe('CLI: init conflict errors exit with code 2', () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain('Error: ERR_SQUAD_INIT_CLONE_PATH_EXISTS');
     expect(result.stderr).toContain('already registered as a clone');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI: URL positional rejection
+// ---------------------------------------------------------------------------
+
+describe('CLI: URL positional argument rejection', () => {
+  beforeEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    await mkdir(TEST_ROOT, { recursive: true });
+  });
+  afterEach(async () => {
+    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  const homeRegistryPath = join(TEST_ROOT, 'home', 'registry.json');
+  const explicitRegistryPath = tempRegistry();
+  const urlGuardCases = [
+    {
+      label: 'http:// URL positional',
+      args: ['init', 'http://example.com/repo.git'],
+      expectedRegistryPath: homeRegistryPath,
+    },
+    {
+      label: 'ssh:// URL positional',
+      args: ['init', 'ssh://git@example.com/repo.git'],
+      expectedRegistryPath: homeRegistryPath,
+    },
+    {
+      label: 'scp-style URL positional',
+      args: ['init', 'git@example.com:foo/repo.git'],
+      expectedRegistryPath: homeRegistryPath,
+    },
+    {
+      label: 'git+https:// URL positional',
+      args: ['init', 'git+https://example.com/repo.git'],
+      expectedRegistryPath: homeRegistryPath,
+    },
+    {
+      label: 'file:// URL positional',
+      args: ['init', 'file:///tmp/repo'],
+      expectedRegistryPath: homeRegistryPath,
+    },
+    {
+      label: 'URL positional after a value-taking option',
+      args: ['init', '--registry-path', explicitRegistryPath, 'https://example.com/r.git'],
+      expectedRegistryPath: explicitRegistryPath,
+    },
+  ] as const;
+
+  it.each(urlGuardCases)('rejects $label before mutating local state', async ({ args, expectedRegistryPath }) => {
+    const result = await runCli(
+      args,
+      { SQUAD_HOME: join(TEST_ROOT, 'home'), SQUAD_REGISTRY_PATH: '' },
+      TEST_ROOT,
+    );
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('--target-dir');
+    expect(existsSync(join(TEST_ROOT, '.squad'))).toBe(false);
+    expect(existsSync(expectedRegistryPath)).toBe(false);
   });
 });
