@@ -10,6 +10,21 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Learnings — Active
 
+### Piece 17 — fuzzy-match utility (2026-05-18T18:13:35-07:00)
+
+**Implemented:** `packages/squad-cli/src/utils/fuzzy-match.ts` — two-function pure utility: `levenshteinDistance` (two-row DP, Unicode-safe via `Array.from()`) and `suggestSimilar` (linear scan, stable tie-breaking, configurable threshold, default 2).
+
+**Key patterns:**
+- Two-row DP: one `prev` array initialized to `[0,1,…,bLen]`, one `curr` array per outer loop iteration. O(|a|·|b|) time, O(|b|) space. No third array.
+- `Array.from(str)` before both DP loops so multi-byte code points (accented characters, emoji) count as single units.
+- `suggestSimilar` tracks only `bestCandidate`/`bestDistance` — no array accumulation. Sentinel `maxDistance + 1` ensures the first candidate within threshold always wins the initial comparison cleanly.
+- Strict `<` (not `<=`) in the comparison guarantees first-in-input-order tie-breaking with no extra bookkeeping.
+- `vitest.config.ts` required a new `include` glob for `packages/squad-cli/src/utils/__tests__/**/*.test.ts` — the existing config only covered `commands/__tests__`.
+
+**Test surface:** 24 tests (10 `levenshteinDistance` + 14 `suggestSimilar`), covering all 10 spec-required scenarios plus explicit symmetry, deletion/insertion/substitution, and boundary cases.
+
+**Gotchas:** The vitest root config restricts `include` by path — new utility test directories must be added to `vitest.config.ts` or tests silently produce "no test files found, exit 1" which looks like a path error but is actually a config omission.
+
 ### Piece 15 — squad unassign (2026-05-18T15:41:51-07:00)
 
 **Implemented:** `runUnassign` with demote-not-delete semantics. Removing the last clone path from a registry entry sets `status: 'inactive'` and preserves `callsign`, `path`, `initUri`, and all unknown forward-compatible fields. The entry stays in the registry; `squad assign <callsign>` reactivates it.

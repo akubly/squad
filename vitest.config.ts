@@ -12,6 +12,7 @@ export default defineConfig({
     include: [
       'test/**/*.test.ts',
       'packages/squad-cli/src/commands/__tests__/**/*.test.ts',
+      'packages/squad-cli/src/utils/__tests__/**/*.test.ts',
     ],
     coverage: {
       provider: 'v8',
