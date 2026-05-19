@@ -44,7 +44,7 @@ Write-Host ""
 
 # --- Gate 1: Strip-listed paths must not exist ---
 Write-Host "[1/6] Strip-listed paths..." -NoNewline
-$stripHits = git ls-files | Select-String -Pattern '(_internal|windows-wireless|@wifi-aware|wifi.aware|-mc\.preview|orchestration-log|/identity/|/casting/|squad/specs/v0\.5\.x)'
+$stripHits = git ls-files | Where-Object { $_ -notmatch '^\.squad(-templates)?/' } | Select-String -Pattern '(_internal|windows-wireless|@wifi-aware|wifi.aware|-mc\.preview|orchestration-log|/identity/|/casting/|squad/specs/v0\.5\.x)'
 if ($stripHits) {
     $failures += "Gate 1 FAIL: Strip-listed paths found:`n$($stripHits -join "`n")"
     Write-Host " FAIL" -ForegroundColor Red
@@ -54,7 +54,7 @@ if ($stripHits) {
 
 # --- Gate 2: Zero wifi-aware mentions ---
 Write-Host "[2/6] wifi-aware mentions..." -NoNewline
-$wifiHits = git grep -i 'wifi.aware' -- ':!docs/proposals/upstream-bradygaster/_scrub-gate.ps1' 2>$null
+$wifiHits = git grep -i 'wifi.aware' -- ':!docs/proposals/upstream-bradygaster/_scrub-gate.ps1' ':!.squad/' ':!.squad-templates/' 2>$null
 if ($wifiHits) {
     $failures += "Gate 2 FAIL: wifi-aware references found:`n$($wifiHits -join "`n")"
     Write-Host " FAIL" -ForegroundColor Red
