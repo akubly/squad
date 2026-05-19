@@ -130,3 +130,27 @@ Pattern: the `--` separator before positional URL arguments should be a standing
 
 One MAJOR governance risk: the branch edits `.github/agents/squad.agent.md` even though the source-of-truth table in that same file marks it as authoritative governance and human-maintainer-write-only. Clean checks: strip-listed path count stayed 121 on both compared branches, added lines in the branch diff introduced no banned-record terms or secret patterns, and git remote configuration remained single-origin only.
 
+### Scrub Gate Cleanup — Pre-Phase C (2026-05-19)
+
+**Task:** Diagnose and fix Gate 1 (strip-listed paths) and Gate 2 (wifi-aware mentions) failures on `akubly/upstream-18-doctor-enhancements` before Phase C begins.
+
+**Finding: ALL violations are baseline contamination — zero introduced by piece 18.**
+
+**Gate 1 — Strip-listed paths (131+ violations, all baseline):**
+Three categories, all pre-dating piece 18:
+1. **`docs/_internal/`** — 17 files. Born in commit `482fd58d` (docs: rewrite documentation site with Astro). The `_internal` directory name matches the strip pattern. These are design/PRD docs, not MS-internal content per se.
+2. **`packages/squad-sdk/src/casting/`** and **`templates/{casting,identity}/`** and **`packages/*/templates/{casting,identity}/orchestration-log.md`** — 15 files. Born in `df4fafe6` (feat: migrate SDK + CLI source files into workspace packages). These are Squad's own casting, identity, and orchestration-log features — legitimate product directories that share naming with the strip-list patterns.
+3. **`.squad/orchestration-log/`, `.squad/identity/`, `.squad/casting/`, `.squad-templates/`** — 99+ files. These are team infrastructure/history files. Piece 18 added 3 new `.squad/orchestration-log/2026-05-19T194800Z-*.md` files, but the directory pattern was already violated. Per task guidance: NOT silently rewritten.
+
+**Gate 2 — Wifi-aware mentions (1 root source, 3 derivative mentions, all baseline):**
+- Root source: `.squad/reviews/piece-13-adversarial-review.md:160` — contains `git grep -i 'wifi.aware'` as a shell command inside a scrub-gate report block. This is a **false positive** — the file recorded that the search returned 0 hits. The grep pattern `wifi.aware` in the review text triggers the gate.
+- Derivative mentions: `.squad/agents/fido/history.md`, `.squad/decisions.md`, `.squad/orchestration-log/2026-05-18T191914Z-fido.md` — all reference the piece-13 review as the source. None are in piece-18's diff.
+
+**No source code violations from piece 18:** The four piece-18 source files (`doctor.ts`, `cli-entry.ts`, `doctor.test.ts`, `doctor-registry-cli.test.ts`) contain zero strip-list or wifi-aware content.
+
+**Actions taken:** None. All violations are baseline. Per procedure, STOP and report — do not silently modify earlier branches.
+
+**Scrub gate boundary discovery:** The gate pattern `/identity/`, `/casting/`, `orchestration-log` is too broad — it matches Squad's own product directories (not just internal MS content). The `.squad/` directory should be excluded from both Gate 1 (path scan) and Gate 2 (content scan), as these are team infrastructure files, not upstream-destined code. The `_scrub-gate.ps1` already excludes itself from Gate 2; the same exclusion logic should extend to `.squad/`.
+
+**Rebase strategy required:** Cleaning Gate 1 non-`.squad/` violations requires either (a) renaming `docs/_internal/` → `docs/design/` across all pieces 1-18, or (b) refining the strip-list pattern to exclude Squad's own product directory names. Gate 2 root cause requires either (a) editing `.squad/reviews/piece-13-adversarial-review.md` line 160 to escape the grep command (e.g., backtick or code fence language tag adjustment), or (b) excluding `.squad/` from Gate 2 in the scrub gate script.
+
