@@ -10,6 +10,26 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Learnings — Active
 
+### Piece 18 — doctor enhancements (2026-05-20)
+
+**Implemented:** Extended `runDoctor` with three new registry health checks (empty `clones[]`, clone-path ambiguity, origin overlap); added `runDoctorNormalize` for callsign case-collision detection and merge; added `runDoctorPurge` for explicit registry entry removal.
+
+**Key patterns:**
+- `_pickSurvivor` preference: active status first, then clone count, then registry-order index. Uses `allEntries.indexOf(entry)` for stable tie-breaking that survives re-runs.
+- `_mergeIntoSurvivor` deduplicates `clones[]` and `origins[]` from the entire group before writing the merged entry, ensuring the survivor inherits all clone bindings.
+- Merge insertion point: after removing all group members from the working copy, re-insert the survivor at `Math.min(firstGroupIdx, currentEntries.length)` (first group member's position in original entries) to preserve approximate registry order.
+- `runDoctorPurge` refuses when `entry.status === 'active'` AND `entry.clones.length > 0` — exit code 2 from the CLI layer. Active entries with empty `clones[]` (orphaned status) are purge-eligible.
+- `_defaultReadLine` uses `fs.readSync(0, buf, 0, buf.length, null)` — avoids the non-callable `process.binding?.('fs')` pattern that fails TypeScript compilation.
+- `findCloseMatch` (from `../lib/close-match.ts`) provides a not-found suggestion in `runDoctorPurge` when the supplied callsign misses the registry.
+
+**Test surface:** 28 tests — W01-W10 (registry warnings), N01-N08 (normalize callsigns), P01-P10 (purge). All GREEN.
+
+**Gotchas:**
+- `validateRegistry` (internal to SDK) checks duplicate paths case-insensitively on Windows via `normalisedPathKey`. Test registries with host directories whose names differ only by case collapse to the same key and fail registry load. Use non-colliding suffixes (norm-host-a, norm-host-b…) for all normalize-group test directories.
+- `writeRegistry` calls `validateRegistry` internally. The survivor must pass uniqueness constraints. After merging, only the survivor's callsign and path remain in that slot — this satisfies uniqueness cleanly.
+
+**Scrub gate:** Gates 1 and 2 are pre-existing baseline contamination — confirmed not introduced by this piece. Accepted per coordinator decision in `.squad/decisions.md`.
+
 ### Piece 17 — fuzzy-match utility (2026-05-18T18:13:35-07:00)
 
 **Implemented:** `packages/squad-cli/src/utils/fuzzy-match.ts` — two-function pure utility: `levenshteinDistance` (two-row DP, Unicode-safe via `Array.from()`) and `suggestSimilar` (linear scan, stable tie-breaking, configurable threshold, default 2).

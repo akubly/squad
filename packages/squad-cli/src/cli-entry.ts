@@ -181,7 +181,7 @@ function formatResolverReason(source: ResolvedSquad['source']): string {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const noColor = !process.stdout.isTTY || !!process.env['NO_COLOR'];
-  
+
   // --team-root flag: override team root for resolution
   const teamRootIdx = args.indexOf('--team-root');
   if (teamRootIdx !== -1 && args[teamRootIdx + 1]) {
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
     // Remove --team-root and its value from args
     args.splice(teamRootIdx, 2);
   }
-  
+
   const hasGlobal = args.includes('--global');
   // --economy activates economy mode for this session (sets env var for spawner)
   const hasEconomy = args.includes('--economy');
@@ -311,10 +311,19 @@ async function main(): Promise<void> {
     }
     if (cmd === 'doctor') {
       console.log(`\n${b}squad doctor${r} — Validate setup and health\n`);
-      console.log(`Usage: squad doctor [--registry-path <path>]\n`);
+      console.log(`Usage: squad doctor [options]\n`);
+      console.log(`  squad doctor [--registry-path <path>]`);
+      console.log(`  squad doctor --normalize-callsigns [--apply] [--yes] [--registry-path <path>]`);
+      console.log(`  squad doctor --purge <callsign> [--yes] [--registry-path <path>]\n`);
       console.log(`Runs system checks (Node, git, config) and`);
       console.log(`registry health (entries, paths, resolution).`);
       console.log(`Exit 0 unless registry has error-severity issues.\n`);
+      console.log(`Flags:`);
+      console.log(`  ${b}--normalize-callsigns${r}  Detect case-colliding callsign pairs`);
+      console.log(`  ${b}--apply${r}               Merge collisions (requires --normalize-callsigns)`);
+      console.log(`  ${b}--purge <callsign>${r}    Remove a registry entry entirely`);
+      console.log(`  ${b}--yes${r}                 Skip confirmation prompts`);
+      console.log(`  ${b}--registry-path${r}       Alternate registry file\n`);
       return;
     }
     // For other commands, fall through to the main help
@@ -426,7 +435,6 @@ async function main(): Promise<void> {
   if (cmd === 'upgrade') {
     const { runUpgrade, selfUpgradeCli } = await import('./cli/core/upgrade.js');
     const { migrateDirectory } = await import('./cli/core/migrate-directory.js');
-    
     const migrateDir = args.includes('--migrate-directory');
     const selfUpgrade = args.includes('--self');
     const forceUpgrade = args.includes('--force');
@@ -436,8 +444,8 @@ async function main(): Promise<void> {
     // Parse --state-backend for backend migration
     const sbIdx = args.indexOf('--state-backend');
     const upgradeStateBackend = (sbIdx !== -1 && args[sbIdx + 1]) ? args[sbIdx + 1] : undefined;
-    
-    // Warn when --insider is used without --self (it has no effect on project upgrades)
+
+    // Warn when --insider is used without --self(it has no effect on project upgrades)
     if (insider && !selfUpgrade) {
       console.warn('⚠️ --insider only applies with --self (squad upgrade --self --insider). Ignoring.');
     }
@@ -447,7 +455,7 @@ async function main(): Promise<void> {
       await migrateDirectory(dest);
       // Continue with regular upgrade after migration
     }
-    
+
     // Handle --self: upgrade the CLI package itself
     if (selfUpgrade) {
       await selfUpgradeCli({ insider, force: forceUpgrade });
@@ -456,7 +464,7 @@ async function main(): Promise<void> {
     }
 
     // Run upgrade
-    await runUpgrade(dest, { 
+    await runUpgrade(dest, {
       migrateDirectory: migrateDir,
       self: selfUpgrade,
       force: forceUpgrade
@@ -471,7 +479,7 @@ async function main(): Promise<void> {
       const { ensureHooksForBackend } = await import('./cli/commands/install-hooks.js');
       ensureHooksForBackend(dest);
     }
-    
+
     return;
   }
 
@@ -955,15 +963,89 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'doctor') {
-    // === System doctor ===
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
+    const hasYes = args.includes('--yes');
+    const hasNormalize = args.includes('--normalize-callsigns');
+    const hasApply = args.includes('--apply');
+    const purgeIdx = args.indexOf('--purge');
+    const hasPurge = purgeIdx !== -1;
+
+    // N5: --apply requires --normalize-callsigns
+    if (hasApply && !hasNormalize) {
+      fatal('--apply requires --normalize-callsigns');
+      return;
+    }
+
+    // F2: --normalize-callsigns and --purge are mutually exclusive
+    if (hasNormalize && hasPurge) {
+      fatal('--normalize-callsigns and --purge are mutually exclusive');
+      return;
+    }
+
+    // --normalize-callsigns mode
+    if (hasNormalize) {
+      const { runDoctorNormalize } = await import('./commands/doctor.js');
+      const result = await runDoctorNormalize({ registryPath, apply: hasApply, yes: hasYes });
+      for (const line of result.lines) {
+        console.log(line);
+      }
+      return;
+    }
+
+    // --purge <callsign> mode
+    if (hasPurge) {
+      const purgeCallsign = args[purgeIdx + 1];
+      if (!purgeCallsign || purgeCallsign.startsWith('--')) {
+        fatal('Usage: squad doctor --purge <callsign>');
+        return;
+      }
+      const { runDoctorPurge } = await import('./commands/doctor.js');
+      const result = await runDoctorPurge({ callsign: purgeCallsign, registryPath, yes: hasYes });
+      if (result.invalidCallsign) {
+        fatal(`Invalid callsign "${purgeCallsign}": must match [A-Za-z0-9_-] and be at most 64 characters.`);
+        return;
+      }
+      if (result.noRegistry) {
+        console.error('No registry found.');
+        process.exit(1);
+        return;
+      }
+      if (result.notFound) {
+        const hint = result.notFound.suggestion ? ` Did you mean "${result.notFound.suggestion}"?` : '';
+        fatal(`Callsign "${purgeCallsign}" not found in the registry.${hint}`);
+        return;
+      }
+      if (result.refused) {
+        const list = result.refused.consumers.map(c => `  - ${c}`).join('\n');
+        console.error(
+          `Cannot purge "${purgeCallsign}": entry is active with ${result.refused.consumers.length} clone binding(s):\n${list}\n` +
+          `Run "squad unassign --callsign ${purgeCallsign}" from each clone directory first.`,
+        );
+        process.exit(2);
+        return;
+      }
+      if (result.cancelled) {
+        console.log('Purge cancelled.');
+        return;
+      }
+      if (result.removed) {
+        console.log(`Removed registry entry "${purgeCallsign}".`);
+        if (result.hostPath) {
+          console.log(`Host directory was not deleted: ${result.hostPath}`);
+        }
+        return;
+      }
+      return;
+    }
+
+    // Default doctor mode: system checks + registry health
     const { doctorCommand } = await import('./cli/commands/doctor.js');
     console.log(noColor ? '=== System doctor ===' : `${BOLD}=== System doctor ===${RESET}`);
     await doctorCommand();
 
     // === Registry doctor ===
     const { runDoctor: runRegistryDoctor } = await import('./commands/doctor.js');
-    const registryPathIdx = args.indexOf('--registry-path');
-    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
     console.log(noColor ? '\n=== Registry doctor ===' : `\n${BOLD}=== Registry doctor ===${RESET}`);
     const result = await runRegistryDoctor({ cwd: getSquadStartDir(), registryPath });
 
