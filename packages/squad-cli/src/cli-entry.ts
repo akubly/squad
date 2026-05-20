@@ -1266,7 +1266,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir } = parseAssignArgs(args);
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1357,7 +1357,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'unassign') {
     const { parseUnassignArgs } = await import('./commands/assign-args.js');
-    const { callsign, registryPath, targetDir } = parseUnassignArgs(args);
+    const { callsign, registryPath, targetDir } = parseUnassignArgs(args.slice(1));
     const { runUnassign } = await import('./commands/unassign.js');
     try {
       const result = await runUnassign({

@@ -111,6 +111,21 @@ describe('parseAssignArgs', () => {
     expect(result.cloneTo).toBe('./dest');
     expect(result.callsign).toBe('my-squad');
   });
+
+  it('does not treat the command token as the positional argument (regression)', () => {
+    // cli-entry.ts must call parseAssignArgs(args.slice(1)) so the 'assign'
+    // command token is stripped before the parser sees it. This test verifies
+    // the parser correctly identifies the positional arg from pre-sliced input.
+    const sliced = ['my-callsign', '--clone-to', './dest']; // args.slice(1)
+    const result = parseAssignArgs(sliced);
+    expect(result.callsignOrUrl).toBe('my-callsign');
+    expect(result.cloneTo).toBe('./dest');
+
+    // Demonstrates the bug if args are NOT sliced: the command token becomes callsignOrUrl
+    const unsliced = ['assign', 'my-callsign', '--clone-to', './dest'];
+    const buggy = parseAssignArgs(unsliced);
+    expect(buggy.callsignOrUrl).toBe('assign'); // proves why slice is required
+  });
 });
 
 describe('parseUnassignArgs', () => {
@@ -150,5 +165,13 @@ describe('parseUnassignArgs', () => {
     expect(result.callsign).toBeUndefined();
     expect(result.registryPath).toBeUndefined();
     expect(result.targetDir).toBeUndefined();
+  });
+
+  it('ignores command token when args are pre-sliced (regression)', () => {
+    // cli-entry.ts must pass args.slice(1) so 'unassign' is stripped.
+    const withCommand = ['unassign', '--callsign', 'alpha'];
+    const sliced = withCommand.slice(1);
+    const result = parseUnassignArgs(sliced);
+    expect(result.callsign).toBe('alpha');
   });
 });
