@@ -37,6 +37,20 @@ Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routi
 
 📌 **2026-05-15 Piece 09/10 Revisions:** Both completed independent revision cycles post-rejection. All blocking gaps closed. Decisions merged.
 
+## Learnings
+
+### Phase B verify-first sub-proposals are real
+
+When prior pieces already shipped the surface, the correct disposition is 'verified-already-green' with concrete test ID citations — not re-implementation. Sub-proposals that find the surface already in place should be marked verified and closed with a reference, not treated as unimplemented gaps.
+
+### Build re-stamps package.json versions; never include those in a feature commit
+
+`npm run build` automatically updates `package.json` and `packages/*/package.json` version fields. These are build artifacts, not source. Feature commits must use `git add -- <explicit path>` to exclude them. Staged files that include version changes will be reverted by the Coordinator.
+
+### Scope hygiene: a feature commit MUST exclude .github/agents/squad.agent.md unless that file is actually being changed for the piece
+
+The squad agent discovery file is governance infrastructure, maintained separately. If a piece does not explicitly modify it per spec, do not include it in the code commit. The Coordinator will remove it during cleanup.
+
 ## Known Issues
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.
