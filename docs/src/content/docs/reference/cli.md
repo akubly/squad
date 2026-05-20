@@ -73,6 +73,231 @@ squad init
 | `squad scrub-emails [directory]` | Remove email addresses from Squad state files (default: `.squad/`) | No |
 | `squad --version` | Print installed version | No |
 
+## Lifecycle command reference
+
+Use these commands to initialize a squad host, bind and unbind product repositories, list registered hosts, and maintain registry health.
+
+---
+
+### squad init
+
+Initialize a squad host in the current directory.
+
+**Synopsis:**
+
+```text
+squad init [--callsign <name>] [--target-dir <path>] [--registry-path <file>] [--no-register]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--callsign <name>` | Register the host under this name |
+| `--target-dir <path>` | Initialize in a specific directory |
+| `--registry-path <file>` | Use an alternate registry file |
+| `--no-register` | Scaffold the `.squad/` directory without registering |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Initialized or reactivated |
+| Non-zero | Usage error, callsign conflict, or file system error |
+
+**Examples:**
+
+```bash
+# Initialize and register under a callsign
+squad init --callsign my-team
+
+# Scaffold only — no registry entry
+squad init --no-register
+
+# Initialize in a specific directory
+squad init --target-dir ../team-repo --callsign shared
+```
+
+---
+
+### squad assign
+
+Bind the current product repository to a registered squad host. Also installs the host's `.copilot/` payload into your user-scoped Copilot home under callsign-prefixed names.
+
+**Synopsis:**
+
+```text
+squad assign <callsign> [--target-dir <path>] [--registry-path <file>]
+squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--clone-to <path>` | Clone the host from `<url>` to this path before assigning |
+| `--callsign <name>` | Override the callsign when assigning by URL |
+| `--skills-from <callsign>` | Install skills, agents, and MCP entries from the named host's `.copilot/` directory |
+| `--target-dir <path>` | Resolve the product repo from a specific path |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Assigned or reactivated |
+| Non-zero | Usage error (URL without `--clone-to`), missing entry (unknown callsign), or file system error |
+
+**Examples:**
+
+```bash
+# Assign by callsign (warm path — host already registered)
+squad assign my-team
+
+# Assign by URL and clone (cold path — first-time setup on a new machine)
+squad assign https://github.com/org/team-repo --clone-to ../team-repo
+
+# Assign by URL with a custom callsign
+squad assign https://github.com/org/team-repo --clone-to ../team-repo --callsign ops
+```
+
+**Recovery paths:**
+
+- **URL without `--clone-to`** — `squad assign` exits with a usage error when you pass a URL without `--clone-to`. Add `--clone-to <local-path>` to specify where to clone the host.
+- **Unknown callsign** — run `squad list` to see available entries. Use `squad assign <url> --clone-to <path>` to set up from scratch.
+
+---
+
+### squad unassign
+
+Remove the current product repository's binding from its squad host. Also removes the callsign-namespaced Copilot payload installed by `squad assign`.
+
+**Synopsis:**
+
+```text
+squad unassign [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--callsign <name>` | Remove the binding for a specific registered callsign |
+| `--target-dir <path>` | Resolve the product repo from a specific path |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Unassigned, or already unassigned (no-op with informational message) |
+| Non-zero | File system error |
+
+**Examples:**
+
+```bash
+# Unassign the current directory
+squad unassign
+
+# Unassign a specific callsign binding
+squad unassign --callsign my-team
+```
+
+`squad unassign` never deletes the host repository or the product repository.
+
+---
+
+### squad list
+
+List registered squad hosts from the local registry.
+
+**Synopsis:**
+
+```text
+squad list [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Listed registered hosts successfully |
+| Non-zero | File system error |
+
+**Examples:**
+
+```bash
+# List registered squad hosts
+squad list
+
+# Read from a custom registry file
+squad list --registry-path ./tmp/squad-registry.json
+```
+
+---
+
+### squad doctor (lifecycle flags)
+
+In addition to general health checks, `squad doctor` provides cleanup operations for the registry.
+
+**Synopsis:**
+
+```text
+squad doctor [--registry-path <file>]
+squad doctor --purge <callsign> [--yes] [--registry-path <file>]
+squad doctor --normalize-callsigns [--apply] [--yes] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--purge <callsign>` | Remove a registry entry entirely |
+| `--normalize-callsigns` | Detect callsign pairs that differ only by case |
+| `--apply` | Merge case collisions (requires `--normalize-callsigns`) |
+| `--yes` | Skip confirmation prompts |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Check passed or operation succeeded |
+| 1 | Diagnostics found error-severity issues |
+| Non-zero | Usage error (conflicting flags), refused purge (active consumers), or file system error |
+
+**Examples:**
+
+```bash
+# Run health diagnostics
+squad doctor
+
+# Remove an inactive registry entry
+squad doctor --purge my-old-team
+
+# Remove without confirmation
+squad doctor --purge my-old-team --yes
+
+# Detect callsign case collisions
+squad doctor --normalize-callsigns
+
+# Detect and merge callsign case collisions
+squad doctor --normalize-callsigns --apply
+```
+
+**Recovery paths:**
+
+- **Refused purge** — `squad doctor --purge` refuses to remove an entry that still has active consumers. Run `squad unassign` in each consumer repo first, then retry the purge.
+- **Conflicting flags** — `--normalize-callsigns` and `--purge` are mutually exclusive. Run them as separate commands.
+
+---
+
 ### Remote Init Mode
 
 Use `--mode remote` to link your project to a shared team root:
@@ -394,7 +619,7 @@ git clone my-project && cd my-project && squad doctor
 ✓ .gitattributes rules applied
 ```
 
-The doctor always exits cleanly (no error code) because it's a diagnostic tool, not a gate. Use it to troubleshoot setup issues, validate team state, or run before opening an issue on GitHub.
+The doctor exits with code 1 when it finds error-severity issues; otherwise it exits 0. Use it to troubleshoot setup issues, validate team state, or run before opening an issue on GitHub.
 
 ---
 

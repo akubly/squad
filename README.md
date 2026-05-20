@@ -100,13 +100,17 @@ Use `--force` to re-apply updates even when your installed version already match
 
 | Command | What it does |
 |---------|-------------|
-| `squad init` | **Init** — scaffold Squad in the current directory (idempotent — safe to run multiple times); alias: `hire`; use `--global` to init in personal squad directory, `--mode remote <path>` for dual-root mode |
+| `squad init` | **Init** — scaffold Squad in the current directory (idempotent — safe to run multiple times); alias: `hire`; use `--callsign <name>` to register as a shared squad host; use `--global` to init in personal squad directory, `--mode remote <path>` for dual-root mode |
+| `squad assign <callsign>` | **Assign** — bind this product repo to a registered squad host by callsign; installs `.copilot/` payload under callsign-prefixed names |
+| `squad assign <url> --clone-to <path>` | **Assign (cold)** — clone the host and bind in one step (first-time setup on a new machine) |
+| `squad unassign` | **Unassign** — remove this repo's binding from its squad host; removes callsign-namespaced Copilot payload; host and product files are preserved |
+| `squad list` | List all registered squad hosts |
+| `squad doctor` | Validate setup and registry health; use `--purge <callsign>` to remove inactive entries; use `--normalize-callsigns` to detect or fix callsign case collisions |
+| `squad triage` | Auto-triage issues and assign to team; alias: `watch` |
+| `squad copilot` | Add @copilot coding agent to the team; use `--off` to remove, `--auto-assign` for auto-assignment |
 | `squad upgrade` | Update Squad-owned files to latest; never touches your team state; use `--global` to upgrade personal squad, `--migrate-directory` to rename `.ai-team/` → `.squad/` |
-| `squad upgrade --self` | Update the Squad CLI package itself; add `--insider` for dev-channel prerelease builds |
+| `squad upgrade --self` | Update the Squad CLI package itself |
 | `squad status` | Show which squad is active and why |
-| `squad triage` | **Watch mode** — poll for issues and auto-triage to team (aliases: `watch`, `loop`); use `--interval <minutes>` to set polling frequency (default: 10); with `--execute` dispatch Copilot agents; use `--agent-cmd`, `--copilot-flags`, `--auth-user` to customize agent execution; `--health` shows watch status; `--log-file` for diagnostics |
-| `squad copilot` | Add/remove the Copilot coding agent (@copilot); use `--off` to remove, `--auto-assign` to enable auto-assignment |
-| `squad doctor` | Check your setup and diagnose issues (alias: `heartbeat`) |
 | `squad link <team-repo-path>` | Connect to a remote team |
 | `squad externalize` | Move `.squad/` state outside the working tree; survives branch switches; use `--key <name>` for custom project key |
 | `squad internalize` | Move externalized state back into `.squad/` |
