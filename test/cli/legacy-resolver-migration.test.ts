@@ -604,7 +604,23 @@ describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
   });
 
   afterEach(async () => {
-    if (existsSync(TEST_ROOT)) await rm(TEST_ROOT, { recursive: true, force: true });
+    if (!existsSync(TEST_ROOT)) return;
+    // On Windows, child processes spawned by runCliShort may still hold file
+    // handles briefly after the test completes. Retry with backoff to avoid
+    // EBUSY teardown failures.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await rm(TEST_ROOT, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if ((code === 'EBUSY' || code === 'EPERM') && attempt < 4) {
+          await new Promise<void>(resolve => setTimeout(resolve, 200 * (attempt + 1)));
+        } else {
+          throw err;
+        }
+      }
+    }
   });
 
   it('start does not start bridge when resolution returns null', async () => {

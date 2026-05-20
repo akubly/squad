@@ -834,6 +834,15 @@ async function main(): Promise<void> {
       if (resolvedSquad.callsign) {
         console.log(`  Callsign:     ${resolvedSquad.callsign}`);
       }
+      const { formatRegistryStatusBlock } = await import('./commands/status.js');
+      const registryBlock = formatRegistryStatusBlock(
+        resolvedSquad,
+        process.env as Record<string, string | undefined>,
+      );
+      if (registryBlock) {
+        console.log();
+        process.stdout.write(registryBlock);
+      }
     } else if (globalExists) {
       console.log(`  Active squad: ${BOLD}personal (global)${RESET}`);
       console.log(`  Path:         ${globalSquadDir}`);
