@@ -51,6 +51,16 @@ When prior pieces already shipped the surface, the correct disposition is 'verif
 
 The squad agent discovery file is governance infrastructure, maintained separately. If a piece does not explicitly modify it per spec, do not include it in the code commit. The Coordinator will remove it during cleanup.
 
+### `defaultRegistryFilePath` is the canonical helper — `path-utils.ts` is the neutral home (2026-05-21)
+
+**Fix shipped.** `platformDefaultRegistryPath` is deleted. All three call sites (`resolution-v2.ts`, `commands/status.ts`, `commands/_registry-path.ts`) now import `defaultRegistryFilePath(env, homeDir)` from `packages/squad-sdk/src/path-utils.ts`. This helper is exported from the SDK public barrel (`@wifi-aware/squad-sdk`).
+
+**Rule for future authors:** before adding any code that touches the default registry path, grep for `defaultRegistryFilePath` and reuse it. Never inline `APPDATA`/`XDG_CONFIG_HOME`/`Library/Application Support` logic in path resolution. `path-utils.ts` is the correct shared layer — it has no imports from `resolution.ts` or `resolution-v2.ts`, so there is no circular-dependency risk.
+
+Decision written to `.squad/decisions/inbox/eecom-registry-path-canonical-helper.md`.  
+Skill extracted to `.squad/skills/path-helper-single-source/SKILL.md`.  
+PR: `squad/fix-registry-path-mismatch` targeting `akubly/upstream-npm-release`.
+
 ## Known Issues
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.

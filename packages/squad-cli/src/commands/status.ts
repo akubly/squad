@@ -12,6 +12,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { ResolvedSquad } from '@wifi-aware/squad-sdk';
+import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk';
 
 /** Source values that indicate the squad was resolved via the registry. */
 const REGISTRY_SOURCES = new Set<string>(['env', 'clones', 'origins']);
@@ -30,25 +31,13 @@ function matchViaLabel(source: string): string {
  * Derive the effective registry file path from an environment record.
  *
  * Mirrors the precedence used by the resolver: explicit SQUAD_REGISTRY_PATH
- * wins, then platform-scoped default.
+ * wins, then the canonical default (~/.squad/registry.json or $SQUAD_HOME/registry.json).
  */
 export function resolveStatusRegistryPath(env: Record<string, string | undefined>): string {
   const envPath = env['SQUAD_REGISTRY_PATH'];
   if (envPath) return envPath;
 
-  const homeDir = os.homedir();
-  const platform = process.platform;
-  let base: string;
-
-  if (platform === 'win32') {
-    base = env['APPDATA'] ?? env['LOCALAPPDATA'] ?? path.join(homeDir, 'AppData', 'Roaming');
-  } else if (platform === 'darwin') {
-    base = path.join(homeDir, 'Library', 'Application Support');
-  } else {
-    base = env['XDG_CONFIG_HOME'] ?? path.join(homeDir, '.config');
-  }
-
-  return path.join(base, 'squad', 'registry.json');
+  return defaultRegistryFilePath(env, os.homedir());
 }
 
 /**

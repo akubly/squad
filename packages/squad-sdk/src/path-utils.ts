@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
@@ -92,4 +93,23 @@ export function clonesMatch(cwd: string, clone: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Returns the default registry file path — the single authoritative computation
+ * shared by all readers and writers.
+ *
+ * Precedence:
+ * 1. `SQUAD_HOME` env var → `path.resolve(SQUAD_HOME)/registry.json`
+ * 2. Otherwise → `~/.squad/registry.json`
+ *
+ * Pure computation — no filesystem I/O, no directory existence checks.
+ */
+export function defaultRegistryFilePath(
+  env: Record<string, string | undefined>,
+  homeDir: string = os.homedir(),
+): string {
+  const squadHome = env['SQUAD_HOME'];
+  const base = squadHome ? path.resolve(squadHome) : path.join(homeDir, '.squad');
+  return path.join(base, 'registry.json');
 }
