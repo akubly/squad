@@ -139,17 +139,23 @@ The developer's PR contains only product code. Squad mutable state is committed 
 
 #### Current implementation status
 
-The SDK's `stateBackend` mechanism is approximately 95% of the way to satisfying this P0: the abstraction exists, the `orphan` and `two-layer` variants are shipped, and Scribe's commit/push workflow is plumbed. Three targeted follow-on items close the remaining gap and are required before the P0 claim is defensible in org settings.
+The SDK's `stateBackend` abstraction provides the foundation: the `orphan` and `two-layer` variants are shipped, and Scribe's commit/push workflow is plumbed. Three targeted features remain before the P0 is complete for org settings.
 
 #### Required follow-on work (P0 delivery checklist)
 
-These items are required to close the transparent state isolation P0. They apply only when `stateBackend` is `orphan` or `two-layer`; out-of-the-box single-developer behavior is unchanged.
+These items are required to close the transparent state isolation P0. They apply only when `stateBackend` is `orphan` or `two-layer`. Default worktree-backend behavior is unchanged; orphan/two-layer opt-in adds hooks and guards as part of the isolation mechanism.
 
-- [ ] **State Leak Guard** — (1) Strengthen Scribe's pre-check from warn-mode to block-mode: if `stateBackend` is `orphan`/`two-layer` and the working tree has staged changes to mutable state paths, Scribe refuses to proceed and prints a remediation command. Lives in the spawn template / Scribe's bootstrap logic. (2) Ship a git pre-commit hook template, auto-installed by `squad init` and `squad assign`, that inspects `git diff --cached --name-only` and rejects a commit if mutable state paths appear while the backend is `orphan`/`two-layer`. Hard enforcement; `--no-verify` bypass is an accepted limitation (see §5).
+- [ ] **State Leak Guard: Scribe enforcement** — Strengthen Scribe's pre-check from warn-mode to block-mode: if `stateBackend` is `orphan`/`two-layer` and the working tree has staged changes to mutable state paths, Scribe refuses to proceed and prints a remediation command. Lives in the spawn template / Scribe's bootstrap logic.
 
-- [ ] **Hook Bootstrap** — `squad assign` installs the pre-commit hook on completion, mirroring the existing call site in `squad init`. Installation is idempotent — running multiple times must not corrupt the hooks directory or duplicate entries. Key insight: hooks are not a separate distribution problem. A developer cannot use Squad without `squad.agent.md` present and consciously selecting the squad agent in their IDE. The same delivery events that activate Squad on a clone (`squad init` for solo dev, `squad assign --callsign` for org-managed) are the right install moments for hooks. Edge case: orgs that commit `squad.agent.md` directly to the repo (bypassing `assign`) are responsible for also committing `.githooks/` and setting `core.hooksPath`. A CI-side state-diff guard is *not* shipped by the SDK; it is an org-discretionary defense-in-depth option, documented as such (see §5).
+- [ ] **State Leak Guard: Pre-commit hook** — Ship a git pre-commit hook template, auto-installed by `squad init` and `squad assign`, that inspects `git diff --cached --name-only` and rejects a commit if mutable state paths appear while the backend is `orphan`/`two-layer`. Hard enforcement; `--no-verify` bypass is an accepted limitation (see §5).
 
-- [ ] **Post-Migration Cleanup** — `squad migrate-backend` auto-removes stale on-disk state files from the working tree at migration time and appends appropriate `.gitignore` entries (covering `decisions.md`, `agents/*/history.md`, `log/*`, `orchestration-log/*`, `decisions/inbox/*`) so files cannot be re-added accidentally. History scrubbing (`git filter-repo` to remove old state files from project history) is explicitly out of scope for the P0 — clean PR diffs going forward is the bar; pre-migration commits retaining `.squad/` state in history are accepted, analogous to legacy `.DS_Store` commits. A documented recipe for compliance-paranoid orgs is provided (see §5).
+  The pre-commit hook is the primary blocking gate — it fires before the commit is written. Scribe's pre-check is the audit/self-heal layer, activating when the hook is missing or was bypassed (e.g., `--no-verify`). These are not competing peers; they are layered guards with distinct authority.
+
+- [ ] **Hook Bootstrap** — `squad assign` installs the pre-commit hook on completion, mirroring the existing call site in `squad init`. Installation is idempotent — running multiple times must not corrupt the hooks directory or duplicate entries.
+
+  Hooks are not a separate distribution problem. A developer cannot use Squad without `squad.agent.md` present and consciously selecting the squad agent in their IDE. The same delivery events that activate Squad (`squad init` for solo dev, `squad assign --callsign` for org-managed) are the right install moments, reusing existing channels rather than inventing new ones. Orgs that commit `squad.agent.md` directly (bypassing `assign`) are responsible for also committing `.githooks/` and setting `core.hooksPath`.
+
+- [ ] **Post-Migration Cleanup** — `squad migrate-backend` runs `git rm --cached` on tracked mutable state paths to remove them from git's index, then appends appropriate `.gitignore` entries (covering `decisions.md`, `agents/*/history.md`, `log/*`, `orchestration-log/*`, `decisions/inbox/*`) to guard against new `git add` of those files going forward. Note: `.gitignore` only prevents tracking of *untracked* files — `git rm --cached` is the required first step for files git is already tracking. The pre-commit hook backstops residual edge cases (old-checkout, stash-pop, and merge-conflict scenarios where files may be re-staged). History scrubbing (`git filter-repo` to remove old state files from project history) is explicitly out of scope for the P0 — clean PR diffs going forward is the bar; pre-migration commits retaining `.squad/` state in history are accepted, analogous to legacy `.DS_Store` commits. A documented recipe for compliance-paranoid orgs is provided (see §5).
 
 ### 5. Non-goals
 
@@ -164,9 +170,9 @@ This proposal does **not** attempt to solve the following in v1:
 - Solving every enterprise deployment problem inside the SDK
 - Shipping a public admin service or dashboard product for rollout management
 - Treating Tamir's fork as an alternate trunk or merge queue
-- **Preventing `git commit --no-verify` bypass of the pre-commit hook** — accepted limitation of the hook-based approach; enforcement relies on developer workflow discipline or CI-side guards at org discretion.
-- **Rewriting git history at migration time** — `squad migrate-backend` cleans the working tree going forward; pre-migration commits retaining `.squad/` state in history are accepted. A recipe for compliance-paranoid orgs that require `git filter-repo`-based history scrubbing will be documented alongside the migration command, but it is not a built-in.
-- **Shipping a CI-side state-diff enforcement guard in the SDK** — this is an optional defense-in-depth pattern an org may adopt independently; it is documented in the proposal but not shipped or required by the SDK.
+- **The SDK does not enforce `--no-verify` bypass prevention** — `git commit --no-verify` circumvents the pre-commit hook; this is an accepted limitation of the hook-based approach. Enforcement at this boundary relies on developer discipline or org-discretionary CI guards.
+- **The SDK does not rewrite git history at migration time** — `squad migrate-backend` cleans the working tree going forward; pre-migration commits retaining `.squad/` state in history are accepted. A `git filter-repo` recipe for compliance-paranoid orgs will be documented alongside the migration command, but it is not a built-in.
+- **The SDK does not ship a CI-side state-diff enforcement guard** — this is an optional defense-in-depth pattern an org may adopt independently; it is documented as such but not included in the SDK.
 
 The private layer inventory is explicit: **corp catalog, enterprise policy, deployment/bootstrap UX, dashboard/operator UX, and managed-machine personal sandbox behavior remain private unless Brady later chooses to productize them.**
 
