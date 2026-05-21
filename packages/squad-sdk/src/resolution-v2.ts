@@ -4,6 +4,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
+import { formatCallsignValidationMessage, isValidCallsign } from './callsign.js';
 import { parseRegistry } from './registry.js';
 import { clonesMatch, defaultRegistryFilePath } from './path-utils.js';
 
@@ -35,8 +36,6 @@ export interface ResolvedSquad {
   matchedOrigin?: string | null;
 }
 
-const CALLSIGN_RE = /^[A-Za-z0-9_-]+$/;
-
 function resolverError(message: string, code: ResolveErrorCode): SquadError {
   return new SquadError(
     message,
@@ -58,15 +57,12 @@ function inputError(message: string): SquadError {
   );
 }
 
-function validateCallsign(callsign: string, source: string): void {
+function validateCallsign(callsign: string, _source: string): void {
   if (callsign.length === 0) {
-    throw resolverError(`${source} must not be empty.`, 'EMPTY_CALLSIGN');
+    throw resolverError(formatCallsignValidationMessage(callsign), 'EMPTY_CALLSIGN');
   }
-  if (!CALLSIGN_RE.test(callsign)) {
-    throw resolverError(
-      `${source} "${callsign}" contains invalid characters. Allowed: A-Z a-z 0-9 _ -`,
-      'INVALID_CALLSIGN',
-    );
+  if (!isValidCallsign(callsign)) {
+    throw resolverError(formatCallsignValidationMessage(callsign), 'INVALID_CALLSIGN');
   }
 }
 

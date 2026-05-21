@@ -81,3 +81,9 @@ The revision unified `discover` and `delegate` on v2 resolution, threaded `--tea
 
 **Revision complete:** Commit 0e4f301e. Logged to `.squad/orchestration-log/2026-05-14T21-38-40Z-capcom.md`. Full suite 6,308/6,432 PASS; build clean; scrub gates 2/4/5/6 PASS. CONTROL locked out for further 08a revisions unless re-rejection cycle restarts.
 
+### 2026-05-21: Canonical callsign validation convergence
+
+When the same validation rule spans SDK reader paths, payload namespace code, and CLI maintenance commands, extract a shared helper in the SDK and make downstream packages import it through the barrel instead of copying regexes inline.
+
+The specific smell to watch for is writer/reader/doctor triple-divergence: once those three paths disagree, users get inconsistent acceptance rules and tests stop guarding the real contract.
+

@@ -426,7 +426,7 @@ describe('runAssign: origin collision', () => {
   });
 });
 
-describe('runAssign: case sensitivity', () => {
+describe('runAssign: callsign validation', () => {
   let hostDir: string;
   let cloneDir: string;
   let registryPath: string;
@@ -438,7 +438,7 @@ describe('runAssign: case sensitivity', () => {
     cloneDir = makeDir('clone');
     registryPath = path.join(TEST_ROOT, 'registry.json');
     writeRegistry(registryPath, [{
-      callsign: 'Alpha',
+      callsign: 'alpha',
       path: squadPath,
       origins: [],
       clones: [],
@@ -449,11 +449,10 @@ describe('runAssign: case sensitivity', () => {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('A20 callsign matching is case-sensitive on all platforms', async () => {
-    // 'alpha' != 'Alpha'
+  it('A20 non-canonical uppercase callsigns do not match the canonical lowercase registry entry', async () => {
     await expect(
       runAssign({
-        callsignOrUrl: 'alpha',
+        callsignOrUrl: 'Alpha',
         registryPath,
         cwd: cloneDir,
         getGitRoot: (dir) => dir,
@@ -461,9 +460,8 @@ describe('runAssign: case sensitivity', () => {
       }),
     ).rejects.toThrow(/ERR_ASSIGN_UNKNOWN_CALLSIGN/);
 
-    // 'Alpha' matches exactly
     const result = await runAssign({
-      callsignOrUrl: 'Alpha',
+      callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
       getGitRoot: (dir) => dir,

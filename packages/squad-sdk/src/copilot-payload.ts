@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+import { formatCallsignValidationMessage, isValidCallsign } from './callsign.js';
+
 // ============================================================
 // Error type
 // ============================================================
@@ -459,14 +461,11 @@ export function diagnoseCopilotPayload(opts: DiagnoseCopilotPayloadOpts): Diagno
 // Internal helpers
 // ============================================================
 
-// Callsign must be lowercase alphanumeric, optionally with internal hyphens, max 64 chars.
-const CALLSIGN_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
-
 function assertValidCallsign(callsign: string): void {
-  if (!CALLSIGN_RE.test(callsign) || callsign.length > 64) {
+  if (!isValidCallsign(callsign)) {
     throw new CopilotPayloadError(
       'ERR_PAYLOAD_INVALID_CALLSIGN',
-      `Callsign must match ${CALLSIGN_RE}, got: ${JSON.stringify(callsign)}`,
+      formatCallsignValidationMessage(callsign),
     );
   }
 }

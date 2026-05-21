@@ -734,7 +734,7 @@ describe('runDoctorPurge', () => {
   it('P13 callsign with invalid characters returns invalidCallsign', async () => {
     writeRegistry(registryPath, []);
     const result = await runDoctorPurge({
-      callsign: 'alpha!@#',
+      callsign: '_underscore',
       registryPath,
       yes: true,
     });

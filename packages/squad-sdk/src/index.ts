@@ -29,6 +29,7 @@ export type { Registry, RegistryEntry } from './registry.js';
 export { upsertEntry, registerEntry } from './registry.js';
 export type { ResolvedSquad, ResolveOpts, ResolveErrorCode } from './resolution-v2.js';
 export { clonesMatch, collectCwdRemoteUrls, normalizeRemoteUrl } from './resolution-v2.js';
+export { CALLSIGN_PATTERN, CALLSIGN_MAX_LENGTH, isValidCallsign, assertValidCallsign, formatCallsignValidationMessage } from './callsign.js';
 export { normalisedPathKey, pathsRefSameLocation, defaultRegistryFilePath } from './path-utils.js';
 export * from './config/index.js';
 export * from './agents/onboarding.js';

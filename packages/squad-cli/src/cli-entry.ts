@@ -1009,10 +1009,11 @@ async function main(): Promise<void> {
         fatal('Usage: squad doctor --purge <callsign>');
         return;
       }
+      const { formatCallsignValidationMessage } = await import('@bradygaster/squad-sdk');
       const { runDoctorPurge } = await import('./commands/doctor.js');
       const result = await runDoctorPurge({ callsign: purgeCallsign, registryPath, yes: hasYes });
       if (result.invalidCallsign) {
-        fatal(`Invalid callsign "${purgeCallsign}": must match [A-Za-z0-9_-] and be at most 64 characters.`);
+        fatal(formatCallsignValidationMessage(purgeCallsign));
         return;
       }
       if (result.noRegistry) {

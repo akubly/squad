@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { clonesMatch, normalisedPathKey, normalizeRemoteUrl } from '@bradygaster/squad-sdk';
+import { clonesMatch, isValidCallsign, normalisedPathKey, normalizeRemoteUrl } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
@@ -534,9 +534,6 @@ async function _defaultPromptFn(question: string): Promise<string> {
 // Purge
 // ============================================================
 
-const _CALLSIGN_RE = /^[A-Za-z0-9_-]+$/;
-const _MAX_CALLSIGN_LEN = 64;
-
 /**
  * Remove a registry entry by callsign.
  *
@@ -550,7 +547,7 @@ const _MAX_CALLSIGN_LEN = 64;
  */
 export async function runDoctorPurge(opts: RunDoctorPurgeOpts): Promise<RunDoctorPurgeResult> {
   // N4: Validate callsign format before any registry I/O
-  if (!_CALLSIGN_RE.test(opts.callsign) || opts.callsign.length > _MAX_CALLSIGN_LEN) {
+  if (!isValidCallsign(opts.callsign)) {
     return { invalidCallsign: true };
   }
 

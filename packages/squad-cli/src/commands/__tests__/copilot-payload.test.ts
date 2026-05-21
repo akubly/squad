@@ -906,6 +906,10 @@ describe('safety guards', () => {
     ['ALPHA', 'uppercase letters'],
     ['-alpha', 'leading dash'],
     ['alpha-', 'trailing dash'],
+    ['_underscore', 'underscore'],
+    ['with.dot', 'period'],
+    ['with space', 'space'],
+    ['..', 'path traversal marker'],
     ['', 'empty string'],
     ['a'.repeat(65), '65-character callsign exceeds maximum length'],
   ];
@@ -935,6 +939,18 @@ describe('safety guards', () => {
   it('valid callsign with internal hyphen passes validation (my-squad is a real expected pattern)', () => {
     expect(() =>
       installCopilotPayload({ hostDir, callsign: 'my-squad', copilotHome }),
+    ).not.toThrow();
+  });
+
+  it('valid double-hyphen callsign passes validation', () => {
+    expect(() =>
+      installCopilotPayload({ hostDir, callsign: 'a--b', copilotHome }),
+    ).not.toThrow();
+  });
+
+  it('valid 64-character callsign passes validation', () => {
+    expect(() =>
+      installCopilotPayload({ hostDir, callsign: 'x'.repeat(64), copilotHome }),
     ).not.toThrow();
   });
 

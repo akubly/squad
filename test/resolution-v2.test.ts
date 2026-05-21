@@ -16,9 +16,11 @@ import { join, resolve as pathResolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
 
+import { isValidCallsign, uninstallCopilotPayload } from '@bradygaster/squad-sdk';
 import { resolveSquad, normalizeRemoteUrl, collectCwdRemoteUrls } from '@bradygaster/squad-sdk/resolution-v2';
 import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
 import { SquadError } from '@bradygaster/squad-sdk/adapter/errors';
+import { runDoctorPurge } from '../packages/squad-cli/src/commands/doctor.js';
 
 const TMP = join(process.cwd(), `.test-resolution-v2-${randomBytes(4).toString('hex')}`);
 
@@ -462,6 +464,7 @@ describe('resolveSquad() — callsign input validation', () => {
       resolveSquad({ cwd: TMP, env: {}, callsign: 'bad/callsign' }),
     );
     expect(errorCode(err)).toBe('INVALID_CALLSIGN');
+    expect(err.message).toContain('Callsign "bad/callsign" is invalid.');
   });
 
   it('throws SquadError with INVALID_CALLSIGN for SQUAD_CALLSIGN env var with illegal characters', () => {
@@ -472,17 +475,96 @@ describe('resolveSquad() — callsign input validation', () => {
     expect(errorCode(err)).toBe('INVALID_CALLSIGN');
   });
 
-  it('accepts callsigns with letters, digits, hyphens, and underscores', () => {
+  it('accepts lowercase callsigns with digits and internal hyphens', () => {
     scaffold('.git', 'team', 'team/.squad', 'registry');
     const registryFile = dir('registry', 'registry.json');
-    writeRegistry(registryFile, [{ callsign: 'my-team_01', path: dir('team', '.squad') }]);
+    writeRegistry(registryFile, [{ callsign: 'gethelp-app', path: dir('team', '.squad') }]);
 
     const result = resolveSquad({
       cwd: TMP,
-      env: { SQUAD_CALLSIGN: 'my-team_01' },
+      env: { SQUAD_CALLSIGN: 'gethelp-app' },
       registryPath: registryFile,
     });
-    expect(result?.callsign).toBe('my-team_01');
+    expect(result?.callsign).toBe('gethelp-app');
+  });
+
+  it('keeps resolution-v2, copilot-payload, and doctor callsign validation aligned', async () => {
+    scaffold('.git');
+
+    const cases = [
+      ['a', true],
+      ['squad', true],
+      ['my-squad', true],
+      ['gethelp-app', true],
+      ['abc123', true],
+      ['x'.repeat(64), true],
+      ['', false],
+      ['-leading', false],
+      ['trailing-', false],
+      ['_underscore', false],
+      ['UPPER', false],
+      ['with.dot', false],
+      ['with space', false],
+      ['x'.repeat(65), false],
+      ['a--b', true],
+      ['..', false],
+    ] as const;
+
+    for (const [index, [callsign, expected]] of cases.entries()) {
+      const hostDir = dir(`callsign-host-${index}`);
+      const squadDir = join(hostDir, '.squad');
+      const registryDir = dir(`callsign-registry-${index}`);
+      const registryFile = join(registryDir, 'registry.json');
+      const copilotHome = dir(`callsign-copilot-${index}`);
+
+      mkdirSync(squadDir, { recursive: true });
+      mkdirSync(registryDir, { recursive: true });
+      writeRegistry(registryFile, expected ? [{ callsign, path: squadDir }] : []);
+
+      const resolutionValid = (() => {
+        try {
+          resolveSquad({ cwd: TMP, env: {}, callsign, registryPath: registryFile });
+          return true;
+        } catch (error) {
+          if (error instanceof SquadError) {
+            const code = errorCode(error);
+            if (code === 'EMPTY_CALLSIGN' || code === 'INVALID_CALLSIGN') {
+              return false;
+            }
+          }
+          throw error;
+        }
+      })();
+
+      const payloadValid = (() => {
+        try {
+          uninstallCopilotPayload({ callsign, copilotHome });
+          return true;
+        } catch (error) {
+          if ((error as { code?: string }).code === 'ERR_PAYLOAD_INVALID_CALLSIGN') {
+            return false;
+          }
+          throw error;
+        }
+      })();
+
+      const doctorResult = await runDoctorPurge({ callsign, registryPath: registryFile, yes: true });
+      const doctorValid = doctorResult.invalidCallsign !== true;
+
+      expect({
+        callsign,
+        helper: isValidCallsign(callsign),
+        resolution: resolutionValid,
+        payload: payloadValid,
+        doctor: doctorValid,
+      }).toEqual({
+        callsign,
+        helper: expected,
+        resolution: expected,
+        payload: expected,
+        doctor: expected,
+      });
+    }
   });
 });
 
