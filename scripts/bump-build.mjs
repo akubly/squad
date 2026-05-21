@@ -31,11 +31,11 @@ const PACKAGE_PATHS = [
   join(root, 'packages', 'squad-cli', 'package.json'),
 ];
 
-// Parse version: "major.minor.patch-prerelease.build" or "major.minor.patch.build"
+// Parse version: "major.minor.patch-prerelease[.tag].build" or "major.minor.patch.build"
 // Non-prerelease bumps now produce "major.minor.patch-build.N" (valid semver)
 function parseVersion(version) {
-  // Try prerelease format: "1.2.3-tag" or "1.2.3-tag.N"
-  let match = version.match(/^(\d+\.\d+\.\d+)(-[a-zA-Z][a-zA-Z0-9-]*)(?:\.(\d+))?$/);
+  // Try prerelease format: "1.2.3-tag", "1.2.3-tag.N", or "1.2.3-tag.segment.N"
+  let match = version.match(/^(\d+\.\d+\.\d+)(-[a-zA-Z][a-zA-Z0-9-]*(?:\.[a-zA-Z][a-zA-Z0-9-]*)*)(?:\.(\d+))?$/);
   if (match) {
     return {
       base: match[1],
