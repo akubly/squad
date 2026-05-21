@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
 import { parseRegistry } from './registry.js';
-import { clonesMatch } from './path-utils.js';
+import { clonesMatch, defaultRegistryFilePath } from './path-utils.js';
 
 export type ResolveErrorCode =
   | 'EMPTY_CALLSIGN'
@@ -83,23 +83,16 @@ function findGitRoot(cwd: string): string | null {
   }
 }
 
-function platformDefaultRegistryPath(
-  platform: NodeJS.Platform,
-  homeDir: string,
-  env: Record<string, string | undefined>,
-): string {
-  let base: string;
-  if (platform === 'win32') {
-    base =
-      env['APPDATA'] ??
-      env['LOCALAPPDATA'] ??
-      path.join(homeDir, 'AppData', 'Roaming');
-  } else if (platform === 'darwin') {
-    base = path.join(homeDir, 'Library', 'Application Support');
-  } else {
-    base = env['XDG_CONFIG_HOME'] ?? path.join(homeDir, '.config');
-  }
-  return path.join(base, 'squad', 'registry.json');
+function resolveEffectiveRegistryPath(opts: ResolveOpts): string {
+  if (opts.registryPath) return opts.registryPath;
+
+  const env: Record<string, string | undefined> =
+    opts.env ?? (process.env as Record<string, string | undefined>);
+  const envPath = env['SQUAD_REGISTRY_PATH'];
+  if (envPath) return envPath;
+
+  const homeDir = opts.homeDir ?? os.homedir();
+  return defaultRegistryFilePath(homeDir, env);
 }
 
 /** Resolve the platform-scoped user .squad/ directory for the platform fallback step. */
@@ -120,19 +113,6 @@ function platformFallbackSquadPath(
   }
   if (base === null) return null;
   return path.join(base, 'squad', '.squad');
-}
-
-function resolveEffectiveRegistryPath(opts: ResolveOpts): string {
-  if (opts.registryPath) return opts.registryPath;
-
-  const env: Record<string, string | undefined> =
-    opts.env ?? (process.env as Record<string, string | undefined>);
-  const envPath = env['SQUAD_REGISTRY_PATH'];
-  if (envPath) return envPath;
-
-  const platform = opts.platform ?? process.platform;
-  const homeDir = opts.homeDir ?? os.homedir();
-  return platformDefaultRegistryPath(platform, homeDir, env);
 }
 
 function resolveByCallsign(callsign: string, opts: ResolveOpts): ResolvedSquad {

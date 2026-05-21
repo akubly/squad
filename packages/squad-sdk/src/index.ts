@@ -29,7 +29,7 @@ export type { Registry, RegistryEntry } from './registry.js';
 export { upsertEntry, registerEntry } from './registry.js';
 export type { ResolvedSquad, ResolveOpts, ResolveErrorCode } from './resolution-v2.js';
 export { clonesMatch, collectCwdRemoteUrls, normalizeRemoteUrl } from './resolution-v2.js';
-export { normalisedPathKey, pathsRefSameLocation } from './path-utils.js';
+export { normalisedPathKey, pathsRefSameLocation, defaultRegistryFilePath } from './path-utils.js';
 export * from './config/index.js';
 export * from './agents/onboarding.js';
 export { resolvePersonalAgents, mergeSessionCast } from './agents/personal.js';

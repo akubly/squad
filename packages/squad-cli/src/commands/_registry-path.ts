@@ -8,7 +8,7 @@
  */
 
 import path from 'node:path';
-import { resolveSquadHome } from '@bradygaster/squad-sdk';
+import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
 
 export interface ResolveRegistryPathOpts {
   explicit?: string;
@@ -21,10 +21,9 @@ export interface ResolveRegistryPathOpts {
  * 1. `explicit` — caller-supplied path (CLI flag or test override).
  * 2. `env.SQUAD_REGISTRY_PATH` — per-invocation environment override.
  * 3. `process.env.SQUAD_REGISTRY_PATH` — ambient environment variable.
- * 4. User-registry default — `~/.config/squad/registry.json` (or platform equivalent).
+ * 4. User-registry default — `~/.squad/registry.json` (or `$SQUAD_HOME/registry.json`).
  *
  * When a value is a directory path (does not end in `.json`), appends `registry.json`.
- * Returns `null` when no source resolves.
  */
 export function resolveRegistryFilePath(opts?: ResolveRegistryPathOpts): string | null {
   const explicit = opts?.explicit;
@@ -42,6 +41,5 @@ export function resolveRegistryFilePath(opts?: ResolveRegistryPathOpts): string 
     return processEnv.endsWith('.json') ? processEnv : path.join(processEnv, 'registry.json');
   }
 
-  const home = resolveSquadHome(false);
-  return home ? path.join(home, 'registry.json') : null;
+  return defaultRegistryFilePath();
 }

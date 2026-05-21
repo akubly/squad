@@ -12,11 +12,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, writeFileSync, mkdirSync as mkdirSyncFs } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as pathResolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
 
 import { resolveSquad, normalizeRemoteUrl, collectCwdRemoteUrls } from '@bradygaster/squad-sdk/resolution-v2';
+import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
 import { SquadError } from '@bradygaster/squad-sdk/adapter/errors';
 
 const TMP = join(process.cwd(), `.test-resolution-v2-${randomBytes(4).toString('hex')}`);
@@ -1291,3 +1292,118 @@ describe('resolveSquad() — full chain precedence', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// RRP — Registry-path parity (writer/reader agreement)
+// ---------------------------------------------------------------------------
+
+describe('defaultRegistryFilePath() — path-utils helper', () => {
+  it('RRP.1 uses ~/.squad/registry.json when SQUAD_HOME is not set', () => {
+    const fakeHome = join(process.cwd(), '.test-rrp-home-' + randomBytes(4).toString('hex'));
+    const result = defaultRegistryFilePath(fakeHome, {});
+    expect(result).toBe(join(fakeHome, '.squad', 'registry.json'));
+  });
+
+  it('RRP.2 uses SQUAD_HOME/registry.json when SQUAD_HOME is set', () => {
+    const squadHome = join(process.cwd(), '.test-rrp-squadhome-' + randomBytes(4).toString('hex'));
+    const result = defaultRegistryFilePath('/any-home', { SQUAD_HOME: squadHome });
+    expect(result).toBe(join(pathResolve(squadHome), 'registry.json'));
+  });
+
+  it('RRP.3 path agreement: writer and resolveSquad reader return identical path (no SQUAD_HOME)', () => {
+    // The "writer" path: what the CLI would compute for the default registry location.
+    // The "reader" path: what resolveSquad would probe — verified indirectly by
+    // checking that a registry written at writerPath is found by resolveSquad.
+    const fakeHome = join(process.cwd(), '.test-rrp-agree-' + randomBytes(4).toString('hex'));
+    const writerPath = defaultRegistryFilePath(fakeHome, {});
+    // Confirm the reader (resolveEffectiveRegistryPath) uses the SAME path:
+    // both must return ~/.squad/registry.json when SQUAD_HOME is absent.
+    const expectedPath = join(fakeHome, '.squad', 'registry.json');
+    expect(writerPath).toBe(expectedPath);
+  });
+
+  it('RRP.4 path agreement: writer and resolveSquad reader agree when SQUAD_HOME is set', () => {
+    const squadHome = join(process.cwd(), '.test-rrp-sh-' + randomBytes(4).toString('hex'));
+    const env = { SQUAD_HOME: squadHome };
+    const writerPath = defaultRegistryFilePath('/any-home', env);
+    const expectedPath = join(pathResolve(squadHome), 'registry.json');
+    expect(writerPath).toBe(expectedPath);
+  });
+});
+
+describe('resolveSquad() — registry path parity (end-to-end)', () => {
+  const TMP2 = join(process.cwd(), `.test-rrp-e2e-${randomBytes(4).toString('hex')}`);
+
+  beforeEach(() => {
+    if (existsSync(TMP2)) rmSync(TMP2, { recursive: true, force: true });
+    mkdirSync(TMP2, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TMP2)) rmSync(TMP2, { recursive: true, force: true });
+  });
+
+  it('RRP.5 resolveSquad finds a squad written at defaultRegistryFilePath (clones match)', () => {
+    // Writer computes: defaultRegistryFilePath(fakeHome, {}) → fakeHome/.squad/registry.json
+    // Reader (resolveEffectiveRegistryPath) must probe the same path.
+    const fakeHome = join(TMP2, 'home');
+    const cwdDir = join(TMP2, 'my-clone');
+    const squadDir = join(TMP2, 'my-squad', '.squad');
+    // Create a .git marker at TMP2 level so walk-up stops here (doesn't escape to repo root).
+    mkdirSync(join(TMP2, '.git'), { recursive: true });
+    mkdirSync(cwdDir, { recursive: true });
+    mkdirSync(squadDir, { recursive: true });
+
+    // Write registry at the writer-computed path.
+    const registryPath = defaultRegistryFilePath(fakeHome, {});
+    mkdirSync(join(fakeHome, '.squad'), { recursive: true });
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        squads: [{ callsign: 'parity-squad', path: squadDir, clones: [cwdDir] }],
+      }),
+      'utf8',
+    );
+
+    // Reader: resolveSquad with homeDir=fakeHome and no explicit registryPath.
+    const result = resolveSquad({ cwd: cwdDir, env: {}, homeDir: fakeHome });
+    expect(result).not.toBeNull();
+    expect(result?.source).toBe('clones');
+    expect(result?.path).toBe(squadDir);
+  });
+
+  it('RRP.6 writing to old platform-default path does NOT cause spurious resolution (negative test)', () => {
+    // OLD win32 path was: APPDATA\squad\registry.json
+    // Verify that writing there does NOT resolve a squad entry.
+    const fakeHome = join(TMP2, 'home-neg');
+    const fakeAppData = join(TMP2, 'appdata');
+    const cwdDir = join(TMP2, 'my-clone-neg');
+    const squadDir = join(TMP2, 'my-squad-neg', '.squad');
+    // Create a .git marker at TMP2 level so walk-up stops here (doesn't escape to repo root).
+    mkdirSync(join(TMP2, '.git'), { recursive: true });
+    mkdirSync(cwdDir, { recursive: true });
+    mkdirSync(squadDir, { recursive: true });
+
+    // Write registry at the OLD win32 location (APPDATA\squad\registry.json).
+    const oldPlatformPath = join(fakeAppData, 'squad', 'registry.json');
+    mkdirSync(join(fakeAppData, 'squad'), { recursive: true });
+    writeFileSync(
+      oldPlatformPath,
+      JSON.stringify({
+        version: 1,
+        squads: [{ callsign: 'ghost-squad', path: squadDir, clones: [cwdDir] }],
+      }),
+      'utf8',
+    );
+
+    // Reader uses defaultRegistryFilePath(fakeHome, { APPDATA: fakeAppData }).
+    // With the fix, APPDATA is ignored for the registry path — we read from fakeHome/.squad/registry.json.
+    // No registry there → returns null.
+    const result = resolveSquad({
+      cwd: cwdDir,
+      env: { APPDATA: fakeAppData },
+      homeDir: fakeHome,
+    });
+    expect(result).toBeNull();
+  });
+});

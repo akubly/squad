@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
 
@@ -92,4 +93,30 @@ export function clonesMatch(cwd: string, clone: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Canonical default path for the user-level registry file.
+ *
+ * Precedence:
+ *   1. SQUAD_HOME env var → `<SQUAD_HOME>/registry.json`
+ *   2. Fallback           → `<homeDir>/.squad/registry.json`
+ *
+ * Both the CLI writer (squad init / squad assign) and the SDK reader
+ * (resolveSquad) MUST route through this helper so they always agree on
+ * the default registry location.
+ *
+ * @param homeDir - Override for os.homedir() — primarily for testing.
+ * @param env     - Override for process.env — primarily for testing.
+ */
+export function defaultRegistryFilePath(
+  homeDir?: string,
+  env?: Record<string, string | undefined>,
+): string {
+  const e = env ?? (process.env as Record<string, string | undefined>);
+  const squadHome = e['SQUAD_HOME'];
+  if (squadHome) {
+    return path.join(path.resolve(squadHome), 'registry.json');
+  }
+  return path.join(homeDir ?? os.homedir(), '.squad', 'registry.json');
 }

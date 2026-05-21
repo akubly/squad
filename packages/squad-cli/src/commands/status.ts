@@ -9,9 +9,9 @@
  * @module commands/status
  */
 
-import os from 'node:os';
 import path from 'node:path';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad } from '@bradygaster/squad-sdk/resolution-v2';
+import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
 
 /** Source values that indicate the squad was resolved via the registry. */
 const REGISTRY_SOURCES = new Set<string>(['env', 'clones', 'origins']);
@@ -35,20 +35,7 @@ function matchViaLabel(source: string): string {
 export function resolveStatusRegistryPath(env: Record<string, string | undefined>): string {
   const envPath = env['SQUAD_REGISTRY_PATH'];
   if (envPath) return envPath;
-
-  const homeDir = os.homedir();
-  const platform = process.platform;
-  let base: string;
-
-  if (platform === 'win32') {
-    base = env['APPDATA'] ?? env['LOCALAPPDATA'] ?? path.join(homeDir, 'AppData', 'Roaming');
-  } else if (platform === 'darwin') {
-    base = path.join(homeDir, 'Library', 'Application Support');
-  } else {
-    base = env['XDG_CONFIG_HOME'] ?? path.join(homeDir, '.config');
-  }
-
-  return path.join(base, 'squad', 'registry.json');
+  return defaultRegistryFilePath(undefined, env);
 }
 
 /**

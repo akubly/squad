@@ -6,8 +6,10 @@
 
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
+import os from 'node:os';
 import { formatRegistryStatusBlock, resolveStatusRegistryPath } from '../status.js';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad } from '@bradygaster/squad-sdk/resolution-v2';
+import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
 
 // ============================================================
 // resolveStatusRegistryPath
@@ -27,6 +29,20 @@ describe('resolveStatusRegistryPath()', () => {
   it('SR.3 platform default path contains "squad"', () => {
     const result = resolveStatusRegistryPath({});
     expect(result).toContain('squad');
+  });
+
+  it('SR.4 resolveStatusRegistryPath agrees with defaultRegistryFilePath (no SQUAD_HOME)', () => {
+    // Display path and SDK reader must agree — both delegate to defaultRegistryFilePath.
+    const result = resolveStatusRegistryPath({});
+    expect(result).toBe(defaultRegistryFilePath());
+  });
+
+  it('SR.5 resolveStatusRegistryPath uses SQUAD_HOME when set', () => {
+    const env = { SQUAD_HOME: path.join(os.homedir(), '.custom-squad') };
+    const result = resolveStatusRegistryPath(env);
+    expect(result).toBe(defaultRegistryFilePath(undefined, env));
+    expect(result).toContain('.custom-squad');
+    expect(result).toContain('registry.json');
   });
 });
 
