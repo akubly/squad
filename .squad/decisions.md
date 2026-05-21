@@ -217,3 +217,100 @@ Before adding more squad-home / cross-machine state work on `dev`, evaluate Tami
 **By:** Brady
 **What:** Squad becomes its own interactive CLI shell. `squad` with no args enters a REPL.
 **Why:** Squad needs to own the full interactive experience.
+
+---
+
+## 2026-05-21: Transparent Artifact/Dotfile Management — P0 Elevation
+
+**Author:** Flight  
+**Date:** 2026-05-21  
+**Status:** Landed — integrated into authoritative proposal  
+**Target:** `.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec.md`
+
+### The Requirement
+
+Squad's mutable state — decisions, agent histories, session logs, orchestration records, inbox files — MUST NOT appear in developer pull requests in organizational settings. Developers must not pay a git/repo tax (manual file separation, separate PR workflows, branch-policy negotiation) to use Squad in organizations with PR review and branch protection. The SDK/agents and any organization layer are responsible for keeping state invisible; the developer should be unaware this problem even exists.
+
+This is a **P0 requirement** for any org-scale Squad deployment. It was missing from the initial multi-squad proposal and has been elevated now.
+
+Crucially, this does not change Squad's default behavior. The `worktree` backend remains the out-of-the-box default for solo developers and personal projects. The P0 is a capability for org use, not a forced migration.
+
+### The Mechanism (Already Exists)
+
+Squad's `stateBackend` field in `.squad/config.json` already supports the backends that solve this:
+
+- **`orphan`** — mutable state lives on a dedicated `squad-state` orphan branch; the working branch is completely clean.
+- **`two-layer`** — static config (charters, team.md, routing.md) stays on the working branch; mutable state goes to the orphan branch.
+- **`git-notes`** — state stored in `refs/notes/squad`; branch-invisible.
+
+For org use, `orphan` or `two-layer` should be the registered default. The org's tool layer sets this when registering a new squad. Individual developers never touch the setting.
+
+### The Three File Classes
+
+| Class | Examples | Should appear in PR diffs? |
+|---|---|---|
+| Working product changes | Feature code, tests, build config | Yes — normal peer review |
+| Squad static config | `charters/`, `team.md`, `routing.md`, `ceremonies.md` | Yes — intentional reviewable artifacts |
+| Squad mutable state | `decisions.md`, `agents/*/history.md`, `log/*`, `orchestration-log/*`, `decisions/inbox/*` | **No** — owned by Squad infrastructure |
+
+### Ownership
+
+| Owner | Responsibility |
+|---|---|
+| SDK | `stateBackend` abstraction and backend implementations |
+| `squad-cli` | Reads `stateBackend` from config and plumbs it to the runtime |
+| Scribe | Executes orphan-branch commit/push transparently |
+| Org tool layer | Sets org default (`"stateBackend": "orphan"`) at squad registration time |
+| Developer | Unaware — this is the success condition |
+
+### Proposal Artifacts Updated
+
+- Section 4 (Goals) — converted to requirements summary table; new P0 row added
+- Section 4a (new) — "How transparent state isolation works": three file classes, backend comparison, before/after diff, ownership table
+- Section 26 (Glossary) — added: State backend, Transparent state isolation, Orphan-branch backend
+- Section 27 (Appendix A) — added cross-reference note: Casey narratives depend on this P0; PAO refreshing in parallel
+- Section 29 (Appendix C) — added three new vocabulary terms
+
+---
+
+## 2026-05-21: State Isolation Audit — Transparent State Backend Verification
+
+**Audit Lead:** EECOM  
+**Date:** 2026-05-21  
+**Scope:** Verify that existing state-backend work (`worktree`/`orphan`/`git-notes`/`two-layer`) truly solves P0: "Squad's mutable state must NOT pollute developer PRs transparently."
+
+### Summary
+
+Orphan and two-layer backends are **genuinely git-native** and **don't pollute PRs** if used correctly. No temporary branches, no working-tree cruft. The architecture is sound. However, the **transparency claim is currently overstated** because developers must explicitly opt in and infrastructure work (state leak guards, hook bootstrap automation, CI recipes) is incomplete.
+
+### What's Fully Working ✅
+- State backend configuration plumbing (config.json → resolveStateBackend → runtime)
+- Orphan branch backend (git-native, working-tree-clean, fully tested)
+- Two-layer backend (orphan + notes, designed for team use)
+- Git hooks for orphan branch sync (pre-push, post-merge, post-checkout, post-rewrite)
+- Migration command (local → orphan/two-layer)
+
+### Critical Gaps 🔴
+1. **State Leak Guard** — Pre-commit validation missing; if code bypasses backend abstraction and writes directly to `.squad/decisions.md` on working tree when backend is `orphan`/`two-layer`, the file will be committed despite being meant for orphan branch.
+2. **Hook Bootstrap Automation** — No automatic installation on new clone; CI runners need manual setup; new developers must run `squad upgrade --state-backend orphan` manually.
+3. **Stale On-Disk State After Migration** — `squad upgrade --state-backend orphan` creates orphan branch but leaves old `.squad/` files on disk; developers and reviewers see stale files until manually cleaned up.
+
+### Top Priorities for Full P0 Delivery
+
+**MUST-HAVE (blocking P0 claim):**
+1. State Leak Guard: Scribe or git hook pre-commit validation that rejects `.squad/decisions.md` and `.squad/agents/*/history.md` when backend is `orphan`/`two-layer`
+2. Hook Bootstrap: Automatic installation of git hooks on `squad init` or first `squad` command
+
+**SHOULD-HAVE (high-impact):**
+3. Post-Migration Cleanup: `squad upgrade --state-backend orphan --cleanup` option
+4. CI Recipe: Documented GitHub Actions example showing `squad sync --push`
+
+### Recommended Defaults
+
+- **Single-repo single-dev** (`squad init`): Keep `local` (current behavior) — zero-impact P0
+- **Org tool / shared squad consumer**: Flip default to `orphan` when registering
+- **CI/Host runners**: Explicit opt-in required; provide well-documented recipe
+
+### Takeaway
+
+The state backend framework is **95% implemented and architecturally sound**. The last 5% is ecosystem support (guards, bootstrap automation, CI integration). Prioritize the ecosystem work if P0 is "state isolation must be transparent and unavoidable to developers."

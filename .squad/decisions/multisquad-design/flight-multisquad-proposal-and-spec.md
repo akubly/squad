@@ -42,11 +42,100 @@ Brady’s original framing is a mix-and-match matrix, not a single feature reque
 
 In short: **given any current directory, on any supported host, resolve the right squad stack, explain it plainly, materialize it safely, and preserve the boundary between shared and personal state.**
 
-### 4. Goals (P0 / P1 / P1)
+### 4. Goals — requirements summary
 
-1. **P0:** Org-scale multi-squad flexibility (N squads, applicability, storage medium, location, layering, sharing)
-2. **P1:** Minimum custom code
-3. **P1:** Contribute upstream to `bradygaster/squad`
+| Priority | Requirement |
+|---|---|
+| **P0** | **Org-scale multi-squad flexibility** — N squads, applicability by directory, multiple storage media, multiple persistence locations, layering, cross-user sharing. |
+| **P0** | **Transparent artifact/dotfile management** — Squad's mutable state (decisions, histories, logs, orchestration records) MUST NOT appear in developer pull requests. Developers must not pay a git/repo tax — no manual file separation, no separate PRs, no branch-policy negotiation — to use Squad in organizations with PR review and branch protection. The SDK/agents and any organization layer are responsible; the developer is unaware. Default out-of-the-box behavior (worktree backend, single-developer) is unchanged. See §4a. |
+| **P1** | **Minimum custom code** — Reuse existing Squad and Rally substrate; minimize net-new code. |
+| **P1** | **Contribute upstream** — Upstream reusable value to `bradygaster/squad`. |
+
+### 4a. How transparent state isolation works
+
+#### Three classes of Squad files
+
+Squad files fall into three categories with distinct PR-visibility rules in org settings:
+
+| Class | Examples | Visible in PR diffs? |
+|---|---|---|
+| **Working product changes** | Feature code, tests, build config | Always — peer-reviewed normally |
+| **Squad static config** | `charters/`, `team.md`, `routing.md`, `ceremonies.md` | Yes — intentional, reviewable artifacts |
+| **Squad mutable state** | `decisions.md`, `agents/*/history.md`, `log/*`, `orchestration-log/*`, `decisions/inbox/*` | **No** — MUST be invisible to PRs in org contexts |
+
+The boundary between "static config" and "mutable state" is the same line that already exists in the state-backend design: config describes who the squad is; state records what the squad has done.
+
+#### The `stateBackend` mechanism
+
+Squad's `.squad/config.json` supports a `stateBackend` field that already ships in v0.9.2-mc.preview.x:
+
+| Value | Where state lives | Appears in working-branch diffs? | Recommended for |
+|---|---|---|---|
+| `worktree` | On the working branch | **Yes** (default) | Solo developers, personal projects |
+| `git-notes` | In `refs/notes/squad` — branch-invisible | No | Single-developer org repos |
+| `orphan` | On a dedicated `squad-state` orphan branch | No | Org / team use — **recommended org default** |
+| `two-layer` | Static config on working branch; mutable state on orphan | No (mutable part) | Orgs that want config committed, state hidden |
+| `external` | Outside the repo entirely | No | Fully managed environments |
+
+For organizational use, **`orphan` or `two-layer` are the recommended defaults.** The org's tool layer can pre-set the backend when registering a new squad, so individual developers never need to configure it themselves.
+
+#### What the developer sees
+
+With `orphan` or `two-layer` as the org default:
+
+- Scribe commits mutable state to the `squad-state` orphan branch transparently as part of normal state-flush operations.
+- The working branch carries only the developer's product changes (plus static Squad config, if any).
+- `git diff main...feature-branch` shows zero Squad artifacts — only product code.
+- PR review, branch protection, and required-reviewer policies apply only to the developer's real work.
+- No cherry-picking, no separate Squad-state PRs, no branch-policy negotiation required.
+
+#### Before/after: the PR diff tax
+
+**Without transparent state isolation** (`worktree` backend, single-repo default):
+
+```diff
+# PR: feat/add-payment-gateway
+diff --git a/src/payments/stripe.ts b/src/payments/stripe.ts
+@@ -0,0 +1,12 @@
++ export async function createCharge(...) { ... }
+
+diff --git a/.squad/decisions.md b/.squad/decisions.md
+@@ -1,3 +1,18 @@
++## 2026-05-21: Payment gateway architecture decision
++...
+
+diff --git a/.squad/agents/flight/history.md b/.squad/agents/flight/history.md
+@@ ... @@
++📌 Team update: reviewed payment gateway proposal...
+
+diff --git a/.squad/log/session-2026-05-21.md b/.squad/log/session-2026-05-21.md
+new file mode 100644
+@@ ... @@
++[session log contents]
+```
+
+Reviewers must sift through Squad artifacts to find the real change. Branch protection may block merge until reviewers sign off on Squad state they cannot meaningfully evaluate.
+
+**With transparent state isolation** (`orphan` or `two-layer` backend):
+
+```diff
+# PR: feat/add-payment-gateway
+diff --git a/src/payments/stripe.ts b/src/payments/stripe.ts
+@@ -0,0 +1,12 @@
++ export async function createCharge(...) { ... }
+```
+
+The developer's PR contains only product code. Squad mutable state is committed by Scribe to the `squad-state` branch independently — no human review required, no branch-protection friction.
+
+#### Ownership
+
+| Owner | Responsibility |
+|---|---|
+| **SDK** | Provides the `stateBackend` abstraction and implements each backend variant |
+| **`squad-cli`** | Reads `stateBackend` from `.squad/config.json` and plumbs it to the runtime |
+| **Scribe** | Executes the orphan-branch commit/push workflow transparently; the developer does not invoke it manually |
+| **Org tool layer** | Sets `"stateBackend": "orphan"` as the org default when registering new squads — developers never touch this setting |
+| **Developer** | Unaware — commits product changes; Squad state management is invisible |
 
 ### 5. Non-goals
 
@@ -792,6 +881,9 @@ They may differ only in presentation and persistence location.
 - **Personal-only mode** — an explicit rule that disables shared layers for a path and keeps only the personal workspace active.
 - **Org tool** — a private company-standard developer shell that consumes the Squad kernel without exposing Squad-native UX directly.
 - **Pivot heuristic** — the pre-decided rule set for abandoning the upstream path and shipping independently.
+- **State backend** — the persistence mechanism that controls where Squad mutable state (decisions, history, logs) is stored relative to the working branch. Configured via `stateBackend` in `.squad/config.json`.
+- **Transparent state isolation** — the property, achieved via the `orphan` or `two-layer` state backends, by which Squad mutable state never appears on the developer's working branch and therefore never enters PR diffs or triggers branch-protection policies.
+- **Orphan-branch backend** — the `orphan` state backend variant: mutable state is committed to a dedicated `squad-state` orphan branch, keeping the working branch entirely free of Squad state artifacts.
 
 ## PART III — APPENDICES
 
@@ -811,6 +903,8 @@ They may differ only in presentation and persistence location.
 - `.squad/decisions/inbox/pao-multisquad-day-in-life-casey.md` — Casey baseline day-1 narrative for the first-party host.
 - `.squad/decisions/inbox/pao-multisquad-day-in-life-casey-rally.md` — Casey narrative for Rally as shared-repo operator host.
 - `.squad/decisions/inbox/pao-multisquad-day-in-life-casey-org-tool.md` — Casey narrative for a corp-managed org host.
+
+> **Cross-reference:** The Casey narratives above all implicitly depend on the transparent artifact/dotfile management P0 introduced in §4/§4a. Specifically, any Casey scenario set in an org context assumes that Squad state (decisions, history, logs) does not appear in Casey's PRs and does not trigger branch-protection friction. PAO is refreshing the narrative files to make this dependency explicit; this proposal is the authoritative requirement source.
 
 ### 28. Appendix B — alternatives considered
 
@@ -838,6 +932,9 @@ Rejected for now. Rubber-Duck was right that a private org host could ship faste
 - **Materialization** — producing the effective `.squad/` view for a target workspace
 - **Personal-only mode** — explicit exclusion of all shared layers
 - **Pivot heuristic** — the pre-agreed trigger set for abandoning upstream
+- **State backend** — the persistence mechanism controlling where Squad mutable state is stored relative to the working branch; configured via `stateBackend` in `.squad/config.json`
+- **Transparent state isolation** — the property by which Squad mutable state is kept off the developer's working branch and therefore invisible to PR diffs and branch-protection policies; achieved via the `orphan` or `two-layer` backends
+- **Orphan-branch backend** — the `orphan` backend variant; mutable state commits to a dedicated `squad-state` orphan branch, leaving the working branch entirely clean
 
 #### Existing terms redefined
 

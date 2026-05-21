@@ -203,7 +203,29 @@ Org history received a breadcrumb because shared policy constrained this session
 
 Perfect. One session Scribe. One canonical home for the local decision. A breadcrumb where the broader squad needs to remember it. I do not need to know the file layout to appreciate that somebody thought carefully about ownership.
 
-By late afternoon, the whole day has sorted itself into a mental model I can actually carry.
+By late afternoon, the work is ready for review. I push my branch and open a pull request on the mono-repo. I half expect to see some squad noise in the diff — history files, decisions logs, session artifacts. The old way (or so I am told by a teammate over chat) would have meant choosing: commit the squad state alongside the product code and fight the branch policy to land it, or open a second PR just for the squad files and hope someone rubber-stamps it.
+
+Instead, when I scroll through the diff, there is nothing but product code. The request handler. The test case. A note in the shared runbook. No `.squad/decisions.md` churn. No `agents/*/history.md` entries. No orchestration logs.
+
+It is so clean that I have to ask.
+
+I message my tech lead: "Did the squad state just... not land?"
+
+The answer is matter-of-fact: "It landed. It is just not in your branch diff. Contoso's engineering team set the org squad to use an orphan-branch backend when they registered the call-sign. All the mutable state—decisions, histories, session logs—lives on a separate git branch that is invisible to your working branch and your PR. The static config stays on main so reviewers can see it. The noise is just... gone."
+
+I read that twice. It hits like the assignment ledger hit this morning, except bigger.
+
+No cherry-picking. No "can you review this PR?" in parallel to the actual work PR. No policy exceptions. No coordination tax. The squad state is there. The work is clean. They are just not the same thing anymore.
+
+For a moment, I think about the cognitive load this removes. Every PR I open from here on, reviewers see only the product signal. The team decisions and squad histories are recorded, but they do not clutter the review. That is the kind of detail that compounds over time. A hundred PRs, a hundred clean diffs.
+
+My teammate continues: "Your personal squad, your team's squad, the org squad—they all live on that same hidden branch. Mutable. Distributed. Transparent to the product repos. If you set up a project in one of the ancillary repos where there is no PR review policy, you could flip it back to the default `worktree` backend if you wanted the state on your working branch. But here, where everyone reviews code, the orphan branch is the sensible default."
+
+I nod even though this is a chat window.
+
+The contrast is sharp enough that I have to sit with it for a second. This is one of those features that sounds small until you realize it removes an entire category of friction. No more git tax. No more state-separation strategy. The framework just handles it.
+
+By the time I close my laptop that evening, the whole day has sorted itself into a mental model I can actually carry.
 
 - Project Z in `Baz` is the classic case. It is just Squad, exactly the way a normal single-squad project expects it.
 - Project X in `Foo` is the collaboration case. I assign Team A's call-sign, the org call-sign reports in, and the active roster gets bigger without getting sloppy.
