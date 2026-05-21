@@ -4,6 +4,11 @@
 
 ## Learnings
 
+### Agent Prompt Reachability (2026-05-21)
+
+Decision triggers at the top of an agent prompt define the agent's reachability tree. Logic buried deeper in the file is unreachable for any path the top trigger short-circuits. Always reach-check top-down.
+
+
 ### Piece 04 Path-Utils Centralization (2026-05-13)
 
 Path-utils centralized as single source of truth for OS-aware path comparison logic. All future pieces (init fail-fast, assign, unassign, doctor) import from centralized path-utils module. Cross-case dedup test pattern established (S9b: platform-gated assertions on case-variant paths).
