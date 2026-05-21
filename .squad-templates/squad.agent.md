@@ -82,6 +82,8 @@ You reached Init Mode because the team root resolution chain above did not yield
 
 6. Create the `.squad/` directory structure (see `.squad/templates/` for format guides or use the standard structure: team.md, routing.md, ceremonies.md, decisions.md, decisions/inbox/, casting/, agents/, orchestration-log/, skills/, log/).
 
+Note: Init Mode creates `.squad/` in the current repo (which becomes TEAM_ROOT). For shared-squad consumer repos, state is written to TEAM_ROOT (not CWD) — see the spawn templates.
+
 **Casting state initialization:** Copy `.squad/templates/casting-policy.json` to `.squad/casting/policy.json` (or create from defaults). Create `registry.json` (entries: persistent_name, universe, created_at, legacy_named: false, status: "active") and `history.json` (first assignment snapshot with unique assignment_id).
 
 **Seeding:** Each agent's `history.md` starts with the project description, tech stack, and the user's name so they have day-1 context. Agent folder names are the cast name in lowercase (e.g., `.squad/agents/ripley/`). The Scribe's charter includes maintaining `decisions.md` and cross-agent context sharing.
@@ -250,7 +252,7 @@ The `name` parameter generates the human-readable agent ID shown in the tasks pa
      **Why:** User request — captured for team memory
      ```
    - **git-notes backend:** Persist via:
-     `powershell .squad/scripts/notes/write-note.ps1 -Ref "squad/directives" -Content '{"timestamp": "{timestamp}", "by": "{user name}", "what": "...", "why": "User request"}'`
+     `powershell {TEAM_ROOT}/.squad/scripts/notes/write-note.ps1 -Ref "squad/directives" -Content '{"timestamp": "{timestamp}", "by": "{user name}", "what": "...", "why": "User request"}'`
 2. Acknowledge briefly: `"📌 Captured. {one-line summary of the directive}."`
 3. If the message ALSO contains a work request, route that work normally after capturing. If it's directive-only, you're done — no agent spawn needed.
 
@@ -367,9 +369,9 @@ prompt: |
   Do the work. Keep it focused.
   {% if STATE_BACKEND == "git-notes" %}
   If you made a meaningful decision, persist it via:
-  `powershell .squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{"decision": {"title": "...", "what": "...", "why": "..."}}'`
+  `powershell {TEAM_ROOT}/.squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{"decision": {"title": "...", "what": "...", "why": "..."}}'`
   {% else %}
-  If you made a meaningful decision, write to .squad/decisions/inbox/{name}-{brief-slug}.md
+  If you made a meaningful decision, write to {TEAM_ROOT}/.squad/decisions/inbox/{name}-{brief-slug}.md
   {% endif %}
 
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
@@ -824,16 +826,16 @@ prompt: |
   Static config (charters, team.md, routing.md) is on disk as normal — read those with `view`.
   
   **Reading your state:**
-  Run: `powershell .squad/scripts/notes/fetch.ps1 -Setup` (first time per session)
+  Run: `powershell {TEAM_ROOT}/.squad/scripts/notes/fetch.ps1 -Setup` (first time per session)
   Then: `git notes --ref=squad/{name} show $(git rev-list --max-parents=0 HEAD) 2>$null`
   Falls back to empty if no note exists.
   
   **Writing state (history, decisions, learnings):**
-  Run: `powershell .squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{json}'`
+  Run: `powershell {TEAM_ROOT}/.squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{json}'`
   The helper handles JSON validation, conflict retry, and push.
   
   **Decisions:** Write decisions as JSON via your note ref. Scribe will merge them.
-  **Skills:** Skills are static config — write to `.squad/skills/` on disk as normal.
+  **Skills:** Skills are static config — write to `{TEAM_ROOT}/.squad/skills/` on disk as normal.
   {% endif %}
   
   {% if STATE_BACKEND == "orphan" %}
@@ -841,8 +843,8 @@ prompt: |
   This project uses an orphan branch (`squad-state`) for mutable state.
   Static config (charters, team.md, routing.md) is on disk as normal — read those with `view`.
   
-  **Reading state:** Read `.squad/` files on disk — they are synced from the orphan branch.
-  **Writing state:** Write to `.squad/` files on disk as normal during your session.
+  **Reading state:** Read `{TEAM_ROOT}/.squad/` files on disk — they are synced from the orphan branch.
+  **Writing state:** Write to `{TEAM_ROOT}/.squad/` files on disk as normal during your session.
   Scribe will commit your changes to the orphan branch (not the working branch) and
   ensure they persist across branch switches.
   
@@ -861,7 +863,7 @@ prompt: |
   **During your session:**
   1. Write commit-scoped annotations as git notes on HEAD:
      `git notes --ref=squad/{name} add -f -m '{"agent":"{Name}","type":"decision","decision":"...","promote_to_permanent":true}' HEAD`
-  2. Write bulk state (history, logs) to `.squad/` files on disk — Scribe moves them to the orphan branch.
+  2. Write bulk state (history, logs) to `{TEAM_ROOT}/.squad/` files on disk — Scribe moves them to the orphan branch.
   
   **Note flags:**
   - `"promote_to_permanent": true` — Ralph promotes this to decisions.md after PR merge
@@ -873,19 +875,19 @@ prompt: |
   {% endif %}
   
   {% if STATE_BACKEND == "worktree" or STATE_BACKEND is not defined %}
-  Read .squad/agents/{name}/history.md (your project knowledge).
+  Read {TEAM_ROOT}/.squad/agents/{name}/history.md (your project knowledge).
   {% endif %}
   {% if STATE_BACKEND == "git-notes" %}
   Read your agent state from git notes (see State Protocol above).
   {% endif %}
   {% if STATE_BACKEND == "orphan" or STATE_BACKEND == "two-layer" %}
-  Read .squad/agents/{name}/history.md (your project knowledge — synced from orphan branch).
+  Read {TEAM_ROOT}/.squad/agents/{name}/history.md (your project knowledge — synced from orphan branch).
   {% endif %}
-  Read .squad/decisions.md (team decisions to respect).
-  If .squad/identity/wisdom.md exists, read it before starting work.
-  If .squad/identity/now.md exists, read it at spawn time.
-  Check .copilot/skills/ for copilot-level skills (process, workflow, protocol).
-  Check .squad/skills/ for team-level skills (patterns discovered during work).
+  Read {TEAM_ROOT}/.squad/decisions.md (team decisions to respect).
+  If {TEAM_ROOT}/.squad/identity/wisdom.md exists, read it before starting work.
+  If {TEAM_ROOT}/.squad/identity/now.md exists, read it at spawn time.
+  Check {TEAM_ROOT}/.copilot/skills/ for copilot-level skills (process, workflow, protocol).
+  Check {TEAM_ROOT}/.squad/skills/ for team-level skills (patterns discovered during work).
   Read any relevant SKILL.md files before working.
   
   {only if MCP tools detected — omit entirely if none:}
@@ -906,27 +908,27 @@ prompt: |
   AFTER work:
   {% if STATE_BACKEND == "git-notes" %}
   1. Persist your learnings as JSON via the State Protocol:
-     `powershell .squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{"learnings": ["..."], "timestamp": "{current_datetime}"}'`
+     `powershell {TEAM_ROOT}/.squad/scripts/notes/write-note.ps1 -Ref "squad/{name}" -Content '{"learnings": ["..."], "timestamp": "{current_datetime}"}'`
   2. If you made a team-relevant decision, include it in the JSON:
      Add a `"decision"` field with `"title"`, `"what"`, and `"why"` keys.
      Scribe will merge decisions into the canonical decisions.md.
   {% elif STATE_BACKEND == "two-layer" %}
-  1. APPEND to .squad/agents/{name}/history.md under "## Learnings":
+  1. APPEND to {TEAM_ROOT}/.squad/agents/{name}/history.md under "## Learnings":
      architecture decisions, patterns, user preferences, key file paths.
      (Scribe commits this to the orphan branch.)
   2. If you made a team-relevant decision, write BOTH:
      a. A git note on HEAD with promote flag:
         `git notes --ref=squad/{name} add -f -m '{"agent":"{Name}","type":"decision","decision":"...","promote_to_permanent":true}' HEAD`
-     b. A drop file: .squad/decisions/inbox/{name}-{brief-slug}.md
+     b. A drop file: {TEAM_ROOT}/.squad/decisions/inbox/{name}-{brief-slug}.md
         (Scribe merges to orphan branch; Ralph promotes note after PR merge.)
   {% else %}
-  1. APPEND to .squad/agents/{name}/history.md under "## Learnings":
+  1. APPEND to {TEAM_ROOT}/.squad/agents/{name}/history.md under "## Learnings":
      architecture decisions, patterns, user preferences, key file paths.
   2. If you made a team-relevant decision, write to:
-     .squad/decisions/inbox/{name}-{brief-slug}.md
+     {TEAM_ROOT}/.squad/decisions/inbox/{name}-{brief-slug}.md
   {% endif %}
   3. SKILL EXTRACTION: If you found a reusable pattern, write/update
-     .squad/skills/{skill-name}/SKILL.md (read templates/skill.md for format).
+     {TEAM_ROOT}/.squad/skills/{skill-name}/SKILL.md (read templates/skill.md for format).
   
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a 2-3 sentence plain text
   summary as your FINAL output. No tool calls after this summary.
@@ -973,51 +975,53 @@ mode: "background"
 name: "scribe"
 description: "📋 Scribe: Log session & merge decisions"
 prompt: |
-  You are the Scribe. Read .squad/agents/scribe/charter.md.
+  You are the Scribe.
   TEAM ROOT: {team_root}
   CURRENT_DATETIME: {current_datetime}
   STATE_BACKEND: {state_backend}
+  SQUAD_DIR: {TEAM_ROOT}/.squad
+  All file operations below use paths relative to SQUAD_DIR unless explicitly marked as git-root-relative.
+  Read {SQUAD_DIR}/agents/scribe/charter.md.
 
   SPAWN MANIFEST: {spawn_manifest}
 
   Tasks (in order):
   {% if STATE_BACKEND == "orphan" or STATE_BACKEND == "git-notes" or STATE_BACKEND == "two-layer" %}
   0. PRE-CHECK — STATE LEAK GUARD: Check if any agent accidentally committed or staged state files
-     (.squad/decisions.md, agents/*/history.md, log/*, orchestration-log/*, decisions/inbox/*)
-     to the working branch. If found: unstage with `git reset HEAD -- {file}`, restore with
-     `git checkout HEAD -- {file}`. If leaked in last commit, amend to remove. Log count.
+     ({SQUAD_DIR}/decisions.md, {SQUAD_DIR}/agents/*/history.md, {SQUAD_DIR}/log/*, {SQUAD_DIR}/orchestration-log/*, {SQUAD_DIR}/decisions/inbox/*)
+     to the working branch. If found: unstage with `git reset HEAD -- <git-root-relative-path>`, restore with
+     `git checkout HEAD -- <git-root-relative-path>`. If leaked in last commit, amend to remove. Log count.
   {% endif %}
-  0b. PRE-CHECK: Stat decisions.md size and count inbox/ files. Record measurements.
-  1. DECISIONS ARCHIVE [HARD GATE]: If decisions.md >= 20480 bytes, archive entries older than 30 days NOW. If >= 51200 bytes, archive entries older than 7 days. Do not skip this step.
+  0b. PRE-CHECK: Stat {SQUAD_DIR}/decisions.md size and count {SQUAD_DIR}/decisions/inbox/ files. Record measurements.
+  1. DECISIONS ARCHIVE [HARD GATE]: If {SQUAD_DIR}/decisions.md >= 20480 bytes, archive entries older than 30 days NOW. If >= 51200 bytes, archive entries older than 7 days. Do not skip this step.
   {% if STATE_BACKEND == "git-notes" %}
-  2. DECISION MERGE (git-notes): For each agent ref `squad/{agent}`, read notes via `git notes --ref=squad/{agent} show $(git rev-list --max-parents=0 HEAD)`. Extract any `decision` entries. Merge into decisions.md. Clear the decision field by overwriting the note without it.
+  2. DECISION MERGE (git-notes): For each agent ref `squad/{agent}`, read notes via `git notes --ref=squad/{agent} show $(git rev-list --max-parents=0 HEAD)`. Extract any `decision` entries. Merge into {SQUAD_DIR}/decisions.md. Clear the decision field by overwriting the note without it.
   {% elif STATE_BACKEND == "two-layer" %}
-  2. DECISION MERGE (two-layer): Merge .squad/decisions/inbox/ → decisions.md AND read agent note refs for any decisions with `promote_to_permanent`. Deduplicate. Push note refs: `git push origin 'refs/notes/squad/*'`
+  2. DECISION MERGE (two-layer): Merge {SQUAD_DIR}/decisions/inbox/ → {SQUAD_DIR}/decisions.md AND read agent note refs for any decisions with `promote_to_permanent`. Deduplicate. Push note refs: `git push origin 'refs/notes/squad/*'`
   {% else %}
-  2. DECISION INBOX: Merge .squad/decisions/inbox/ → decisions.md, delete inbox files. Deduplicate.
+  2. DECISION INBOX: Merge {SQUAD_DIR}/decisions/inbox/ → {SQUAD_DIR}/decisions.md, delete inbox files. Deduplicate.
   {% endif %}
-  3. ORCHESTRATION LOG: Write .squad/orchestration-log/{timestamp}-{agent}.md per agent. Use ISO 8601 UTC timestamp.
-  4. SESSION LOG: Write .squad/log/{timestamp}-{topic}.md. Brief. Use ISO 8601 UTC timestamp.
+  3. ORCHESTRATION LOG: Write {SQUAD_DIR}/orchestration-log/{timestamp}-{agent}.md per agent. Use ISO 8601 UTC timestamp.
+  4. SESSION LOG: Write {SQUAD_DIR}/log/{timestamp}-{topic}.md. Brief. Use ISO 8601 UTC timestamp.
   {% if STATE_BACKEND == "git-notes" %}
-  5. CROSS-AGENT (git-notes): For team updates, write to affected agents' note refs via `powershell .squad/scripts/notes/write-note.ps1 -Ref "squad/{agent}" -Content '{json}'`.
+  5. CROSS-AGENT (git-notes): For team updates, write to affected agents' note refs via `powershell {SQUAD_DIR}/scripts/notes/write-note.ps1 -Ref "squad/{agent}" -Content '{json}'`.
   {% else %}
-  5. CROSS-AGENT: Append team updates to affected agents' history.md.
+  5. CROSS-AGENT: Append team updates to {SQUAD_DIR}/agents/{agent}/history.md.
   {% endif %}
-  6. HISTORY SUMMARIZATION [HARD GATE]: If any history.md >= 15360 bytes (15KB), summarize now.
+  6. HISTORY SUMMARIZATION [HARD GATE]: If any {SQUAD_DIR}/agents/{agent}/history.md >= 15360 bytes (15KB), summarize now.
   {% if STATE_BACKEND == "orphan" or STATE_BACKEND == "two-layer" %}
-  7. GIT COMMIT (orphan): Stage `.squad/` state files and commit to the `squad-state` orphan branch:
-     a. Identify changed `.squad/` state files via `git status --porcelain` (decisions.md, agents/*/history.md, log/*, orchestration-log/*).
-     b. For each file, use git plumbing to write to the orphan branch:
-        `git show squad-state:.squad/{path}` to check if file exists on orphan.
-        Use `git checkout squad-state -- .squad/{path}` + write + `git add` + `git commit` workflow, OR
-        use the SDK's OrphanBranchBackend if available.
-     c. Reset working tree state files: `git checkout HEAD -- .squad/` to avoid polluting the working branch.
+  7. GIT COMMIT (orphan): Stage state files from {SQUAD_DIR} and commit to the `squad-state` orphan branch.
+     a. Identify changed state files under {SQUAD_DIR} via `git status --porcelain` filtered to git-root-relative paths (`.squad/decisions.md`, `.squad/agents/*/history.md`, `.squad/log/*`, `.squad/orchestration-log/*`).
+     b. For each git-root-relative path, use git plumbing to write to the orphan branch:
+        `git show squad-state:.squad/{path-relative-to-squad-dir}` to check if file exists on orphan.
+        Use `git checkout squad-state -- .squad/{path-relative-to-squad-dir}` + write + `git add -- .squad/{path-relative-to-squad-dir}` + `git commit` workflow, OR use the SDK's OrphanBranchBackend if available.
+     c. Reset working tree state files with `git checkout HEAD -- .squad/` to avoid polluting the working branch.
      d. Push orphan branch: `git push origin squad-state`
      ⚠️ NEVER commit `.squad/` state files to the working branch when using orphan backend.
   {% else %}
-  7. GIT COMMIT: Stage only the exact `.squad/` files Scribe wrote in this session. Use `git status --porcelain` filtered to allowed paths (decisions.md, decisions-archive.md, agents/{name}/history.md, agents/{name}/history-archive.md, log/*, orchestration-log/*). Stage each file individually with `git add -- <path>`. Handle renames by extracting destination path (`-replace '^.* -> ',''`). Commit with -F (write msg to temp file). Skip if nothing staged. ⚠️ NEVER use `git add .squad/` or broad globs.
+  7. GIT COMMIT: Stage only the exact files Scribe wrote under {SQUAD_DIR}. Use `git status --porcelain` filtered to allowed git-root-relative paths (`.squad/decisions.md`, `.squad/decisions-archive.md`, `.squad/agents/{name}/history.md`, `.squad/agents/{name}/history-archive.md`, `.squad/log/*`, `.squad/orchestration-log/*`). Stage each file individually with `git add -- <git-root-relative-path>`. Handle renames by extracting destination path (`-replace '^.* -> ',''`). Commit with -F (write msg to temp file). Skip if nothing staged. ⚠️ NEVER use `git add .squad/` or broad globs.
   {% endif %}
-  8. HEALTH REPORT: Log decisions.md before/after size, inbox count processed, history files summarized.
+  8. HEALTH REPORT: Log {SQUAD_DIR}/decisions.md before/after size, inbox count processed, history files summarized.
 
   Never speak to user. ⚠️ End with plain text summary after all tool calls.
 ```

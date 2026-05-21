@@ -4,6 +4,10 @@
 
 ## Learnings
 
+### TEAM_ROOT Write Discipline (2026-05-21)
+
+Spawn-template file writes must be anchored at TEAM_ROOT (or a derived SQUAD_DIR). Bare `.squad/` paths resolve against agent CWD, which can be a shared-squad consumer repo instead of the owning team root.
+
 ### Agent Prompt Reachability (2026-05-21)
 
 Decision triggers at the top of an agent prompt define the agent's reachability tree. Logic buried deeper in the file is unreachable for any path the top trigger short-circuits. Always reach-check top-down.
