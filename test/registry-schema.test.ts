@@ -266,6 +266,34 @@ describe('upsertEntry()', () => {
     };
     expect(upsertEntry(entry)).toEqual(entry);
   });
+
+  it('UE.5 normalizes and deduplicates origins and clones while preserving first occurrence order', () => {
+    const entry = {
+      path: path.join(dir, 'alpha.squad'),
+      origins: [
+        'https://github.com/example/repo.git',
+        'git@github.com:example/repo.git',
+        'https://github.com/example/other.git',
+      ],
+      clones: [
+        path.join(dir, 'clone-a'),
+        path.join(dir, '.', 'clone-a'),
+        path.join(dir, 'clone-b'),
+      ],
+    };
+
+    expect(upsertEntry(entry)).toEqual({
+      ...entry,
+      origins: [
+        'https://github.com/example/repo.git',
+        'https://github.com/example/other.git',
+      ],
+      clones: [
+        path.join(dir, 'clone-a'),
+        path.join(dir, 'clone-b'),
+      ],
+    });
+  });
 });
 
 describe('registerEntry() backward-compatibility alias', () => {

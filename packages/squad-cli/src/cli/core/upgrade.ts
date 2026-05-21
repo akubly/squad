@@ -5,6 +5,7 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import { success, warn, info, dim, bold } from './output.js';
@@ -14,6 +15,7 @@ import { TEMPLATE_MANIFEST, getTemplatesDir } from './templates.js';
 import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
+import { installCoordinatorAgent } from '../../commands/assign.js';
 
 const storage = new FSStorageProvider();
 
@@ -34,6 +36,8 @@ export interface UpgradeOptions {
   migrateDirectory?: boolean;
   self?: boolean;
   force?: boolean;
+  /** Override the user home used for global coordinator sync (test seam). */
+  homeDir?: string;
   /** When --self, install the insider (prerelease) tag instead of latest. */
   insider?: boolean;
 }
@@ -594,6 +598,10 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     
     // Run infrastructure ensure checks even when already current
     runEnsureChecks(dest, templatesDir, filesUpdated);
+
+    if (installCoordinatorAgent(options.homeDir ?? os.homedir(), { requireExisting: true })) {
+      console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
+    }
     
     return {
       fromVersion: oldVersion,
@@ -680,6 +688,10 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   
   // Run infrastructure ensure checks
   runEnsureChecks(dest, templatesDir, filesUpdated);
+
+  if (installCoordinatorAgent(options.homeDir ?? os.homedir(), { requireExisting: true })) {
+    console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
+  }
   
   console.log();
   info(`Upgrade complete: v${fromLabel} → v${cliVersion}`);

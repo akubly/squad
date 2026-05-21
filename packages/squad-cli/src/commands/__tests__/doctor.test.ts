@@ -314,6 +314,32 @@ describe('runDoctor: registry health warnings', () => {
     });
     expect(result.severity).toBe('warn');
   });
+
+  it('W11 warns when consumer repo has a misplaced leaked .squad directory', async () => {
+    const consumerRepo = makeDir('consumer-repo');
+    fs.mkdirSync(path.join(consumerRepo, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(consumerRepo, '.squad', 'decisions.md'), '# leaked\n');
+
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: path.join(hostDir, '.squad'),
+      origins: [],
+      clones: [consumerRepo],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({
+      cwd: consumerRepo,
+      registryPath,
+      env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
+    });
+
+    expect(result.severity).toBe('warn');
+    expect(result.findings).toContain(
+      `⚠️ Found .squad/ in consumer repo ${consumerRepo} — this was likely created by a CWD write leak bug. The real squad is at ${hostDir}. Run 'rm -rf .squad/' in this directory to clean up.`,
+    );
+  });
 });
 
 // ============================================================

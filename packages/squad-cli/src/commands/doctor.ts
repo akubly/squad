@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { clonesMatch, isValidCallsign, normalisedPathKey, normalizeRemoteUrl } from '@bradygaster/squad-sdk';
+import { clonesMatch, isValidCallsign, normalisedPathKey, normalizeRemoteUrl, resolveSquad } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
@@ -190,6 +190,26 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
   } else if (cwdCloneMatches.length > 1) {
     findings.push(
       `Ambiguous: ${cwdCloneMatches.length} registry entries match the current directory as a clone.`,
+    );
+    escalate('warn');
+  }
+
+  let resolvedTeamRoot: string | null = null;
+  if (cwdCloneMatches.length === 1) {
+    resolvedTeamRoot = path.dirname(cwdCloneMatches[0]!.path);
+  } else if (originMatches.length === 1) {
+    resolvedTeamRoot = path.dirname(originMatches[0]!.path);
+  } else {
+    const resolved = resolveSquad({ cwd, env, registryPath: registryFilePath ?? undefined });
+    if (resolved && resolved.source !== 'local') {
+      resolvedTeamRoot = path.dirname(resolved.path);
+    }
+  }
+
+  if (hasLocalSquad && resolvedTeamRoot && normalisedPathKey(resolvedTeamRoot) !== cwdNormalised) {
+    findings.push(
+      `⚠️ Found .squad/ in consumer repo ${cwd} — this was likely created by a CWD write leak bug. ` +
+      `The real squad is at ${resolvedTeamRoot}. Run 'rm -rf .squad/' in this directory to clean up.`,
     );
     escalate('warn');
   }

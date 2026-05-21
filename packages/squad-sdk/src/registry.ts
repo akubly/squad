@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { ErrorCategory, ErrorSeverity, SquadError } from './adapter/errors.js';
 import { resolveSquadHome } from './resolution.js';
 import { normalisedPathKey } from './path-utils.js';
+import { normalizeRemoteUrl } from './platform/detect.js';
 
 export interface RegistryEntry {
   callsign?: string;
@@ -213,6 +214,24 @@ export function upsertEntry(entry: RegistryEntry, opts: { onWarn?: (msg: string)
   const validated = validateEntry(entry, 0);
   if (!fs.existsSync(validated.path)) {
     opts.onWarn?.(`Registry entry path does not exist: ${validated.path}`);
+  }
+  if (validated.origins) {
+    const seenOrigins = new Set<string>();
+    validated.origins = validated.origins.filter((origin) => {
+      const key = normalizeRemoteUrl(origin);
+      if (seenOrigins.has(key)) return false;
+      seenOrigins.add(key);
+      return true;
+    });
+  }
+  if (validated.clones) {
+    const seenClones = new Set<string>();
+    validated.clones = validated.clones.filter((clonePath) => {
+      const key = normalisedPathKey(clonePath);
+      if (seenClones.has(key)) return false;
+      seenClones.add(key);
+      return true;
+    });
   }
   return validated;
 }

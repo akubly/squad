@@ -22,7 +22,7 @@ import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getTemplatesDir } from '../cli/core/templates.js';
-import { getPackageVersion, stampVersion } from '../cli/core/version.js';
+import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 
@@ -153,14 +153,15 @@ export async function runAssignToCopilot(opts: RunAssignOpts): Promise<void> {
   // Install coordinator agent (best-effort, does not affect assignment outcome).
   if (!opts.noInstallAgent) {
     const home = opts.home ?? os.homedir();
-    _installCoordinatorAgent(home);
+    installCoordinatorAgent(home);
   }
 }
 
 /**
  * Best-effort coordinator agent install. Silently warns on failure.
+ * Returns true only when the target file was written.
  */
-function _installCoordinatorAgent(home: string): void {
+export function installCoordinatorAgent(home: string, opts: { requireExisting?: boolean } = {}): boolean {
   const targetDir = path.join(home, '.copilot', 'agents');
   const targetPath = path.join(targetDir, 'squad.agent.md');
   try {
@@ -168,18 +169,30 @@ function _installCoordinatorAgent(home: string): void {
     const primaryCandidate = path.join(resolvedTemplatesDir, 'squad.agent.md');
     const fallbackCandidate = path.join(resolvedTemplatesDir, 'squad.agent.md.template');
     const templatePath = fs.existsSync(primaryCandidate) ? primaryCandidate : fallbackCandidate;
-    if (!fs.existsSync(templatePath)) return;
-    fs.mkdirSync(targetDir, { recursive: true });
+    if (!fs.existsSync(templatePath)) return false;
+    if (opts.requireExisting && !fs.existsSync(targetPath)) return false;
+
+    const stampedContent = applyVersionStamp(fs.readFileSync(templatePath, 'utf8'), getPackageVersion());
+    let shouldWrite = true;
     try {
       const stat = fs.lstatSync(targetPath);
-      if (stat.isSymbolicLink()) fs.unlinkSync(targetPath);
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(targetPath);
+      } else {
+        const existingContent = fs.readFileSync(targetPath, 'utf8');
+        shouldWrite = existingContent !== stampedContent;
+      }
     } catch (e: unknown) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     }
-    fs.copyFileSync(templatePath, targetPath);
-    stampVersion(targetPath, getPackageVersion());
+
+    if (!shouldWrite) return false;
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(targetPath, stampedContent, 'utf8');
+    return true;
   } catch (e: unknown) {
     console.warn(`⚠️  Could not install coordinator agent at ${targetPath}: ${(e as Error).message}`);
+    return false;
   }
 }
 

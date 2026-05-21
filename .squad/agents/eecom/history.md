@@ -39,6 +39,18 @@ Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routi
 
 ## Learnings
 
+### Writer/reader path divergence: always route both through a single helper
+
+When a CLI writer and SDK reader compute the same "default" path independently, they will eventually drift (e.g., platform-specific APPDATA logic on one side vs `~/.squad` on the other). The fix pattern: extract a `defaultRegistryFilePath(homeDir?, env?)` helper in the SDK, export it, and have both call it. Never let writer and reader compute their own independent defaults.
+
+### Stash-and-verify gate for path-fix tests
+
+After adding path-parity regression tests (RRP.5, RRP.6), the stash gate confirms they fail when the old code is restored. Without it you cannot distinguish "test that always passes" from "test that actually guards the fix." Procedure: stash the changed file, run targeted tests (expect FAIL), pop stash, run again (expect PASS).
+
+### Sub-directory temp paths escape to repo root during walk-up
+
+End-to-end tests using `os.tmpdir()` subdirs sometimes create paths that are children of the repo root on CI machines where TEMP is inside the workspace. Add a `.git` marker at the temp root to serve as a boundary for `gitRoot` walk-up, preventing the real `.squad/` from contaminating resolution tests.
+
 ### Phase B verify-first sub-proposals are real
 
 When prior pieces already shipped the surface, the correct disposition is 'verified-already-green' with concrete test ID citations — not re-implementation. Sub-proposals that find the surface already in place should be marked verified and closed with a reference, not treated as unimplemented gaps.
@@ -50,6 +62,10 @@ When prior pieces already shipped the surface, the correct disposition is 'verif
 ### Scope hygiene: a feature commit MUST exclude .github/agents/squad.agent.md unless that file is actually being changed for the piece
 
 The squad agent discovery file is governance infrastructure, maintained separately. If a piece does not explicitly modify it per spec, do not include it in the code commit. The Coordinator will remove it during cleanup.
+
+### Upgrade logic must refresh every installed copy of a managed artifact
+
+If a command owns both an in-repo mirror and a user-scoped install of the same template, upgrade cannot stop at the repo copy. Reuse the same installer helper for upgrade-time refresh, gate it on the global artifact already existing, and add a regression test that seeds the installed copy with stale bytes so consumer repos do not stay pinned forever.
 
 ## Known Issues
 

@@ -7,13 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'fs';
-import { tmpdir } from 'os';
+import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { runInit } from '@bradygaster/squad-cli/core/init';
 import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli } from '@bradygaster/squad-cli/core/upgrade';
 import { getPackageVersion } from '@bradygaster/squad-cli/core/version';
 
-const TEST_ROOT = join(tmpdir(), `.test-cli-upgrade-${randomBytes(4).toString('hex')}`);
+const TEST_ROOT = join(os.tmpdir(), `.test-cli-upgrade-${randomBytes(4).toString('hex')}`);
 
 describe('CLI: upgrade command', () => {
   beforeEach(async () => {
@@ -27,6 +27,7 @@ describe('CLI: upgrade command', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (existsSync(TEST_ROOT)) {
       await rm(TEST_ROOT, { recursive: true, force: true });
     }
@@ -75,6 +76,24 @@ describe('CLI: upgrade command', () => {
     expect(result.toVersion).toBe(getPackageVersion());
     expect(result.filesUpdated).toContain('squad.agent.md');
     expect(Array.isArray(result.migrationsRun)).toBe(true);
+  });
+
+  it('updates an existing global coordinator agent install during upgrade', async () => {
+    const homeDir = join(TEST_ROOT, 'home');
+    const globalAgentPath = join(homeDir, '.copilot', 'agents', 'squad.agent.md');
+    const repoAgentPath = join(TEST_ROOT, '.github', 'agents', 'squad.agent.md');
+
+    await mkdir(join(homeDir, '.copilot', 'agents'), { recursive: true });
+    await writeFile(globalAgentPath, '<!-- version: 0.1.0 -->\nold global agent\n');
+
+    const result = await runUpgrade(TEST_ROOT, { homeDir });
+
+    expect(result.filesUpdated).toContain('squad.agent.md');
+    const globalAgent = await readFile(globalAgentPath, 'utf-8');
+    const repoAgent = await readFile(repoAgentPath, 'utf-8');
+    expect(globalAgent).toBe(repoAgent);
+    expect(globalAgent).toContain(`<!-- version: ${getPackageVersion()} -->`);
+    expect(globalAgent).not.toContain('old global agent');
   });
 
   it('should overwrite squad-owned template files', async () => {

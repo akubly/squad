@@ -29,18 +29,23 @@ export function getPackageVersion(): string {
   return '0.0.0';
 }
 
+export function applyVersionStamp(content: string, version: string): string {
+  let stamped = content;
+  // Replace version in HTML comment (must come immediately after frontmatter closing ---)
+  stamped = stamped.replace(/<!-- version: [^>]+ -->/m, `<!-- version: ${version} -->`);
+  // Replace version in the Identity section's Version line
+  stamped = stamped.replace(/- \*\*Version:\*\* [0-9.]+(?:-[a-z]+(?:\.\d+)?)?/m, `- **Version:** ${version}`);
+  // Replace {version} placeholder in the greeting instruction so it's unambiguous
+  stamped = stamped.replace(/`Squad v\{version\}`/g, `\`Squad v${version}\``);
+  return stamped;
+}
+
 /**
  * Stamp version into squad.agent.md after copying
  */
 export function stampVersion(filePath: string, version: string): void {
-  let content = storage.readSync(filePath) ?? '';
-  // Replace version in HTML comment (must come immediately after frontmatter closing ---)
-  content = content.replace(/<!-- version: [^>]+ -->/m, `<!-- version: ${version} -->`);
-  // Replace version in the Identity section's Version line
-  content = content.replace(/- \*\*Version:\*\* [0-9.]+(?:-[a-z]+(?:\.\d+)?)?/m, `- **Version:** ${version}`);
-  // Replace {version} placeholder in the greeting instruction so it's unambiguous
-  content = content.replace(/`Squad v\{version\}`/g, `\`Squad v${version}\``);
-  storage.writeSync(filePath, content);
+  const content = storage.readSync(filePath) ?? '';
+  storage.writeSync(filePath, applyVersionStamp(content, version));
 }
 
 /**
