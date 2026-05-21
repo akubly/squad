@@ -8,6 +8,7 @@ Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, f
 
 ## Learnings
 
+- 2026-05-17T23:55:49-07:00 — Casey v2 narrative drafted in `.squad/decisions/inbox/pao-multisquad-day-in-life-casey-v2.md`; restores the punchier first-person voice while centering call-signs, assignment, active roster, org-constrains/team-executes collaboration, and zero-impact single-squad behavior.
 - 2026-05-17T13:10:07-07:00 — Final Casey v1.1 narrative drafted in `.squad/decisions/inbox/pao-multisquad-day-in-life-casey-final.md`; centers the third-path world, pluggable binding locations, explanation payloads, and explicit personal-only mode.
 
 ### Casey via Rally day-in-life variant (2026-05-15T23:45:52-07:00)

@@ -245,3 +245,5 @@ Also updated: examples section (showing `name` + `description` pairs), anti-patt
 
 
 📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.
+
+- **2026-05-17T22:41:30-07:00 — Multi-squad vocabulary exploration:** Compared technical, Mission Control, and law-enforcement vocabularies; recommended Squad-native terms centered on **call-sign**, **assign/assignment**, and **active roster**, while keeping **org / team / personal** plain and treating multi-squad vocabulary as additive-only.

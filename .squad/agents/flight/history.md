@@ -40,6 +40,8 @@ Treat `tamirdresher/squad` as **incubation lane**, not alternate trunk. Fork con
 
 ---
 
+📌 **Team update (2026-05-20T17:28:32Z — Multi-Squad Proposal Landing):** Flight led 4-turn proposal refinement (Flight-10–13) culminating in landed multi-squad management design. Proposal document finalized at `.squad/decisions/multisquad-design/flight-multisquad-proposal.md` with 6 user directives (identity, self-contained docs, zero-impact P0, rally exclusion, CLI stability, chain-of-command layering). 4 inbox decision files merged to decisions.md; 3 stale entries (>30 days) archived. decisions.md reduced 34.3KB→15.8KB via Tier 1 archive gate. Authoritative artifact ready for implementation phase. All prior versioned artifacts preserved in design-trail archive for historical context.
+
 📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution Complete):**Post-CLI crash recovery executed in 3 rounds. Round 1: Flight audited PR/issue state (found #617 merged, #619 conflicting, 3 dupes #605/#604/#602 open); FIDO verified baseline (5,038 tests ✅ green); Scribe merged stale inbox. Round 2: Flight closed 3 duplicate PRs with rationale; Procedures rebased PR #619 (model catalog) onto dev, resolved 3 merge conflicts, merged; FIDO reviewed 9 community PRs—approved 3 (#625/#603/#608), requested changes on 6 (package naming, file paths). Round 3: Coordinator merged 3 approved PRs. **10 PRs merged total** (6 merge-plan, 3 community, 1 legacy #592). **3 PRs closed** as duplicates. **6 PRs awaiting author revisions**. **Dev branch green** (5,038 tests). All merge-plan sequence complete. Draft #567 parked pending requirements. Decision inbox merged to decisions.md and deleted. Next: Monitor change-request PRs for author responses.
 
 📌 **Team update (2026-03-25T15:23Z — Triage Session & PR Review):** Flight triaged 14 untriaged GitHub issues, created prioritized work session plan. Identified high-value quick wins (P1): #610 (docs broken link, 5-min fix), #590 (getPersonalSquadRoot bug, P0), #591 (hiring wiring docs). Deferred community feature contributions (#601–#595) pending PR review. Categorized maintenance (P2) and questions for community. FIDO reviewed 10 open PRs, identified 3 duplicate/overlap pairs (6 PRs consolidate to 4: merge #607/#603/#606, close #605/#604/#602). Work session priority: #610→PAO, #590→EECOM, #592/#611→Flight review, #588→Procedures. Established PR review strategy: Tamir PRs require proposal-first discipline before review. Merge-ready identified: #611 (blocked on #610), #592 (joniba wiring guide, high-quality). A2A protocol PRs remain shelved. All 14 issues fully categorized with squad assignments. Decision inbox merged to decisions.md. Session complete; team ready for execution.
@@ -235,6 +237,22 @@ Decision written to `.squad/decisions/inbox/flight-release-hardening-plan.md`.
 Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 
 ## Learnings
+
+### Multisquad proposal refinement pass — muster + ambient personal squads (2026-05-18T14:40:48-07:00)
+- Tightened `.squad/decisions/inbox/flight-multisquad-proposal.md` so **assign**, **muster**, and **report in** stay distinct, with `muster` now naming session-start squad loading.
+- Extended the proposal’s personal-squad story with ambient discovery from squad home, manifest-declared scope, ledger force/suppress overrides, preserved `SQUAD_NO_PERSONAL` + Ghost Protocol behavior, and an explicit Phase 1/Phase 2 split for one-vs-many personal squads.
+
+### Proposal polish pass for Aaron (2026-05-18T14:12:55-07:00)
+- Polished `.squad/decisions/inbox/flight-multisquad-proposal.md` in place: added a Squad primer, tightened call-sign vs squad vocabulary, grounded the story in Contoso repos, restored Casey’s personal ancillary repo beat, and standardized `squad root` terminology.
+
+### Self-contained multi-squad proposal rewrite (2026-05-18T00:03:16-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-proposal.md` as the authoritative self-contained proposal and functional specification for multi-squad management.
+- Defined Squad-native vocabulary up front, integrated Casey's first-day narrative into Part I, centered the collaboration model on active-roster participation, and kept the SDK comparison primitive intentionally thin.
+
+### Multi-squad collaboration model replacement (2026-05-17T22:41:30-07:00)
+- Wrote `.squad/decisions/inbox/flight-multisquad-collaboration-model.md` to replace the fallback framing with a collaboration model: union roster, jurisdiction-based routing, one session Scribe, per-squad decision ownership, and shared session logs.
+- Downscoped drift/re-entry to a small SDK comparison primitive instead of a large upstream invariant surface.
+
 
 ### Proposal v1.2 revision — Casey narrative integration (2026-05-17T13:10:07-07:00)
 - v1.2 of multisquad proposal — integrated PAO's finalized Casey narrative as Part I User Story.

@@ -388,3 +388,7 @@ Wrote `.squad/decisions/inbox/eecom-multisquad-reuse-audit.md`. Recommendation: 
 
 
 📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.
+
+### Drift / re-entry disposition breadcrumb (2026-05-17T22:41:30-07:00)
+
+Wrote `.squad/decisions/inbox/eecom-drift-reentry-disposition.md`. Recommendation: **downscope** drift/re-entry from an SDK invariant to a thin runtime-contract primitive—an opaque, comparable resolution fingerprint—while moving reopen-time drift detection, re-explanation, and any user-facing reaction into the consuming host or organizational layer. This preserves zero-impact for single-squad users and keeps org policy layered on top of Squad.
