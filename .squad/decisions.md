@@ -314,3 +314,85 @@ Orphan and two-layer backends are **genuinely git-native** and **don't pollute P
 ### Takeaway
 
 The state backend framework is **95% implemented and architecturally sound**. The last 5% is ecosystem support (guards, bootstrap automation, CI integration). Prioritize the ecosystem work if P0 is "state isolation must be transparent and unavoidable to developers."
+
+---
+### 2026-05-21: P0 Gap #1 — State Leak Guard: Decided
+
+**By:** Aaron (with Flight)
+**Date:** 2026-05-21
+**Status:** DECIDED — Required follow-on blocking the P0 claim
+
+---
+
+## What
+
+Option B + C combined.
+
+**Option B — Scribe pre-check hardened to block-mode:**
+Scribe's existing pre-check, which currently warns when mutable state paths are staged in a working tree while `stateBackend` is `orphan`/`two-layer`, is promoted from warn-mode to block-mode. If staged mutable state paths are detected, Scribe refuses to proceed and prints a remediation command. This lives in the spawn template and Scribe's bootstrap logic.
+
+**Option C — git pre-commit hook template:**
+Ship a real git pre-commit hook template that is auto-installed by both `squad init` and `squad assign` (see Gap #2). The hook inspects `git diff --cached --name-only` and rejects the commit if mutable state paths appear while the backend is `orphan`/`two-layer`. This is hard enforcement at the developer's workstation. `--no-verify` bypass is acknowledged as an accepted limitation; org-discretionary CI guards can cover that edge at the org's option.
+
+## Why
+
+Warn-mode pre-checks are ignored under pressure. The only reliable enforcement is a hard stop. Two enforcement layers (Scribe block + hook rejection) provide defense-in-depth appropriate for an org P0: Scribe catches session-level state flush before it reaches the index; the hook catches anything that escapes to a commit attempt. Neither layer is redundant — they operate at different points in the developer workflow.
+
+## Disposition
+
+**Required follow-on blocking the P0 claim.** Folded into the proposal at §4a ("Required follow-on work") and into §5 (non-goals: `--no-verify` bypass accepted). Neither item changes out-of-the-box single-developer behavior; both activate only when `stateBackend` is `orphan` or `two-layer`.
+
+---
+### 2026-05-21: P0 Gap #2 — Hook Bootstrap Automation: Decided
+
+**By:** Aaron (with Flight)
+**Date:** 2026-05-21
+**Status:** DECIDED — Required follow-on
+
+---
+
+## What
+
+Add hook installation to `squad assign`'s completion path, mirroring the existing call site in `squad init`. Installation is idempotent — running `squad assign` multiple times must not corrupt the hooks directory or duplicate hook entries.
+
+**Narrow edge case documented:** An org that commits `squad.agent.md` directly to the repo (bypassing `squad assign`) is responsible for also committing `.githooks/` with `core.hooksPath` set. Squad cannot install hooks in that path because the activation event never fires.
+
+**CI guard demoted:** A CI-side state-diff guard is NOT shipped by the SDK. It is documented as an org-discretionary defense-in-depth option — an org may adopt it independently, but Squad does not require or enforce it.
+
+## Why
+
+Aaron's reframe: **hooks aren't a separate distribution problem.** A developer cannot use Squad without `squad.agent.md` present AND consciously selecting the squad agent in their IDE. The delivery events that activate Squad on a clone — `squad init` for a solo developer, `squad assign --callsign` for an org-managed setup — are exactly the right moments to install hooks. Treating hook installation as a separate distribution problem would mean inventing a new activation event for a thing that already has two well-defined ones. Reusing the existing delivery channel is cheaper, more reliable, and consistent with Squad's additive design principle.
+
+## Disposition
+
+**Required follow-on.** Add hook install to `squad assign`. CI guard documented as org-discretionary. Folded into the proposal at §4a ("Required follow-on work") and into §5 (non-goals: CI-side guard not SDK-shipped).
+
+---
+### 2026-05-21: P0 Gap #3 — Post-Migration Cleanup: Decided
+
+**By:** Aaron (with Flight)
+**Date:** 2026-05-21
+**Status:** DECIDED — Required follow-on
+
+---
+
+## What
+
+Option D.
+
+**`squad migrate-backend` auto-cleanup:**
+The migration command auto-removes stale on-disk state files from the working tree at migration time. It also appends appropriate `.gitignore` entries covering the mutable state paths (`decisions.md`, `agents/*/history.md`, `log/*`, `orchestration-log/*`, `decisions/inbox/*`) so the files cannot be re-added accidentally after migration.
+
+**History scrubbing — explicitly out of scope for P0:**
+Running `git filter-repo` to remove old state files from project history is NOT a built-in. The P0 bar is "PR diffs are clean going forward." Pre-migration commits that retain `.squad/` state in history are accepted, analogous to legacy `.DS_Store` commits that nobody removes from old history.
+
+**Documented recipe for compliance-paranoid orgs:**
+A documented recipe (not a command) for orgs that require history scrubbing for compliance reasons will be provided alongside the migration command docs. This covers the `git filter-repo` workflow without baking it into the SDK.
+
+## Why
+
+The goal of the P0 is clean developer PR diffs going forward — not retroactive history purity. Requiring history scrubbing as part of migration would add significant complexity, carry real risk (rewriting shared branch history is destructive and requires coordination across all contributors), and is unnecessary for the large majority of orgs. The accepted analogy: organizations that adopted Squad during its `worktree`-default era are in the same position as repos that accumulated `.DS_Store` commits before `.gitignore` was configured. The community norm is to stop the bleeding and move on, not to surgically remove every prior artifact.
+
+## Disposition
+
+**Required follow-on. Companion to Gap #2** (same activation event: `squad migrate-backend` is triggered at the same onboarding moment as `squad assign`). History scrubbing explicitly out of scope; recipe-only for compliance-paranoid orgs. Folded into the proposal at §4a ("Required follow-on work") and into §5 (non-goals: history rewriting at migration time).

@@ -1,16 +1,8 @@
-# EECOM — Project History Summary
+# EECOM — Recent Activity
 
-> Environmental, Electrical, and Consumables Manager
+> Recent work and decisions from multi-squad P0 phase. Historical activity archived in history-archive.md.
 
-## SUMMARY: Template Contamination & Sync Patterns
-
-Brady contamination fix (#977): template files (squad.agent.md, init-mode/SKILL.md) contained hardcoded "Brady" examples, causing LLMs to greet every user as "Brady" regardless of actual `git config user.name`. Fixed: replaced hardcoded "Brady" with generic `{user}` / `{name}` placeholders. Canonical sources: `.squad-templates/squad.agent.md`, `.copilot/skills/init-mode/SKILL.md`. Template sync (`node scripts/sync-templates.mjs`) propagates squad.agent.md to `.github/agents/` but NOT init-mode SKILL.md (lives in `.copilot/skills/`, not `.squad-templates/`). Required manual edits in both CLI and SDK package templates. Key distinction: only template files copied to user repos were changed; Brady references in project docs remain (legitimate project history).
-
-## SUMMARY: Cherry-Pick & Rebasing Discipline
-
-PR #942 rebase (2026-04-12): PR from tamirdresher's fork retargeted from `insider` to `dev`, causing 29 files diff when only 3 commits (4 files) were actual fix. Cherry-picked 3 fix commits onto clean branch from dev, resolved conflicts from insider-only files, dropped `escapeYamlValue` import and APM YAML generation (skill.ts doesn't exist on dev). Key lesson: expect modify/delete conflicts when cherry-picking from insider-based branch to dev. Always verify base assumptions—insider-only module imports must be dropped if source file doesn't exist on target.
-
-## SUMMARY: Loop Command Implementation
+---
 
 Loop command PR #767 (2025-07-26 & 2025-07-25) fixed 6 issues across two rounds: (1) `teamRoot` derived from `workTreeRoot` but `.squad/` may live in main checkout when running inside worktree—now derives from `detectSquadDir().path`. (2) `generateLoopFile()` hardcoded 48-line scaffold inline, duplicating `templates/loop.md`—replaced with `readFileSync` reading from templates. (3) Docs said `gh` optional but code hard-requires `gh copilot`—updated prerequisites. (4) `execFile` buffered output but never printed it—users saw no Copilot output during loop rounds. (5) `loop.md` resolved relative to `dest` but execution used `teamRoot`, creating CWD mismatch in worktree scenarios. (6) Docs said `description` defaults `""` but code uses `"Squad Loop"`.
 
@@ -27,6 +19,21 @@ Loop command PR #767 (2025-07-26 & 2025-07-25) fixed 6 issues across two rounds:
 📌 **Team update (2026-05-15T22:45:19Z — Rally Familiarization Complete & Decisions Merged):** Four-agent familiarization sprint on Rally completed. Flight analyzed Rally relationship to Squad (committable in-repo vs. non-committable external), EECOM documented technical integration (GitHub CLI host/agent split, `.worktrees/` patterns), Network analyzed distribution implications, PAO developed positioning strategy. Decisions drafted and merged to `.squad/decisions.md`: Rally Relationship, EECOM Technical Notes, Squad/Rally Positioning. Orchestration logs written (flight/eecom/network/pao). Session log created. All Rally learnings captured. Scribe archived inbox files and committed team state. Squadron ready for next cycle.
 
 ## Learnings
+
+### State Isolation Audit: State Backend P0 Claim Verification (2026-05-21)
+
+**Context:** Aaron identified P0 for multi-squad proposal: "Squad's mutable state must NOT pollute developer pull requests in organizations with PR review and branch protection. Today, devs pay a 'git tax' — manually separating squad files from product files." The multi-squad proposal claims the existing state-backend work (orphan/git-notes/two-layer backends in `.squad/config.json`) solves this transparently. Audit verified the claim end-to-end.
+
+**Findings:**
+- **95% Done:** Orphan and two-layer backends are production-ready, git-native, and don't pollute PRs if used correctly.
+- **5% Gap:** Transparency claim is overstated. Developers must explicitly choose `--state-backend orphan`, trust all code uses the backend abstraction, and manually install/maintain git hooks.
+- **Critical Missing Pieces:** (1) State Leak Guard—pre-commit validation to catch direct FS writes to mutable state when backend is orphan/two-layer. (2) Hook Bootstrap Automation—automatic installation on new clones and CI runners. (3) Post-Migration Cleanup—guidance to remove stale on-disk state after backend migration.
+
+**Deliverables:** Decision drop file: `.squad/decisions/inbox/eecom-transparent-state-isolation-audit.md` with full inventory, gap analysis (5 gaps mapped to priorities), risk callouts, and recommendations for Flight's proposal integration.
+
+**Key Takeaway:** State backend framework is architecturally sound. Priority work is ecosystem support (Scribe pre-commit guards, hook automation, CI recipes) to make transparency truly unavoidable.
+
+---
 
 ### Template Brady contamination fix (#977) (2026-05-01)
 
@@ -349,7 +356,8 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 5. `resolution.test.ts` - Added 3 tests.
 
 **Pattern:** `resolveGlobalSquadPath()` returns the container; `ensurePersonalSquadDir()` creates the subdirectory the rest of the system looks for.
-📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
+📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like 
+esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
 
 ### Rally familiarization (2026-05-15T22:45:19-07:00)
 
@@ -392,3 +400,16 @@ Wrote `.squad/decisions/inbox/eecom-multisquad-reuse-audit.md`. Recommendation: 
 ### Drift / re-entry disposition breadcrumb (2026-05-17T22:41:30-07:00)
 
 Wrote `.squad/decisions/inbox/eecom-drift-reentry-disposition.md`. Recommendation: **downscope** drift/re-entry from an SDK invariant to a thin runtime-contract primitive—an opaque, comparable resolution fingerprint—while moving reopen-time drift detection, re-explanation, and any user-facing reaction into the consuming host or organizational layer. This preserves zero-impact for single-squad users and keeps org policy layered on top of Squad.
+
+### P0 Gap Dispositions Finalized — 2026-05-21T13:30
+
+🎯 **Decision** — Three critical gaps in transparent state isolation analyzed and decided as required follow-on work:
+- Gap #1 (State Leak Guard): Options B + C combined (Scribe pre-check block-mode + git hook template)
+- Gap #2 (Hook Bootstrap): Hooks ride with \squad init\ and \squad assign\ (reuse existing activation events)
+- Gap #3 (Post-Migration Cleanup): Auto-remove stale files + append .gitignore; history scrubbing recipe-only
+
+All three decisions folded into authoritative proposal at \.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec.md\ (§4a subsections + §5 non-goals).
+
+📋 **Artifacts:** Merged into \.squad/decisions.md\ (3 dated entries); orchestration logs written; session log: \.squad/log/2026-05-21-p0-gap-dispositions.md\
+
+Next: Implementation phase planning to incorporate three gaps as required follow-on blocking P0 claim.

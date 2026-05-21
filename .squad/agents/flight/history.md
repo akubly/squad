@@ -1,44 +1,26 @@
-# Flight — Project History Summary
+# Flight — Recent Activity
 
-> Knowledge accumulated through leading Squad development.
+> Recent work and decisions from multi-squad P0 phase. Historical activity archived in history-archive.md.
 
-## SUMMARY: Casting & Team Identity
-
-Apollo 13 team model (names drawn from NASA Mission Control). Scribe always Scribe, Ralph always Ralph. Three-branch model: main/dev/insiders. Test name-agnosticism enforced (framework tests must never depend on agent names). Two-error lockout policy prevents cascading failures.
-
-## SUMMARY: Rally Integration Boundary
-
-Rally is standalone CLI for git-worktree dispatch to GitHub issues/PRs (non-committable `.squad/` scenario). Responsibility split: Squad owns team identity/prompts/governance/runtime semantics/agent contract. Rally owns onboarding/worktrees/issue dispatch/session tracking/dashboard/trust/sandboxing. Product pattern: Rally treats terminal UX first-class (Ink/React dashboard for TTY, plain-text for non-TTY, docs from E2E tests). Boundary to preserve: Squad = committable in-repo, Rally = complementary external path. If Squad expands into Rally-style orchestration, must be explicit decision.
-
-## SUMMARY: Release Governance & Incident Response
-
-Surgeon owns all publishing (not Coordinator). Strict playbook adherence. Document problems for recurrence prevention. CI/CD top priority. Written playbooks for everything. No improvisation. Issue filing pattern: 9+ issues per major incident (one per root cause + action item). Accelerates fixes, creates accountability.
-
-## SUMMARY: Adoption & Content Boundaries
-
-Three-tier opt-in system: Tier 1 (aggregate-only, `.github/adoption/`) ships first, Tier 2 (opt-in registry) designs next, Tier 3 (public showcase) launches at ≥5 opt-in projects. `.squad/` for team state only; never list individual repos without consent. "Squad Ships It" litmus test: if Squad doesn't ship the code/config, it's IRL content. Content triage skill codifies boundary review pattern.
-
-## SUMMARY: Remote Squad Access Rollout
-
-Phase 1: GitHub Discussions bot with `/squad` command (1 day, zero hosting). Phase 2: GitHub Copilot Extension via Contents API (1 week). Phase 3: Slack/Teams bot (2 weeks). Constraint: any remote solution must solve `.squad/` context access.
-
-## SUMMARY: Community & PR Strategy
-
-Proposal-first discipline: meaningful changes require proposal in `docs/proposals/` before code. Tamir PRs explicitly require proposal framing. 14-issue triage identified 3 duplicate/overlap pairs consolidating 6 PRs to 4. Crash recovery: 3 rounds of issue audit/PR review/merging yielded 10 merged (6 merge-plan, 3 community, 1 legacy), 3 closed duplicates, 6 awaiting revisions. Dev branch green (5,038 tests).
-
-## SUMMARY: SDK Architecture & Integration
-
-SDK Init Shore-Up PRD consolidated 6 SDK issues into 3-phase initiative (root causes: config sync gap, built-in member exclusion, CastingEngine bypass). Phases: (1) fix gaps (P1), (2) wire CastingEngine (P1), (3) full test matrix (P2). 4-sprint estimate to 100% parity. Owners: EECOM + CAPCOM (phases 1–2), FIDO + CAPCOM (phase 3).
-
-## SUMMARY: Distributed Mesh Integration
-
-Zero code changes pattern: skill files in templates/skills/, scripts in scripts/mesh/, docs in features/. mesh.json stays separate from squad.config.ts. Convention-first additive layer (invisible if unused). 125:1 ratio: 30 lines script vs 3,756 lines deleted federation code.
+---
 
 ## SUMMARY: Fork Relationship (2026-05-15)
 
 Treat `tamirdresher/squad` as **incubation lane**, not alternate trunk. Fork converges on same problem selection (scheduler automation, persistent Ralph, cross-squad discovery, state backends) with divergence in delivery shape (Tamir packages whole loops; Brady productizes safer primitives). For overlapping capabilities, use mainline as reference. For new capabilities, treat as proposals first. Watchlist: `feat/upstream-auto-sync` for potential adoption.
 
 ---
+
+📌 **Team update (2026-05-21 — P0 Gap Dispositions Landed):** Aaron walked through EECOM's three transparent-state-isolation P0 gaps and decided each. Gap #1 (State Leak Guard): Options B+C combined — Scribe pre-check hardened to block-mode + git pre-commit hook template auto-installed by `squad init` and `squad assign`. Gap #2 (Hook Bootstrap): `squad assign` installs hooks on completion, mirroring `squad init`; idempotent. **Key framing from Aaron:** hooks are not a separate distribution problem — a developer cannot use Squad without `squad.agent.md` present and the squad agent consciously selected in their IDE; the same delivery events that activate Squad (`squad init` / `squad assign`) are the right install moments, reusing existing channels rather than inventing a new one. CI guard demoted to org-discretionary, not SDK-shipped. Gap #3 (Post-Migration Cleanup): `squad migrate-backend` auto-removes stale state files and appends `.gitignore` entries; history scrubbing via `git filter-repo` is explicitly out of scope for P0 (recipe-only for compliance-paranoid orgs). All three folded into proposal §4a as "Required follow-on work (P0 delivery checklist)" and §5 non-goals extended. Three inbox files written: `flight-p0-gap1-state-leak-guard.md`, `flight-p0-gap2-hook-bootstrap.md`, `flight-p0-gap3-post-migration-cleanup.md`.
+
+## Learnings
+
+**Delivery-channel reuse for hook bootstrap (2026-05-21):** When deciding how to distribute a new capability (pre-commit hooks), the right question is not "what's the distribution mechanism?" but "what existing activation event already reaches this developer?" Squad's hook bootstrap piggybacks on `squad init` and `squad assign` because those are the events where a developer consciously opts into Squad. This is a generalizable pattern: before adding a new installation path, trace back to the earliest moment a developer signals intent to use the system, and install there.
+
+**Gap disposition pattern (2026-05-21):** Three P0 gaps were surfaced, triaged, and resolved in a single session. The resolution shape was consistent: each gap got an option letter + concise summary → folded into proposal as delivery checklist item → inbox file for Scribe → non-goal note for the out-of-scope edge. This is a repeatable triage-to-proposal workflow for future gap sessions.
+
+---
+
+📌 **Team update (2026-05-21 — Transparent State Isolation P0 Elevated):** Aaron identified a new P0 requirement: Squad mutable state (decisions, histories, logs, orchestration records) MUST NOT appear in developer pull requests in org settings. Developers must not pay a git/repo tax to use Squad in organizations with PR review and branch protection. Key learning: Squad's existing `stateBackend` mechanism (`orphan`, `two-layer`, `git-notes` variants) is precisely the implementation vehicle for this requirement — the mechanism already existed; it simply had not been framed as a first-class P0. Pattern to remember: **requirement → mechanism tracing** is a first-class design discipline; implementation capabilities can silently satisfy requirements that were never formally stated, and those requirements need to be elevated before implementation planning begins or they fall through the cracks. Proposal `.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec.md` updated: section 4 converted to requirements table with new P0 row, new section 4a added (file taxonomy, backend comparison table, before/after diff, ownership table), glossary extended with three new terms, Appendix A cross-referenced to Casey narratives, Appendix C vocabulary updated. Inbox file written: `.squad/decisions/inbox/flight-transparent-state-isolation-p0.md`.
 
 📌 **Team update (2026-05-20T17:28:32Z — Multi-Squad Proposal Landing):** Flight led 4-turn proposal refinement (Flight-10–13) culminating in landed multi-squad management design. Proposal document finalized at `.squad/decisions/multisquad-design/flight-multisquad-proposal.md` with 6 user directives (identity, self-contained docs, zero-impact P0, rally exclusion, CLI stability, chain-of-command layering). 4 inbox decision files merged to decisions.md; 3 stale entries (>30 days) archived. decisions.md reduced 34.3KB→15.8KB via Tier 1 archive gate. Authoritative artifact ready for implementation phase. All prior versioned artifacts preserved in design-trail archive for historical context.
 
@@ -302,3 +284,16 @@ Decision written to `.squad/decisions/inbox/flight-triage-session-plan.md`.
 - Locked the pivot heuristic now: stay upstream-shaped by default, but flip to independence if the minimum kernel is projected to take more than ~12 weeks to land or if maintainers reject the SDK ownership boundary.
 
 📌 **Team archive (2026-05-17T19:44:23Z):** Multi-squad design phase complete. All Round 1–7 working artifacts archived at .squad/decisions/multisquad-design/ — v1.1 spec is authoritative. See orchestration log for full details.
+
+### P0 Gap Dispositions Finalized — 2026-05-21T13:30
+
+🎯 **Decision** — Three critical gaps in transparent state isolation analyzed and decided as required follow-on work:
+- Gap #1 (State Leak Guard): Options B + C combined (Scribe pre-check block-mode + git hook template)
+- Gap #2 (Hook Bootstrap): Hooks ride with \squad init\ and \squad assign\ (reuse existing activation events)
+- Gap #3 (Post-Migration Cleanup): Auto-remove stale files + append .gitignore; history scrubbing recipe-only
+
+All three decisions folded into authoritative proposal at \.squad/decisions/multisquad-design/flight-multisquad-proposal-and-spec.md\ (§4a subsections + §5 non-goals).
+
+📋 **Artifacts:** Merged into \.squad/decisions.md\ (3 dated entries); orchestration logs written; session log: \.squad/log/2026-05-21-p0-gap-dispositions.md\
+
+Next: Implementation phase planning to incorporate three gaps as required follow-on blocking P0 claim.
