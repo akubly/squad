@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { resolveSquad as resolveRegistrySquad } from '@bradygaster/squad-sdk';
+import { resolveSquad as resolveRegistrySquad } from '@wifi-aware/squad-sdk';
 
 import { detectSquadDir } from '../../core/detect-squad-dir.js';
 import type { WatchConfig } from './config.js';

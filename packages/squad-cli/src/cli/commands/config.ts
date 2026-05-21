@@ -17,7 +17,7 @@ import {
   readAgentModelOverrides,
   writeAgentModelOverrides,
   MODEL_CATALOG,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 import { resolveSquadDir } from '../core/squad-resolver.js';

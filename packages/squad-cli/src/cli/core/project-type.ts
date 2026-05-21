@@ -3,7 +3,7 @@
  */
 
 import path from 'node:path';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 
 const storage = new FSStorageProvider();
 

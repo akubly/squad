@@ -8,7 +8,7 @@
  * @module cli/upgrade
  */
 
-import { MigrationRegistry } from '@bradygaster/squad-sdk/config';
+import { MigrationRegistry } from '@wifi-aware/squad-sdk/config';
 
 // ============================================================================
 // Types

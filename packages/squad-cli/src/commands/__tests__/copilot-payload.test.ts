@@ -15,7 +15,7 @@ import {
   diagnoseCopilotPayload,
   _rewriteFrontmatterName,
   CopilotPayloadError,
-} from '@bradygaster/squad-sdk/copilot-payload';
+} from '@wifi-aware/squad-sdk/copilot-payload';
 import { runAssign } from '../assign.js';
 import { runUnassign } from '../unassign.js';
 

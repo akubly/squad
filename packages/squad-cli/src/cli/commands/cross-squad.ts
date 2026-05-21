@@ -18,7 +18,7 @@ import {
   findSquadByName,
   buildDelegationArgs,
   type DiscoveredSquad,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 import { resolveSquadDir } from '../core/squad-resolver.js';
 
 const execFileAsync = promisify(execFile);

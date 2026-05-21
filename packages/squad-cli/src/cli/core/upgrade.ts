@@ -7,9 +7,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { installCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
+import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { installCopilotPayload } from '@wifi-aware/squad-sdk/copilot-payload';
 import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
@@ -777,7 +777,7 @@ function detectPackageManager(): 'npm' | 'pnpm' | 'yarn' {
 export async function selfUpgradeCli(options: SelfUpgradeOptions = {}): Promise<void> {
   const { execSync } = await import('node:child_process');
   const tag = options.insider ? 'insider' : 'latest';
-  const pkg = `@bradygaster/squad-cli@${tag}`;
+  const pkg = `@wifi-aware/squad-cli@${tag}`;
   const pm = detectPackageManager();
 
   let cmd: string;

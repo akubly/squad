@@ -12,7 +12,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from '../core/squad-file-conventions.js';
 import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
 import { getGitRoot } from '../../lib/git-root.js';

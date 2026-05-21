@@ -8,7 +8,10 @@
  */
 
 import { join } from 'node:path';
-import { writeEconomyMode, readEconomyMode } from '@bradygaster/squad-sdk/config';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
+import { writeEconomyMode, readEconomyMode } from '@wifi-aware/squad-sdk/config';
+
+const storage = new FSStorageProvider();
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM } from '../core/output.js';
 import { resolveSquadDir } from '../core/squad-resolver.js';

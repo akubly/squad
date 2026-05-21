@@ -10,8 +10,8 @@
  */
 
 import path from 'node:path';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk/resolution-v2';
-import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
+import type { ResolvedSquad } from '@wifi-aware/squad-sdk/resolution-v2';
+import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk/path-utils';
 
 /** Source values that indicate the squad was resolved via the registry. */
 const REGISTRY_SOURCES = new Set<string>(['env', 'clones', 'origins']);

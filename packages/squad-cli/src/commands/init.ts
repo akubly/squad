@@ -15,10 +15,10 @@ import {
   upsertEntry,
   normalisedPathKey,
   clonesMatch,
-} from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
-import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
-import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
+} from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/registry';
+import type { RegistryEntry } from '@wifi-aware/squad-sdk/registry';
+import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';

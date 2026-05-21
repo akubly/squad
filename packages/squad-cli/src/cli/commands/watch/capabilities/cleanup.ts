@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Cleanup capability — housekeeping for stale temp and log files.
  *
  * Runs in the 'housekeeping' phase. Clears the scratch directory, prunes
@@ -8,7 +8,7 @@
 
 import path from 'node:path';
 import { rmSync } from 'node:fs';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 import type { WatchCapability, WatchContext, PreflightResult, CapabilityResult } from '../types.js';
 
 const storage = new FSStorageProvider();

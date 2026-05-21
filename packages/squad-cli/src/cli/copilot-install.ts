@@ -8,8 +8,8 @@
  * @module cli/copilot-install
  */
 
-import { initSquad } from '@bradygaster/squad-sdk/config';
-import type { InitOptions, InitResult } from '@bradygaster/squad-sdk/config';
+import { initSquad } from '@wifi-aware/squad-sdk/config';
+import type { InitOptions, InitResult } from '@wifi-aware/squad-sdk/config';
 
 // ============================================================================
 // Types

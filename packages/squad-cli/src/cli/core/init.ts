@@ -1,17 +1,17 @@
-﻿/**
+/**
  * Init command implementation — uses SDK
  * Scaffolds a new Squad project with templates, workflows, and directory structure
  */
 
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 import { detectSquadDir, resolveWorktreeMainCheckout } from './detect-squad-dir.js';
 import { success, BOLD, RESET, YELLOW, GREEN, DIM } from './output.js';
 import { fatal } from './errors.js';
 import { detectProjectType } from './project-type.js';
 import { getPackageVersion, stampVersion } from './version.js';
-import { initSquad as sdkInitSquad, cleanupOrphanInitPrompt, ensurePersonalSquadDir, resolvePersonalSquadDir, type InitOptions } from '@bradygaster/squad-sdk';
+import { initSquad as sdkInitSquad, cleanupOrphanInitPrompt, ensurePersonalSquadDir, resolvePersonalSquadDir, type InitOptions } from '@wifi-aware/squad-sdk';
 import { installGitHooks } from '../commands/install-hooks.js';
 
 const storage = new FSStorageProvider();
@@ -88,7 +88,7 @@ const INIT_LANDMARKS = [
 function showDeprecationWarning(): void {
   console.log();
   console.log(`${YELLOW}⚠️  DEPRECATION: .ai-team/ is deprecated and will be removed in v1.0.0${RESET}`);
-  console.log(`${YELLOW}    Run 'npx @bradygaster/squad-cli upgrade --migrate-directory' to migrate to .squad/${RESET}`);
+  console.log(`${YELLOW}    Run 'npx @wifi-aware/squad-cli upgrade --migrate-directory' to migrate to .squad/${RESET}`);
   console.log(`${YELLOW}    Details: https://github.com/bradygaster/squad/issues/101${RESET}`);
   console.log();
 }

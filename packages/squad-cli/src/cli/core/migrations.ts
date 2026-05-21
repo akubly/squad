@@ -5,8 +5,8 @@
  */
 
 import path from 'node:path';
-import { defaultRegistryFilePath, FSStorageProvider } from '@bradygaster/squad-sdk';
-import { writeRegistry } from '@bradygaster/squad-sdk/registry';
+import { defaultRegistryFilePath, FSStorageProvider } from '@wifi-aware/squad-sdk';
+import { writeRegistry } from '@wifi-aware/squad-sdk/registry';
 import { success, warn } from './output.js';
 import { scrubEmails } from './email-scrub.js';
 
