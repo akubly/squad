@@ -11,7 +11,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad } from '@wifi-aware/squad-sdk';
 
 /** Source values that indicate the squad was resolved via the registry. */
 const REGISTRY_SOURCES = new Set<string>(['env', 'clones', 'origins']);

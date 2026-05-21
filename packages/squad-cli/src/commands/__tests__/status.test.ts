@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { formatRegistryStatusBlock, resolveStatusRegistryPath } from '../status.js';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad } from '@wifi-aware/squad-sdk';
 
 // ============================================================
 // resolveStatusRegistryPath

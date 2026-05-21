@@ -15,10 +15,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { clonesMatch, normalisedPathKey, normalizeRemoteUrl } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
-import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
-import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
+import { clonesMatch, normalisedPathKey, normalizeRemoteUrl } from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/registry';
+import type { Registry, RegistryEntry } from '@wifi-aware/squad-sdk/registry';
+import { diagnoseCopilotPayload } from '@wifi-aware/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { findCloseMatch } from '../lib/close-match.js';
 

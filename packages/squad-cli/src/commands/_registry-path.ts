@@ -8,7 +8,7 @@
  */
 
 import path from 'node:path';
-import { resolveSquadHome } from '@bradygaster/squad-sdk';
+import { resolveSquadHome } from '@wifi-aware/squad-sdk';
 
 export interface ResolveRegistryPathOpts {
   explicit?: string;

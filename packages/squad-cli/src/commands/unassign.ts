@@ -14,11 +14,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { normalizeRemoteUrl, normalisedPathKey, collectCwdRemoteUrls } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
-import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
-import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
-import { uninstallCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
+import { normalizeRemoteUrl, normalisedPathKey, collectCwdRemoteUrls } from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/registry';
+import type { Registry, RegistryEntry } from '@wifi-aware/squad-sdk/registry';
+import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
+import { uninstallCopilotPayload } from '@wifi-aware/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getGitRoot as _libGetGitRoot } from '../lib/git-root.js';
 import { findCloseMatch as _findCloseMatch } from '../lib/close-match.js';

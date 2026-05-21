@@ -90,9 +90,9 @@ function _handleTopLevelSignal(signal: 'SIGINT' | 'SIGTERM'): void {
 process.on('SIGINT', () => _handleTopLevelSignal('SIGINT'));
 process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 
-import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
-import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
-import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
+import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@wifi-aware/squad-sdk';
+import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@wifi-aware/squad-sdk';
+import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { fatal, SquadError } from './cli/core/errors.js';
@@ -102,7 +102,7 @@ import { getPackageVersion } from './cli/core/version.js';
 
 // Lazy-load squad-sdk to avoid triggering @github/copilot-sdk import on Node 24+
 // (Issue: copilot-sdk has broken ESM imports - vscode-jsonrpc/node without .js extension)
-const lazySquadSdk = () => import('@bradygaster/squad-sdk');
+const lazySquadSdk = () => import('@wifi-aware/squad-sdk');
 const lazyRunShell = () => import('./cli/shell/index.js');
 
 // Use local version resolver instead of importing VERSION from squad-sdk
@@ -258,8 +258,8 @@ async function main(): Promise<void> {
     console.log(`  ${b}--economy${r}      Economy mode (cheaper models)`);
     console.log(`  ${b}--team-root${r}    Override team root path`);
     console.log(`  ${b}--dry-run${r}      Dry-run mode (no writes)`);
-    console.log(`\nInstall: npm i -D @bradygaster/squad-cli`);
-    console.log(`Insider: npm i -D @bradygaster/squad-cli@insider\n`);
+    console.log(`\nInstall: npm i -D @wifi-aware/squad-cli`);
+    console.log(`Insider: npm i -D @wifi-aware/squad-cli@insider\n`);
     return;
   }
 
@@ -394,8 +394,8 @@ async function main(): Promise<void> {
       }
 
       if (presetName) {
-        const { seedBuiltinPresets, applyPreset } = await import('@bradygaster/squad-sdk/presets');
-        const { resolvePresetsDir, ensureSquadHome } = await import('@bradygaster/squad-sdk/resolution');
+        const { seedBuiltinPresets, applyPreset } = await import('@wifi-aware/squad-sdk/presets');
+        const { resolvePresetsDir, ensureSquadHome } = await import('@wifi-aware/squad-sdk/resolution');
         const nodePath = await import('node:path');
 
         if (!resolvePresetsDir()) {
@@ -698,7 +698,7 @@ async function main(): Promise<void> {
     if (args.includes('--init')) {
       const fileIdx = args.indexOf('--file');
       const filePath = (fileIdx !== -1 && args[fileIdx + 1]) ? args[fileIdx + 1]! : 'loop.md';
-      const { FSStorageProvider } = await import('@bradygaster/squad-sdk');
+      const { FSStorageProvider } = await import('@wifi-aware/squad-sdk');
       const storage = new FSStorageProvider();
       const pathMod = await import('node:path');
       const absPath = pathMod.default.resolve(getSquadStartDir(), filePath);
