@@ -31,6 +31,16 @@ const PACKAGE_PATHS = [
   join(root, 'packages', 'squad-cli', 'package.json'),
 ];
 
+// Internal workspace scope — packages here cross-pin each other at the same version.
+// Keep these pins aligned during release bumps to prevent publish desync crashes.
+const WORKSPACE_SCOPE_PREFIX = '@wifi-aware/squad';
+const DEPENDENCY_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+];
+
 // Parse version: "major.minor.patch-prerelease[.tag].build" or "major.minor.patch.build"
 // Non-prerelease bumps now produce "major.minor.patch-build.N" (valid semver)
 function parseVersion(version) {
@@ -63,6 +73,28 @@ function formatVersion({ base, build, prerelease }) {
   return `${base}-build.${build}`;
 }
 
+function shouldRewriteWorkspacePin(packageName, versionSpec) {
+  return packageName.startsWith(WORKSPACE_SCOPE_PREFIX) && /^[~^]?\d/.test(versionSpec);
+}
+
+function rewriteWorkspacePins(pkg, pkgPath, newVersion) {
+  for (const sectionName of DEPENDENCY_SECTIONS) {
+    const section = pkg[sectionName];
+    if (!section) {
+      continue;
+    }
+
+    for (const [dependencyName, versionSpec] of Object.entries(section)) {
+      if (!shouldRewriteWorkspacePin(dependencyName, versionSpec)) {
+        continue;
+      }
+
+      section[dependencyName] = newVersion;
+      console.log(`Pinned dependency ${dependencyName}: ${versionSpec} → ${newVersion} in ${pkg.name ?? pkgPath}`);
+    }
+  }
+}
+
 // Read the canonical version from root package.json
 const rootPkg = JSON.parse(readFileSync(PACKAGE_PATHS[0], 'utf8'));
 const parsed = parseVersion(rootPkg.version);
@@ -73,6 +105,7 @@ const newVersion = formatVersion(parsed);
 for (const pkgPath of PACKAGE_PATHS) {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   pkg.version = newVersion;
+  rewriteWorkspacePins(pkg, pkgPath, newVersion);
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 }
 
