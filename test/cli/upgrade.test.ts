@@ -12,6 +12,7 @@ import { randomBytes } from 'crypto';
 import { runInit } from '@bradygaster/squad-cli/core/init';
 import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli } from '@bradygaster/squad-cli/core/upgrade';
 import { getPackageVersion } from '@bradygaster/squad-cli/core/version';
+import { defaultRegistryFilePath } from '@bradygaster/squad-sdk';
 
 const TEST_ROOT = join(os.tmpdir(), `.test-cli-upgrade-${randomBytes(4).toString('hex')}`);
 
@@ -94,6 +95,43 @@ describe('CLI: upgrade command', () => {
     expect(globalAgent).toBe(repoAgent);
     expect(globalAgent).toContain(`<!-- version: ${getPackageVersion()} -->`);
     expect(globalAgent).not.toContain('old global agent');
+  });
+
+  it('SDK registry path export returns a registry.json path', () => {
+    const registryPath = defaultRegistryFilePath(TEST_ROOT, {});
+
+    expect(typeof registryPath).toBe('string');
+    expect(registryPath).toMatch(/registry\.json$/);
+  });
+
+  it('warns and completes when the SDK registry path smoke-test throws', async () => {
+    vi.resetModules();
+    vi.doMock('@bradygaster/squad-sdk', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@bradygaster/squad-sdk')>();
+      return {
+        ...actual,
+        defaultRegistryFilePath: vi.fn(() => {
+          throw new Error('simulated SDK export failure');
+        }),
+      };
+    });
+
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const { runUpgrade: runUpgradeWithThrowingSdkSmoke } = await import('@bradygaster/squad-cli/core/upgrade');
+
+      await expect(runUpgradeWithThrowingSdkSmoke(TEST_ROOT)).resolves.toMatchObject({
+        toVersion: getPackageVersion(),
+      });
+
+      const calls = spy.mock.calls.map(c => String(c[0]));
+      expect(calls.some(c => c.includes('SDK symbol resolution failed after upgrade'))).toBe(true);
+      expect(calls.some(c => c.includes('simulated SDK export failure'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+      vi.doUnmock('@bradygaster/squad-sdk');
+      vi.resetModules();
+    }
   });
 
   it('should overwrite squad-owned template files', async () => {

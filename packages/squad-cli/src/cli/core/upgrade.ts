@@ -7,7 +7,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, defaultRegistryFilePath } from '@bradygaster/squad-sdk';
 import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
@@ -48,6 +48,15 @@ export interface UpdateInfo {
   toVersion: string;
   filesUpdated: string[];
   migrationsRun: string[];
+}
+
+function smokeTestSdkSymbolResolution(homeDir: string): void {
+  try {
+    defaultRegistryFilePath(homeDir);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`SDK symbol resolution failed after upgrade — reinstall may be required: ${message}`);
+  }
 }
 
 /**
@@ -585,9 +594,11 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     // Run infrastructure ensure checks even when already current
     runEnsureChecks(dest, templatesDir, filesUpdated);
 
-    if (installCoordinatorAgent(options.homeDir ?? os.homedir(), { requireExisting: true })) {
+    const homeDir = options.homeDir ?? os.homedir();
+    if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
       console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
     }
+    smokeTestSdkSymbolResolution(homeDir);
     
     return {
       fromVersion: oldVersion,
@@ -675,9 +686,11 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   // Run infrastructure ensure checks
   runEnsureChecks(dest, templatesDir, filesUpdated);
 
-  if (installCoordinatorAgent(options.homeDir ?? os.homedir(), { requireExisting: true })) {
+  const homeDir = options.homeDir ?? os.homedir();
+  if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
     console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
   }
+  smokeTestSdkSymbolResolution(homeDir);
   
   console.log();
   info(`Upgrade complete: v${fromLabel} → v${cliVersion}`);
