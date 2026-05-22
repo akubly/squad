@@ -11,8 +11,18 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
-import { runDoctor, getDoctorMode, checkNodeVersion } from '@bradygaster/squad-cli/cli/commands/doctor';
+import {
+  runDoctor,
+  getDoctorMode,
+  checkNodeVersion,
+  checkGitattributes,
+  checkGitignore,
+  checkCopilotSkillsSync,
+  checkCopilotInstructions,
+  checkGlobalAgent,
+} from '@bradygaster/squad-cli/cli/commands/doctor';
 import type { DoctorCheck } from '@bradygaster/squad-cli/cli/commands/doctor';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '@bradygaster/squad-cli/core/squad-file-conventions';
 
 const TEST_ROOT = join(process.cwd(), `.test-doctor-${randomBytes(4).toString('hex')}`);
 
@@ -27,6 +37,9 @@ async function scaffold(root: string): Promise<void> {
     join(sq, 'casting', 'registry.json'),
     JSON.stringify({ agents: [] }, null, 2),
   );
+  await writeFile(join(root, '.gitattributes'), `${GITATTRIBUTES_RULES.join('\n')}\n`);
+  await writeFile(join(root, '.gitignore'), `${GITIGNORE_ENTRIES.join('\n')}\n`);
+  await mkdir(join(root, '.copilot', 'skills', 'doctor-check-pattern'), { recursive: true });
   // Copilot agent discovery file (#533)
   await mkdir(join(root, '.github', 'agents'), { recursive: true });
   await writeFile(join(root, '.github', 'agents', 'squad.agent.md'), '# Squad Agent\n');
@@ -68,8 +81,8 @@ describe('squad doctor', () => {
 
     const squadDirCheck = checks.find((c: DoctorCheck) => c.name === '.squad/ directory exists');
     expect(squadDirCheck?.status).toBe('fail');
-    // When .squad/ is missing the file checks are skipped — .squad/ + squad.agent.md + Node version + 2 ESM checks
-    expect(checks.length).toBe(5);
+    // When .squad/ is missing the .squad file checks are skipped, but repo/global upgrade artifacts still run.
+    expect(checks.length).toBe(8);
   });
 
   it('detects remote mode from config.json with teamRoot', async () => {
@@ -290,5 +303,159 @@ describe('squad doctor', () => {
     expect(agentMdCheck).toBeDefined();
     expect(agentMdCheck?.status).toBe('fail');
     expect(agentMdCheck?.message).toContain('squad upgrade');
+  });
+
+  // ── piece-21 FIX-3/FIX-9 — upgrade-managed artifact checks ────────
+
+  it('checkGitattributes passes when all required rules are present', async () => {
+    await writeFile(join(TEST_ROOT, '.gitattributes'), `${GITATTRIBUTES_RULES.join('\n')}\n`);
+
+    const result = checkGitattributes(TEST_ROOT);
+
+    expect(result.status).toBe('pass');
+  });
+
+  it('checkGitattributes warns when one required rule is missing', async () => {
+    await writeFile(join(TEST_ROOT, '.gitattributes'), `${GITATTRIBUTES_RULES.slice(1).join('\n')}\n`);
+
+    const result = checkGitattributes(TEST_ROOT);
+
+    expect(result.status).toBe('warn');
+    expect(result.message).toContain(GITATTRIBUTES_RULES[0]);
+    expect(result.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkGitattributes fails when .gitattributes is absent', () => {
+    const result = checkGitattributes(TEST_ROOT);
+
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkGitattributes passes when a parent rule covers child rules', async () => {
+    await writeFile(join(TEST_ROOT, '.gitattributes'), '.squad/ merge=union\n');
+
+    const result = checkGitattributes(TEST_ROOT);
+
+    expect(result.status).toBe('pass');
+  });
+
+  it('checkGitignore passes when all required entries are present', async () => {
+    await writeFile(join(TEST_ROOT, '.gitignore'), `${GITIGNORE_ENTRIES.join('\n')}\n`);
+
+    const result = checkGitignore(TEST_ROOT);
+
+    expect(result.status).toBe('pass');
+  });
+
+  it('checkGitignore warns when one required entry is missing', async () => {
+    await writeFile(join(TEST_ROOT, '.gitignore'), `${GITIGNORE_ENTRIES.slice(1).join('\n')}\n`);
+
+    const result = checkGitignore(TEST_ROOT);
+
+    expect(result.status).toBe('warn');
+    expect(result.message).toContain(GITIGNORE_ENTRIES[0]);
+    expect(result.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkGitignore fails when .gitignore is absent', () => {
+    const result = checkGitignore(TEST_ROOT);
+
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkGitignore passes when a parent entry covers child entries', async () => {
+    await writeFile(join(TEST_ROOT, '.gitignore'), `.squad/\n${GITIGNORE_ENTRIES.at(-1)}\n`);
+
+    const result = checkGitignore(TEST_ROOT);
+
+    expect(result.status).toBe('pass');
+  });
+
+  it('checkCopilotSkillsSync passes with a non-empty skills directory and reports the count', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await mkdir(join(TEST_ROOT, '.copilot', 'skills', 'one'), { recursive: true });
+    await mkdir(join(TEST_ROOT, '.copilot', 'skills', 'two'), { recursive: true });
+
+    const result = checkCopilotSkillsSync(TEST_ROOT, squadDir);
+
+    expect(result?.status).toBe('pass');
+    expect(result?.message).toContain('2 skills');
+  });
+
+  it('checkCopilotSkillsSync warns when the skills directory is empty', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await mkdir(join(TEST_ROOT, '.copilot', 'skills'), { recursive: true });
+
+    const result = checkCopilotSkillsSync(TEST_ROOT, squadDir);
+
+    expect(result?.status).toBe('warn');
+    expect(result?.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkCopilotSkillsSync warns when the skills directory is missing', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+
+    const result = checkCopilotSkillsSync(TEST_ROOT, squadDir);
+
+    expect(result?.status).toBe('warn');
+    expect(result?.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkCopilotInstructions passes when Coding Agent team has copilot instructions', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await mkdir(join(TEST_ROOT, '.github'), { recursive: true });
+    await writeFile(join(squadDir, 'team.md'), '# Team\n\n🤖 Coding Agent\n');
+    await writeFile(join(TEST_ROOT, '.github', 'copilot-instructions.md'), '# Instructions\n');
+
+    const result = checkCopilotInstructions(TEST_ROOT, squadDir);
+
+    expect(result?.status).toBe('pass');
+  });
+
+  it('checkCopilotInstructions fails when Coding Agent team is missing copilot instructions', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await writeFile(join(squadDir, 'team.md'), '# Team\n\n🤖 Coding Agent\n');
+
+    const result = checkCopilotInstructions(TEST_ROOT, squadDir);
+
+    expect(result?.status).toBe('fail');
+    expect(result?.message).toContain("Run 'squad upgrade'");
+  });
+
+  it('checkCopilotInstructions skips when team.md has no Coding Agent mention', async () => {
+    const squadDir = join(TEST_ROOT, '.squad');
+    await mkdir(squadDir, { recursive: true });
+    await writeFile(join(squadDir, 'team.md'), '# Team\n\n## Members\n');
+
+    const result = checkCopilotInstructions(TEST_ROOT, squadDir);
+
+    expect(result).toBeUndefined();
+  });
+
+  it('checkGlobalAgent passes when the global agent exists under the injected homeDir', async () => {
+    const homeDir = join(TEST_ROOT, 'home');
+    await mkdir(join(homeDir, '.copilot', 'agents'), { recursive: true });
+    await writeFile(join(homeDir, '.copilot', 'agents', 'squad.agent.md'), '# Squad\n');
+
+    const result = checkGlobalAgent(homeDir);
+
+    expect(result.status).toBe('pass');
+  });
+
+  it('checkGlobalAgent warns when the global agent is absent under the injected homeDir', async () => {
+    const homeDir = join(TEST_ROOT, 'home');
+    await mkdir(homeDir, { recursive: true });
+
+    const result = checkGlobalAgent(homeDir);
+
+    expect(result.status).toBe('warn');
+    expect(result.message).toContain("Run 'squad upgrade'");
   });
 });

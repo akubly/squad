@@ -17,6 +17,10 @@ Decision triggers at the top of an agent prompt define the agent's reachability 
 
 Path-utils centralized as single source of truth for OS-aware path comparison logic. All future pieces (init fail-fast, assign, unassign, doctor) import from centralized path-utils module. Cross-case dedup test pattern established (S9b: platform-gated assertions on case-variant paths).
 
+### Doctor Upgrade Artifact Checks (2026-05-22)
+
+Legacy doctor check functions use `checkName(cwdOrSquadDir, optionalTestSeam?): DoctorCheck | undefined`; return `undefined` only for intentional skips such as Coding Agent-specific checks. `runDoctor` aggregates by pushing mandatory checks and conditionally pushing optional results, so skip-capable checks must be filtered before insertion. Parent-pattern coverage is string-prefix based after stripping attributes/comments: `.squad/` covers `.squad/log/**` and `.squad/log/`, but not `.squad-workstream`. Global-agent verification uses `checkGlobalAgent(homeDir?)` so tests can inject a fake home and never touch the runner's real `~/.copilot/`.
+
 ## Archive
 
 See history-archive.md for learnings prior to 2026-05-13 (deterministic skill pattern, issue triage, economy mode governance, model catalog refresh, VS Code routing, templating, protected files, etc.).

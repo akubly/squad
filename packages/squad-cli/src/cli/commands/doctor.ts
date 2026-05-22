@@ -11,7 +11,9 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '../core/squad-file-conventions.js';
 
 const storage = new FSStorageProvider();
 
@@ -253,6 +255,160 @@ function checkRateLimitStatus(squadDir: string): DoctorCheck | undefined {
   };
 }
 
+function conventionPath(value: string): string {
+  return value.trim().split(/\s+/)[0] ?? '';
+}
+
+function isConventionCoveredByParent(entry: string, lines: string[]): boolean {
+  const entryPath = conventionPath(entry);
+  if (!entryPath) return false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) continue;
+
+    const linePath = conventionPath(trimmed);
+    if (!linePath) continue;
+
+    const parent = linePath.endsWith('/') ? linePath : `${linePath}/`;
+    if (entryPath.startsWith(parent) && entryPath !== linePath) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function findMissingConventions(required: readonly string[], content: string): string[] {
+  const lines = content.split('\n');
+  return required.filter((entry) => {
+    const normalized = entry.trim();
+    const hasExactLine = lines.some((line) => line.trim() === normalized);
+    return !hasExactLine && !isConventionCoveredByParent(normalized, lines);
+  });
+}
+
+// TODO(piece-22): merge into unified doctor
+export function checkGitattributes(cwd: string): DoctorCheck {
+  const filePath = path.join(cwd, '.gitattributes');
+  if (!fileExists(filePath)) {
+    return {
+      name: '.gitattributes upgrade rules',
+      status: 'fail',
+      message: "file not found — Run 'squad upgrade'",
+    };
+  }
+
+  const content = storage.readSync(filePath) ?? '';
+  const missing = findMissingConventions(GITATTRIBUTES_RULES, content);
+  if (missing.length > 0) {
+    return {
+      name: '.gitattributes upgrade rules',
+      status: 'warn',
+      message: `missing ${missing.length} rule${missing.length === 1 ? '' : 's'}: ${missing.join(', ')} — Run 'squad upgrade'`,
+    };
+  }
+
+  return {
+    name: '.gitattributes upgrade rules',
+    status: 'pass',
+    message: `${GITATTRIBUTES_RULES.length} required rule${GITATTRIBUTES_RULES.length === 1 ? '' : 's'} present or covered`,
+  };
+}
+
+// TODO(piece-22): merge into unified doctor
+export function checkGitignore(cwd: string): DoctorCheck {
+  const filePath = path.join(cwd, '.gitignore');
+  if (!fileExists(filePath)) {
+    return {
+      name: '.gitignore upgrade entries',
+      status: 'fail',
+      message: "file not found — Run 'squad upgrade'",
+    };
+  }
+
+  const content = storage.readSync(filePath) ?? '';
+  const missing = findMissingConventions(GITIGNORE_ENTRIES, content);
+  if (missing.length > 0) {
+    return {
+      name: '.gitignore upgrade entries',
+      status: 'warn',
+      message: `missing ${missing.length} entr${missing.length === 1 ? 'y' : 'ies'}: ${missing.join(', ')} — Run 'squad upgrade'`,
+    };
+  }
+
+  return {
+    name: '.gitignore upgrade entries',
+    status: 'pass',
+    message: `${GITIGNORE_ENTRIES.length} required entr${GITIGNORE_ENTRIES.length === 1 ? 'y' : 'ies'} present or covered`,
+  };
+}
+
+// TODO(piece-22): merge into unified doctor
+export function checkCopilotSkillsSync(cwd: string, squadDir: string): DoctorCheck | undefined {
+  if (!isDirectory(squadDir)) return undefined;
+
+  const skillsDir = path.join(cwd, '.copilot', 'skills');
+  if (!isDirectory(skillsDir)) {
+    return {
+      name: '.copilot/skills sync',
+      status: 'warn',
+      message: "directory not found — Run 'squad upgrade'",
+    };
+  }
+
+  let count = 0;
+  try {
+    for (const entry of storage.listSync(skillsDir)) {
+      if (storage.isDirectorySync(path.join(skillsDir, entry))) count++;
+    }
+  } catch {
+    count = 0;
+  }
+
+  if (count === 0) {
+    return {
+      name: '.copilot/skills sync',
+      status: 'warn',
+      message: "directory is empty — Run 'squad upgrade'",
+    };
+  }
+
+  return {
+    name: '.copilot/skills sync',
+    status: 'pass',
+    message: `${count} skill${count === 1 ? '' : 's'} synced`,
+  };
+}
+
+// TODO(piece-22): merge into unified doctor
+export function checkCopilotInstructions(cwd: string, squadDir: string): DoctorCheck | undefined {
+  const teamPath = path.join(squadDir, 'team.md');
+  if (!fileExists(teamPath)) return undefined;
+
+  const teamContent = storage.readSync(teamPath) ?? '';
+  if (!teamContent.includes('🤖 Coding Agent')) return undefined;
+
+  const instructionsPath = path.join(cwd, '.github', 'copilot-instructions.md');
+  const exists = fileExists(instructionsPath);
+  return {
+    name: '.github/copilot-instructions.md',
+    status: exists ? 'pass' : 'fail',
+    message: exists ? 'file present for Coding Agent workflow' : "file not found — Run 'squad upgrade'",
+  };
+}
+
+// TODO(piece-22): merge into unified doctor
+export function checkGlobalAgent(homeDir?: string): DoctorCheck {
+  const agentPath = path.join(homeDir ?? os.homedir(), '.copilot', 'agents', 'squad.agent.md');
+  const exists = fileExists(agentPath);
+  return {
+    name: '~/.copilot/agents/squad.agent.md',
+    status: exists ? 'pass' : 'warn',
+    message: exists ? 'global Squad agent present' : "file not found — Run 'squad upgrade'",
+  };
+}
+
 function formatAge(seconds: number): string {
   if (seconds >= 3600) {
     const h = Math.floor(seconds / 3600);
@@ -462,7 +618,11 @@ export async function runDoctor(cwd?: string): Promise<DoctorCheck[]> {
     checks.push(checkTeamRootResolves(squadDir, teamRoot));
   }
 
-  // 5–9 standard files (only if .squad/ exists)
+  // 5. Upgrade-managed repository conventions
+  checks.push(checkGitattributes(resolvedCwd));
+  checks.push(checkGitignore(resolvedCwd));
+
+  // 6–10 standard files (only if .squad/ exists)
   if (isDirectory(squadDir)) {
     checks.push(checkTeamMd(squadDir));
     checks.push(checkRoutingMd(squadDir));
@@ -471,15 +631,20 @@ export async function runDoctor(cwd?: string): Promise<DoctorCheck[]> {
     checks.push(checkDecisionsMd(squadDir));
     const rateLimitCheck = checkRateLimitStatus(squadDir);
     if (rateLimitCheck) checks.push(rateLimitCheck);
+    const skillsCheck = checkCopilotSkillsSync(resolvedCwd, squadDir);
+    if (skillsCheck) checks.push(skillsCheck);
+    const instructionsCheck = checkCopilotInstructions(resolvedCwd, squadDir);
+    if (instructionsCheck) checks.push(instructionsCheck);
   }
 
-  // 10. Copilot agent discovery file (relative to cwd, not squadDir)
+  // 11. Copilot agent discovery files
   checks.push(checkSquadAgentMd(resolvedCwd));
+  checks.push(checkGlobalAgent());
 
-  // 11. Node.js version (node:sqlite availability)
+  // 12. Node.js version (node:sqlite availability)
   checks.push(checkNodeVersion());
 
-  // 11-12. ESM compatibility (Node 22/24+)
+  // 13-14. ESM compatibility (Node 22/24+)
   checks.push(checkVscodeJsonrpcExports(resolvedCwd));
   checks.push(checkCopilotSdkSessionPatch(resolvedCwd));
 

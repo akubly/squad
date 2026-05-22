@@ -93,6 +93,10 @@
       "types": "./dist/cli/core/upgrade.d.ts",
       "import": "./dist/cli/core/upgrade.js"
     },
+    "./core/squad-file-conventions": {
+      "types": "./dist/cli/core/squad-file-conventions.d.ts",
+      "import": "./dist/cli/core/squad-file-conventions.js"
+    },
     "./core/version": {
       "types": "./dist/cli/core/version.d.ts",
       "import": "./dist/cli/core/version.js"

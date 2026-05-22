@@ -16,6 +16,7 @@ import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
 import { installCoordinatorAgent } from '../../commands/assign.js';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from './squad-file-conventions.js';
 
 const storage = new FSStorageProvider();
 
@@ -269,21 +270,6 @@ function writeWorkflowFile(file: string, srcPath: string, destPath: string, proj
 }
 
 /* ── Infrastructure ensure functions ────────────────────────────── */
-
-const GITATTRIBUTES_RULES = [
-  '.squad/decisions.md merge=union',
-  '.squad/agents/*/history.md merge=union',
-  '.squad/log/** merge=union',
-  '.squad/orchestration-log/** merge=union',
-];
-
-const GITIGNORE_ENTRIES = [
-  '.squad/orchestration-log/',
-  '.squad/log/',
-  '.squad/decisions/inbox/',
-  '.squad/sessions/',
-  '.squad-workstream',
-];
 
 const ENSURE_DIRECTORIES = [
   '.squad/identity',
