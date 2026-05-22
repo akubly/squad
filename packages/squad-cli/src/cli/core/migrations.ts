@@ -5,11 +5,52 @@
  */
 
 import path from 'node:path';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
-import { success } from './output.js';
+import { defaultRegistryFilePath, FSStorageProvider } from '@bradygaster/squad-sdk';
+import { writeRegistry } from '@bradygaster/squad-sdk/registry';
+import { success, warn } from './output.js';
 import { scrubEmails } from './email-scrub.js';
 
 const storage = new FSStorageProvider();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function describeRegistryVersion(registryPath: string): string {
+  try {
+    const raw = storage.readSync(registryPath) ?? '';
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed) && Object.hasOwn(parsed, 'version')) {
+      return JSON.stringify(parsed['version']);
+    }
+  } catch {
+    return 'unreadable';
+  }
+
+  return 'missing';
+}
+
+function migrateLegacyUserRegistry(): void {
+  const registryPath = defaultRegistryFilePath();
+  const registryDir = path.dirname(registryPath);
+  const legacyPath = path.join(registryDir, 'squad-repos.json');
+
+  if (storage.existsSync(registryPath)) {
+    const version = describeRegistryVersion(registryPath);
+    if (version !== '1') {
+      warn(`Registry file ${registryPath} has unsupported version ${version}. Please file a bug with the Squad team before running upgrade again.`);
+    }
+    return;
+  }
+
+  if (!storage.existsSync(legacyPath)) {
+    return;
+  }
+
+  storage.mkdirSync(registryDir, { recursive: true });
+  writeRegistry(registryPath, { version: 1, squads: [] });
+  warn(`Detected legacy registry ${legacyPath}; created a fresh registry at ${registryPath}. Re-run "squad assign <callsign>" from each checkout to repopulate it.`);
+}
 
 function copyDirRecursive(src: string, dest: string, force = true): void {
   storage.mkdirSync(dest, { recursive: true });
@@ -91,6 +132,13 @@ const migrations: Migration[] = [
       }
 
       success(`Migrated skills to .copilot/skills: ${skillNames.join(', ')}`);
+    }
+  },
+  {
+    version: '0.9.6',
+    description: 'Create registry.json for legacy squad-repos.json users',
+    run() {
+      migrateLegacyUserRegistry();
     }
   }
 ];
