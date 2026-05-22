@@ -194,3 +194,12 @@ Prepared comprehensive release playbook and CI improvement plan for Brady's revi
 4. **Never:** Double-quoted heredocs with backticks — backtick-escape parsing is silent and destructive
 
 **Skill Created:** `.squad/skills/commit-message-quoting/SKILL.md` with full pattern, verification steps, and safe examples.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

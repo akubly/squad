@@ -43,7 +43,20 @@ Revised VOX's lifecycle command migration (Piece 08c) after RETRO rejection. Two
 
 **vi.waitFor vs fixed timeouts:** Runner-level tests use `void runStart(...)` then wait for mocks. `remoteBridgeCtor` is called synchronously in the mock constructor; `mockPtySpawn` is called after `await bridge.start()` resolves. Use `vi.waitFor(() => expect(mockPtySpawn).toHaveBeenCalled(), { timeout: 5_000 })` for deterministic async completion without wall-clock timing dependency.
 
-
 ### FIX-1 SDK Export Smoke-Test — 2026-05-22
 
 `squad upgrade` statically imports `defaultRegistryFilePath` from `@bradygaster/squad-sdk`, then calls it silently after each `installCoordinatorAgent` path. The existing `warn()` helper lives in `packages/squad-cli/src/cli/core/output.ts` and writes warning text through `console.log`. The catch-path test uses a Vitest `vi.doMock('@bradygaster/squad-sdk', ...)` module seam so the static import still resolves while the smoke-test call throws.
+
+
+### FIX-4 Registry Migration — 2026-05-22T14:08:38-07:00
+
+CLI migrations live in `packages/squad-cli/src/cli/core/migrations.ts` as additive semver entries; the runner strips prerelease/build suffixes, so the branch's `0.9.6-build.*` packages map to a `0.9.6` migration key. Default registry location honors `SQUAD_HOME` through SDK `defaultRegistryFilePath()` (`SQUAD_HOME/registry.json`, otherwise `~/.squad/registry.json`). `writeRegistry()` validates version 1, pretty-prints JSON with a trailing newline, and writes atomically via a sibling temp file + rename, but it does not create the parent directory.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

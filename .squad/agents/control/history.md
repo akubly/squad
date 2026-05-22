@@ -112,3 +112,12 @@ See `.squad/decisions.md` for full findings and `.squad/orchestration-log/` for 
 📌 **CONTROL TypeScript findings from piece 14 adversarial pass successfully addressed in revision.**
 
 Initial review identified three TypeScript pattern violations: (T1) error codes embedded in message string, no typed union or `.code` property (T2) `--flag=value` arg parsing silently ignored, producing false errors (T3) discriminated union switch on `result.kind` lacks `never` default guard. Revision commit 1a47e601 delivered: `AssignErrorCode` union exported and discriminable on error objects; `argValue` helper handles both `--flag value` and `--flag=value` forms; `never` guard added to result.kind switch. All 3 majors addressed. Additional deferred: T8 (index-signature refactor — acceptable architectural debt). Branch ready for Phase C. Decision merged: typed error codes, discriminated unions, and exhaustiveness guards now team-wide conventions.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

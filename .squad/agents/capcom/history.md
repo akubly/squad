@@ -87,3 +87,12 @@ When the same validation rule spans SDK reader paths, payload namespace code, an
 
 The specific smell to watch for is writer/reader/doctor triple-divergence: once those three paths disagree, users get inconsistent acceptance rules and tests stop guarding the real contract.
 
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

@@ -27,3 +27,12 @@ See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc re
 - **#476 (Guide v0.4.1 update)** — squad:handbook + squad:pao (SDK patterns + documentation)
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. PAO owns GitHub auth docs (#488), REPL documentation gate (#478), and Guide v0.4.1 refresh (#476). High community value on Guide update. Ready to begin documentation work on next sprint.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

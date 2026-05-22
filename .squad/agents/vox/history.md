@@ -43,3 +43,12 @@ TDD flow: 6 RED tests written first (all failing for the expected reasons), sour
 📌 **Adversarial review verdict (2026-05-15T00:54:18Z):** 08c rejected by RETRO (Security) on blocker: lifecycle commands do not fail-closed when registry-resolved squad path is stale/missing. GNC assigned as revision owner per Reviewer Rejection Protocol; VOX and EECOM locked out. GNC to add existence check and fall-back-squad fixture to same branch for re-review as 08c-v2.
 
 📌 **Revision shipped under GNC ownership (2026-05-15T00:54:18Z):** Lockout cycle complete. GNC's fail-closed validation pattern (explicit registry parse failure throws, stale-path guards after clone/origin match, try/catch dispatch conversion) is now documented in decisions.md for future command migrations.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

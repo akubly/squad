@@ -169,3 +169,12 @@ Updated both release-process skill files (`.squad/skills/release-process/SKILL.m
 - `packages/squad-cli/templates/squad.agent.md.template`
 - `packages/squad-sdk/templates/squad.agent.md.template`
 - `.github/agents/squad.agent.md`
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

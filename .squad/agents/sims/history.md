@@ -94,3 +94,12 @@ Extracted to `.squad/skills/resolver-guard-threading/SKILL.md`. Key components: 
 
 📌 **Team update (2026-05-15T22:14:43Z — Piece 09 E2E Review + Phase C Assignment):** Piece 09 watch/triage startup resolution returned NEEDS-E2E-BEFORE-MERGE verdict (Sims). No node-pty-driven E2E rehearsal for watch/triage commands; spec requires terminal behavior verification. Missing happy-path rehearsal (consumer repo with registry resolution, CLI entry), failure rehearsal (ambiguous/missing resolution, error surfacing), triage command terminal tests, Ctrl-C/SIGINT handling, long-lived startup-context stability (post-mutation), and Windows path-normalization E2E. Phase C assignment: Sims to author node-pty E2E suite for watch and triage terminal rehearsals, signal handling, cross-platform path edge cases, and validate user-facing error messages.
 
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

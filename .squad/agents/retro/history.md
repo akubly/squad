@@ -69,3 +69,12 @@ Commit ea655861 implements template sync for optional package-local `squad.agent
 
 **Key lesson:** When a scrub gate pattern is broad enough to match team-internal infrastructure files that were never upstream-destined, the correct fix is a targeted exclusion at the gate — not a rename or content change. The `.squad/` directory is canonical team state, not upstream content.
 
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
