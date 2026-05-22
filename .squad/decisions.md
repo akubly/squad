@@ -5,6 +5,51 @@
 
 ---
 
+### 2026-05-22: Piece 22 Scope + Ship-Debt Priority
+
+**Author:** Flight (Lead)  
+**Date:** 2026-05-22  
+**Status:** Proposed
+
+---
+
+## Decision A: Piece 22 Scope — Mechanical Unification Only
+
+**Context:** FIX-8 was deferred from piece 21 to piece 22 with TODO markers. The question is whether piece 22 should be "just" the dual-doctor unification or expand to include related debt cleanup.
+
+**Decision:** Piece 22 is mechanical unification of the dual-doctor implementations plus four trivial co-located fixes (D-4, D-7, D-12, D-15). It does NOT include semantic enrichment (repair commands, correlated findings, new checks).
+
+**Boundary:** ≤200 LOC production code net change (excluding tests). If the PR exceeds this, split D-15 (workflow stub deduplication) into piece 23.
+
+**Rationale:** Piece 21's ship gate taught us that bundling "just one more fix" compounds scope. Mechanical-only means the reviewer can approve on type-correctness alone without evaluating behavioral changes.
+
+---
+
+## Decision B: Ship-Debt Priority Queue
+
+| Priority | Piece # | Theme | Debt Items |
+|---|---|---|---|
+| 1 | 22 | Doctor unification + trivial cleanup | D-1, D-2, D-4, D-7, D-12, D-15 |
+| 2 | 23 | Typing hygiene + convention decisions | D-3, D-5, D-11, D-13 |
+| 3 | 24 | OTel hardening + SDK adapter typing | D-6, D-8, D-9, D-14, D-16 |
+| 4 | 25 | SDK naming cleanup (breaking) | D-18 |
+| — | — | Won't fix | D-10, D-17 |
+
+**Rationale:** Priority follows dependency order. Piece 22 removes the type fragmentation that blocks 23's cross-cutting cleanup. Piece 24 is SDK-internal and can proceed independently. Piece 25 requires a deprecation strategy decision (potential major version bump).
+
+---
+
+## Applies To
+
+All squad agents working on pieces 22–25. Coordinators should use this priority when routing work.
+
+## Consequences
+
+- Pieces 23–25 are not urgent but should be scheduled before any piece that adds NEW doctor checks or OTel instrumentation
+- The "won't fix" items (D-10, D-17) should not appear in future debt audits — they are explicitly accepted
+
+---
+
 ### 2026-05-18: Guard-Ordering Test Discipline
 
 **Author:** Flight (Lead)  
