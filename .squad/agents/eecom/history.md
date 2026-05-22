@@ -67,6 +67,10 @@ The squad agent discovery file is governance infrastructure, maintained separate
 
 If a command owns both an in-repo mirror and a user-scoped install of the same template, upgrade cannot stop at the repo copy. Reuse the same installer helper for upgrade-time refresh, gate it on the global artifact already existing, and add a regression test that seeds the installed copy with stale bytes so consumer repos do not stay pinned forever.
 
+### Registry corruption diagnostics (2026-05-22T14:08:38-07:00)
+
+`loadRegistryFromDisk` surfaces registry parse/schema problems as SDK `SquadError` instances with `category === ErrorCategory.VALIDATION`, `context.operation === "registry"`, and non-recoverable error severity. The exported `validateEntry(value: unknown, entryIndex: number): RegistryEntry` contract validates only one entry, preserves forward-compatible unknown fields, and throws `SquadError` messages that include the registry index. Doctor's seam pattern: catch only registry validation errors, re-read raw JSON, split syntax failures from per-entry validation failures, and rethrow non-validation I/O/permission errors to preserve existing behavior.
+
 ## Known Issues
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.

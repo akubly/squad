@@ -16,8 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { clonesMatch, isValidCallsign, normalisedPathKey, normalizeRemoteUrl, resolveSquad } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk, validateEntry, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
+import { ErrorCategory, SquadError } from '@bradygaster/squad-sdk/adapter/errors';
 import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { findCloseMatch } from '../lib/close-match.js';
@@ -113,9 +114,20 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     explicit: opts.registryPath,
     env,
   });
-  const { registry } = loadRegistryFromDisk({
-    registryPath: registryFilePath ?? undefined,
-  });
+  let registry: Registry | null;
+  try {
+    ({ registry } = loadRegistryFromDisk({
+      registryPath: registryFilePath ?? undefined,
+    }));
+  } catch (error) {
+    const corruptionFindings = _diagnoseRegistryCorruption(error, registryFilePath);
+    if (!corruptionFindings) {
+      throw error;
+    }
+    findings.push(...corruptionFindings);
+    escalate('warn');
+    return { severity, findings };
+  }
 
   if (!hasLocalSquad && !registry) {
     findings.push(
@@ -333,6 +345,65 @@ function _clonePathsOverlap(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+function _diagnoseRegistryCorruption(error: unknown, registryFilePath: string | null): string[] | null {
+  if (!registryFilePath || !_isRegistryValidationError(error)) {
+    return null;
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(registryFilePath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [
+      "Registry file is not valid JSON. Run 'squad doctor --purge <callsign>' or edit ~/.squad/registry.json manually to repair.",
+    ];
+  }
+
+  if (_isRecord(parsed) && Array.isArray(parsed['squads'])) {
+    const findings: string[] = [];
+    parsed['squads'].forEach((entry, index) => {
+      try {
+        validateEntry(entry, index);
+      } catch (entryError) {
+        findings.push(
+          `Registry entry [${index}] is malformed: ${_asSentence(_errorMessage(entryError))} Fix or remove this entry and retry.`,
+        );
+      }
+    });
+    if (findings.length > 0) {
+      return findings;
+    }
+  }
+
+  return [`Registry file is malformed: ${_asSentence(_errorMessage(error))} Fix or remove invalid registry data and retry.`];
+}
+
+function _isRegistryValidationError(error: unknown): error is SquadError {
+  return error instanceof SquadError &&
+    error.category === ErrorCategory.VALIDATION &&
+    error.context.operation === 'registry';
+}
+
+function _isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function _errorMessage(error: unknown): string {
+  return error instanceof Error && error.message.length > 0 ? error.message : 'Unknown validation error';
+}
+
+function _asSentence(message: string): string {
+  const trimmed = message.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 // ============================================================

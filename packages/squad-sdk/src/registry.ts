@@ -65,7 +65,12 @@ function validateStringArray(value: unknown, fieldName: string, entryIndex: numb
   });
 }
 
-function validateEntry(value: unknown, entryIndex: number): RegistryEntry {
+/**
+ * Validate and normalize one registry entry.
+ *
+ * @internal Exposed for CLI diagnostics; prefer {@link parseRegistry} or {@link validateRegistry} for normal registry reads.
+ */
+export function validateEntry(value: unknown, entryIndex: number): RegistryEntry {
   if (!isRecord(value)) {
     throw validationError(`Registry entry ${entryIndex} must be an object.`);
   }

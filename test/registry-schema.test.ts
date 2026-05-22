@@ -7,6 +7,7 @@ import {
   parseRegistry,
   registerEntry,
   upsertEntry,
+  validateEntry,
   writeRegistry,
 } from '../packages/squad-sdk/src/registry.js';
 
@@ -56,6 +57,11 @@ describe('registry schema', () => {
   it('S3 rejects entry missing required path field', () => {
     expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [{}] }))).toThrow(SquadError);
     expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [{}] }))).toThrow(/path.*required/i);
+  });
+
+  it('S3b exports validateEntry for per-entry diagnostics', () => {
+    expect(() => validateEntry({}, 3)).toThrow(SquadError);
+    expect(() => validateEntry({}, 3)).toThrow(/Registry entry 3 path is required/i);
   });
 
   it('S4 rejects path that does not end with .squad', () => {

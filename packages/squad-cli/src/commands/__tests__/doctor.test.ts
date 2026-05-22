@@ -343,6 +343,102 @@ describe('runDoctor: registry health warnings', () => {
 });
 
 // ============================================================
+// Registry corruption diagnostics
+// ============================================================
+
+describe('runDoctor: registry corruption diagnostics', () => {
+  let hostDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('corruption-host');
+    fs.mkdirSync(path.join(hostDir, '.squad'), { recursive: true });
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('C01 reports the specific malformed registry entry index as a warning', async () => {
+    writeRegistry(registryPath, [
+      {
+        callsign: 'alpha',
+        path: path.join(hostDir, '.squad'),
+        clones: [],
+        status: 'active',
+      },
+      {
+        callsign: 'broken',
+        clones: [],
+        status: 'active',
+      },
+    ]);
+
+    const result = await runDoctor({
+      cwd: TEST_ROOT,
+      registryPath,
+      env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
+    });
+
+    expect(result.severity).toBe('warn');
+    expect(result.findings).toContain(
+      'Registry entry [1] is malformed: Registry entry 1 path is required. Fix or remove this entry and retry.',
+    );
+  });
+
+  it('C02 reports invalid registry JSON syntax as a warning', async () => {
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(registryPath, '{not-json', 'utf8');
+
+    const result = await runDoctor({
+      cwd: TEST_ROOT,
+      registryPath,
+      env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
+    });
+
+    expect(result.severity).toBe('warn');
+    expect(result.findings).toContain(
+      "Registry file is not valid JSON. Run 'squad doctor --purge <callsign>' or edit ~/.squad/registry.json manually to repair.",
+    );
+  });
+
+  it('C03 valid registry does not report corruption findings', async () => {
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: path.join(hostDir, '.squad'),
+      clones: [],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({
+      cwd: TEST_ROOT,
+      registryPath,
+      env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
+    });
+
+    expect(result.findings.some(f => /registry (entry \[|file is not valid json|file is malformed)/i.test(f))).toBe(false);
+  });
+
+  it('C04 missing registry file preserves no-registry guidance without corruption findings', async () => {
+    const result = await runDoctor({
+      cwd: TEST_ROOT,
+      registryPath,
+      env: {},
+      copilotHome: path.join(TEST_ROOT, 'test-copilot-home'),
+    });
+
+    expect(result.severity).toBe('info');
+    expect(result.findings.some(f => /registry (entry \[|file is not valid json|file is malformed)/i.test(f))).toBe(false);
+    expect(result.findings.some(f => /No local \.squad\/ directory found and no registry exists/i.test(f))).toBe(true);
+  });
+});
+
+// ============================================================
 // --normalize-callsigns tests
 // ============================================================
 
