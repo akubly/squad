@@ -1,47 +1,139 @@
-# Flight — Project History Archive
+# Flight — Archive (Pre-Piece 05)
 
-> Older learnings (pre-2026-05-13), archived from history.md for reference.
+> Learnings from wave 1 pilots, crash recovery, release crisis, triage sessions, etc.
 
-## Archived Team Updates
+---
 
-### 2026-03-26T06:41:00Z — Crash Recovery Execution Complete
+## Core Context
 
-Post-CLI crash recovery executed in 3 rounds. Round 1: Flight audited PR/issue state; FIDO verified baseline (5,038 tests ✅ green); Scribe merged stale inbox. Round 2: Flight closed 3 duplicate PRs with rationale; Procedures rebased PR #619 onto dev, resolved 3 merge conflicts, merged; FIDO reviewed 9 community PRs. Round 3: Coordinator merged 3 approved PRs. **10 PRs merged total**. **3 PRs closed** as duplicates. **6 PRs awaiting author revisions**. Dev branch green.
+Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary review heuristic: "Squad Ships It" — if Squad doesn't ship the code, it's IRL content. Proposal-first: meaningful changes need docs/proposals/ before code. Two-error lockout policy: agent locked out after 2 errors in a session. Test name-agnosticism: framework tests must never depend on dev team's agent names.
 
-### 2026-03-25T15:23Z — Triage Session & PR Review
+## Learnings
 
-Flight triaged 14 untriaged GitHub issues, created prioritized work session plan. Identified high-value quick wins (P1): #610 (docs broken link, 5-min fix), #590 (getPersonalSquadRoot bug, P0), #591 (hiring wiring docs). Deferred community feature contributions pending PR review. FIDO reviewed 10 open PRs, identified 3 duplicate/overlap pairs (6 PRs consolidate to 4).
+### Branch-relevant fix plan — Piece 21 (2026-05-22)
 
-### 2026-03-23T22:00Z — Release Crisis Recovery
+📌 **9 fixes scoped and sequenced for piece 21 execution.**
 
-v0.9.0→v0.9.1 incident resolved. Released v0.9.1 stable on npm after 8-hour debugging marathon. Root causes: dependency validation gap, GitHub workflow cache race, npm workspace publish automation broken, coordinator decision-making under pressure, no pre-publish verification. Created comprehensive retrospective with 5 root causes and 6 action items. Filed 9 GitHub issues documenting release process improvements. 10 community PRs merged. All 15 discussions fully triaged.
+After full attribution pass, 9 fixes are in scope (LOCAL + bucket-b pre-existing that block shared-squad functionality). Two gaps dropped after no-shipped-users analysis: T2-2 (multi-format registry migration) and T3-6 (backward-compat mode) — registry feature is entirely new on this branch, no legacy consumers exist. T2-5 and T3-5 are confirmed duplicates; merged into single FIX-7.
 
-### 2026-03-22T09:35Z — Wave 1 Personal Squad
+**6 ship-gate fixes (must land before piece 21 merges to dev):**
+FIX-1 (SDK smoke-test in upgrade), FIX-2 (upgrade copilot payload repair), FIX-3 (doctor .gitattributes/.gitignore), FIX-4 (registry schema migration), FIX-5 (per-entry corruption detection), FIX-9 (skills/instructions/global-agent doctor checks).
 
-Ambient personal squad design validated and 19-task implementation plan authored across 4 PRs. MVP = PR #1 + PR #3. EECOM executing Phase 1–2 (SDK + CLI), Procedures executing Phase 3 (governance). All design gaps resolved; dependency graph established.
+**3 follow-on fixes (post-merge to dev):**
+FIX-6 (bulk stale-path repair via --normalize), FIX-7 (cross-platform path display), FIX-8 (dual-doctor structural unification — deliberately deferred to piece 22 to avoid L-complexity landing in piece 21's blast radius).
 
-## Archived Learnings
+**Architectural ruling on dual-doctor:** Do NOT unify in piece 21. Add new checks to legacy doctor now (the "wrong" form), then unify in a dedicated piece-22 PR. Unification is L complexity and doesn't unblock any piece-21 functionality. The compounding benefit is real but the coupling risk in piece 21's PR is not worth it.
 
-### Issue Filing Patterns (2026-03-23 Release Incident)
-When a major incident occurs, file 9+ GitHub issues documenting root causes and improvements. Pattern: one issue per root cause + one per action item. Let team pick up issues in priority order. This accelerates fixes and creates accountability.
+**Wave plan:** Wave 1 (FIX-4, FIX-5 — data contract), Wave 2 (FIX-1, FIX-2, FIX-3, FIX-9 — core functionality, parallelizable), Wave 3 (FIX-6, FIX-7, FIX-8 — polish, FIX-8 deferred).
 
-### Release Governance Directives (2026-03-23)
-Brady established strict release governance: (1) Surgeon owns all publishing; (2) strict adherence to playbook; (3) document problems so they don't recur; (4) CI/CD is top priority; (5) written playbooks for everything; (6) no improvisation.
+### Piece 19 Adversarial Review — APPROVED (2026-05-19T22:30:35Z)
 
-### Adoption Tracking Architecture
-Three-tier opt-in system: Tier 1 (aggregate-only, `.github/adoption/`) ships first; Tier 2 (opt-in registry) designed next; Tier 3 (public showcase) launches when ≥5 projects opt in.
+📌 **Spec parity confirmed.** 19/19 spec tests present in `assign-payload.test.ts`. Guard ordering (cold-start load → callsign validation → registry write) correct per spec. Error surface properly wrapped post-CAPCOM revision. Symlink safety + callsign format validation (post-GNC revision) complete. All gates pass. ✅ Ship-ready.
 
-### Remote Squad Access
-Three-phase rollout: Phase 1 — GitHub Discussions bot with `/squad` command (1 day); Phase 2 — GitHub Copilot Extension via Contents API (1 week); Phase 3 — Slack/Teams bot (2 weeks).
+### Piece 14 Adversarial Review — APPROVED WITH FINDINGS (2026-05-18)
 
-### Content Triage Skill
-"Squad Ships It" litmus test codified into reusable workflow. Content labels: `content:blog`, `content:sample`, `content:video`, `content:talk`.
+📌 **Guard-ordering tests must use mocks that simulate the NEXT guard's normalization behavior, not identity mocks.**
 
-### Distributed Mesh Integration
-Zero code changes. Skill files in templates/skills/, scripts in scripts/mesh/, docs in features/. Convention-first additive layer — invisible if unused.
+Adversarial review of `squad assign` (warm path + cold-start) found no code bugs but identified a significant test gap: the containment guard ordering test (A15) uses `getGitRoot: (dir) => dir`, which doesn't prove the ordering prevents false idempotency. Real git root resolution collapses subdirectories to their repository root. A test needs `getGitRoot: () => parentCloneRoot` to demonstrate that Guard 4 fires BEFORE Guard 5 prevents the collapse from reaching Guard 6.
 
-### Sprint Prioritization Pattern
-Rank by: (1) bugs with active user impact, (2) quality/test gaps blocking GA, (3) high-ROI features unblocking downstream work. Interleave stability with velocity across sprint capacity.
+**Additional findings:** 6 minor (multi-clone growth untested, origins within-batch dedup gap, inactive reactivation assertion incomplete, no negative filesystem assertion on warm path, forward-compat only tested on target entry, cold-start orphan on registry-write failure). 2 nits (branch fallback unimplemented per "may" provision, relative `--clone-to` path resolution untested).
 
-### Issue Triage Patterns (2026-03-22–2026-03-23)
-Identified 10 unlabeled issues requiring squad assignment. SDK issues → squad:eecom + squad:capcom. Personal squad → squad:flight. A2A protocol → squad:flight + domain experts. Tooling layers → squad:eecom + squad:procedures. Manual label application needed by repo owner.
+**Pattern confirmed:** Ordered-guard test discipline requires mocking the DOWNSTREAM guard's transformation function to its realistic output, then proving the UPSTREAM guard catches the scenario first. Identity mocks prove the guard fires but leave ordering bugs invisible.
+
+### Piece 13 Adversarial Review — REJECT → Fixed → APPROVE (2026-05-18)
+
+📌 **PowerShell backtick corruption in commit messages caught by byte-level verification. Static spec-parity checks alone would have missed this.**
+
+Review of hard-remove-register feature identified a critical commit-message corruption: PowerShell's backtick escape processing in double-quoted heredocs consumed backticks and following characters before git received the message. The message text shipped corrupted (`` `register` `` → `register` missing backtick). This manifests only at commit-write time — no code diff visibility, no spec-parity check would catch it.
+
+**Key insight:** Adversarial reviewers must verify commit message bytes directly, not just tree content. The static spec-diff analysis was clean; the blockeroccurred purely in metadata. Surgeon applied a targeted message-only amend under reviewer-lockout, force-pushing with tree preservation and trailer intact.
+
+**Non-blocking findings:**
+- HIGH: Baseline contamination (lingering `register` references in test fixture data); accepted as upstream cleanup.
+- MEDIUM: Test rigor gap (static spec-parity vs. behavioral removal lifecycle verification).
+- LOW: Missing `squad register --help` refusal test.
+
+**Decision recorded:** New PowerShell-backtick safety decision captured in `.squad/decisions/inbox/surgeon-commit-msg-backtick-safety.md`; new skill `.squad/skills/commit-message-quoting/SKILL.md` published team-wide.
+
+### Piece 10 Review — APPROVE (2026-05-15)
+
+📌 **Init fail-fast approved. Solid validation-before-write pattern with one forward-looking concern.**
+
+The three-guard ordering (scaffold → callsign → clone-path → scaffold write → registry write) is correctly enforced in code structure, not just convention. Each guard throws before any filesystem mutation. Exit code 2 scoping is safe today (catch block is init-specific) but the mechanism (`instanceof ConfigurationError`) could overload if future commands adopt the same pattern without introducing a more specific error subclass. Noted as non-blocking architectural concern.
+
+**Key findings:**
+- No critical blockers.
+- Reactivation path creates scaffold dirs without writing registry — acceptable since sentinel check already passed and inactive-entry handling is deferred to later pieces.
+- Clone-path guard correctly delegates to `clonesMatch` with separator-bounded containment (sibling prefix non-match verified).
+- Tests are behavioral (command-level contracts), not implementation-coupled. A legitimate refactor of internal variable names would not break them.
+- Exit code 2 contract is init-only today. Future expansion should introduce a `ConflictError` subclass rather than overloading the `ConfigurationError` instanceof check.
+
+**Phase C decision recorded:** Exit code 2 means "conflict user can resolve by choosing different target/callsign/directory." Future commands should subclass ConfigurationError rather than reusing raw instanceof check. Applies to all CLI error-to-exit-code mapping patterns.
+
+### Piece 08c Review — APPROVE (2026-05-14)
+
+📌 **VOX lifecycle command migration approved without blockers.**
+
+VOX's 08c implementation correctly threads `resolvedForStart.path` / `resolvedForRc.path` as `squadDir: string` into runners, defers dynamic imports until after the guard, and separates process CWD from squad metadata path. Two minor findings deferred: (1) resolver throws propagate to top-level handler instead of local `fatal()` — consistent with 08b but produces raw stack trace on non-SquadError; (2) no `start throws` dispatch test (only null test exists, throw test exists only for rc). Neither blocks Phase C.
+
+**Pattern confirmed:** For runners that only need the resolved path (not callsign or registry metadata), threading `squadDir: string` is acceptable. Full-struct threading (`resolved: guardResult`) reserved for runners needing richer resolver context (e.g., assign).
+
+### Piece 08b Revision — Sims Folded Flight Nits (2026-05-14)
+
+📌 **Flight nits folded into Sims revision as non-blocking tech debt.**
+
+Flight's APPROVE WITH NITS identified dual resolver imports and inconsistent guard placement across consult/link/assign commands. These were architectural nits (non-blocking for 08b), but valuable for follow-up cleanup.
+
+**Sims resolution:**
+- **Dual imports:** Harmonized to single import source. `resolveSquadV2` alias in `cli-entry.ts` for namespace collision avoidance; direct import `resolveSquad` in `assign.ts` fallback for programmatic callers. Clear pattern documented.
+- **Guard placement:** All three commands now use dispatch-level guards in `cli-entry.ts` as primary protection. `assign.ts` retains internal fallback guard (`opts.resolved ?? resolveSquad(...)`) for non-CLI direct API use. Consistent: dispatch is the authority for CLI invocations; internal resolution is safety net for programmatic callers.
+
+**Pattern established:** Dispatch guards are the primary CLI protection layer. Module-internal guards are fallbacks for non-CLI code paths. Future pieces (08c+) should follow this pattern.
+
+### Piece 06 Adversarial Review — Dispatch Coverage (2026-05-14)
+
+Source-sniff tests can mask CLI dispatch coverage gaps; require behavioral assertions for flag handling and real child-process spawning to catch entry-point arg parsing errors.
+
+### Resolver piece reviews require chain-precedence coverage (2026-05-13)
+
+Piece 03 introduces five new resolver chain steps (clones, origins, platform, worktree, init-guard). Pairwise precedence tests are acceptable when the resolver is sequential (no branching between steps). A single 8-step test would be ideal documentation but is not a blocking requirement. Future resolver pieces that introduce conditional branching between steps MUST include a single comprehensive chain test.
+
+### Resolver test coverage pattern for platform-specific behavior (2026-05-13)
+
+When a path-comparison function uses `process.platform` directly (no platform parameter injection), tests for platform-specific branches can only run on the matching host. Any test that cannot fully execute on the current platform must do one of:
+1. **Conditional real assertion**: `if (process.platform === 'win32') expect(result).toBe(true)` — not `expect(typeof result).toBe('boolean')`.
+2. **Skip clearly**: `if (process.platform !== 'linux') return;` with a comment explaining why.
+3. **Inject platform**: Refactor the function to accept `platform?: NodeJS.Platform` so tests can override it.
+
+Placeholder assertions that pass trivially are worse than no test — they give false confidence.
+
+### Piece 21 Audit: upgrade + doctor Coverage vs Pieces 1–21 (2026-05-21)
+
+📌 **Upgrade and doctor are the correct surfaces for repair/diagnosis.** Init's idempotency guard (short-circuit on existing scaffold) makes it the wrong place for repair logic. Upgrade owns "bring repo to latest template state." Doctor owns "diagnose drift from expected state." This scoping is confirmed by the audit — every gap maps cleanly to one or both.
+
+**Key architectural gaps found:**
+1. `upgrade` (core) handles `.github/agents/squad.agent.md` and global `~/.copilot/agents/squad.agent.md` but does NOT verify per-repo copilot payload state (piece 19). Doctor's registry-aware module diagnoses orphan payloads but upgrade has no path to repair them.
+2. Doctor has TWO independent implementations: legacy `cli/commands/doctor.ts` (checks local repo health) and registry-aware `commands/doctor.ts` (validates registry state). They are called sequentially from `cli-entry.ts` but share no result model, no common severity enum, and no common `--fix` surface. This architectural split creates the asymmetries found across pieces 5–21.
+3. `upgrade` does not validate SDK symbol resolution (`defaultRegistryFilePath`) after template refresh — the smoke test failure that precipitated this audit.
+4. Pieces 12 (platform adapter), 13 (hard-remove-register), 17 (fuzzy-match), are pure library additions with no upgrade/doctor surface implications.
+
+**Upgrade-vs-init scoping principle (CONFIRMED):**
+- `init` = first-time scaffold creation + registry registration. Guards: fail-fast on conflicts. Must not attempt repair.
+- `upgrade` = evolve an existing squad to latest version. Writes templates, runs migrations, syncs skills, refreshes agent files. May overwrite.
+- `doctor` = diagnose without mutating (except `--purge`/`--normalize`). Reports actionable findings for manual or upgrade-driven repair.
+
+### Branch Attribution Pass — Piece 21 Gaps vs origin/dev (2026-05-21)
+
+📌 **The vast majority of T1/T2 gaps are LOCAL — introduced by this branch's new features (pieces 14–21).**
+
+Branch `akubly/upstream-21-post-stack-review` is ~30+ commits ahead of `origin/dev`. Origin/dev has NONE of: `registry.ts`, `copilot-payload.ts`, `resolution-v2.ts`, `path-utils.ts`, `callsign.ts`, `platform/adapter-factory.ts`, `commands/doctor.ts`, `commands/init.ts`. The entire registry-aware command layer is local.
+
+**Attribution summary:** 5 T1 gaps → 1 origin/dev + 4 local. 6 T2 gaps → 1 origin/dev + 4 local + 1 unclear. 8 T3 gaps → 6 origin/dev + 2 local. All 5 cross-command asymmetries are origin/dev. Dual-doctor structural gap is local.
+
+**Key re-classification:** T1-3 (global agent refresh in upgrade) was a local gap and is now PARTIALLY FIXED by commit `6a29bfa7` — `installCoordinatorAgent(requireExisting: true)` added to both upgrade paths.
+
+**Ship implication:** Local T1/T2 gaps (registry schema migration, per-repo payload repair) are the real blockers for piece 21 quality. Origin/dev T3 polish gaps (dry-run, instrumentation, diagnostics) are long-standing debt that can defer.
+
+## Archive
+
+See `history-archive.md` for learnings prior to 2026-05-13 (crash recovery, triage sessions, release crisis, Wave 1 personal squad, adoption tracking, issue triage patterns, PR review pipeline, personal squad architecture, community PR batches, etc.).

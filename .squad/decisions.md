@@ -450,404 +450,6 @@ All four blocking findings must be addressed:
 
 ---
 
-### 2026-05-14: Sims — 08b Revision Complete
-
-**By:** Sims (Integration / E2E)
-**Date:** 2026-05-14
-**Branch:** `akubly/upstream-08b-migrate-user-action-commands`
-**Revision of:** commit `012d6d16` (EECOM)
-**Commit strategy:** Follow-on commit on top of `ca413407` (Scribe closure). Phase C will squash with `012d6d16` before PR. EECOM remains locked out per Reviewer Rejection Protocol.
-
-#### Verdict-by-Verdict Resolution
-
-### FIDO Gap #1 — Consult setup-mode success path absent
-
-**Ruling:** Closed.
-
-Added test `consult setup creates .squad/config.json when resolver succeeds and personal squad exists` in `test/cli/legacy-resolver-migration.test.ts`. The test:
-1. Runs `git init` on `consumerRepo` (proper git tree needed for `setupConsultMode` to write `.git/info/exclude`).
-2. Runs `squad init --global` with a test-local XDG config location to create a personal squad.
-3. Runs `squad consult` from `consumerRepo` (registered clone in the fixture registry) — the dispatch-level resolver guard passes, `runConsult` receives control, and `setupConsultMode` writes `.squad/config.json`.
-4. Asserts `exitCode === 0`, stdout contains `Consult mode activated`, config file exists, and `.git/info/exclude` contains `.squad/`.
-
-**Evidence:** `test/cli/legacy-resolver-migration.test.ts` — test at end of `user-action CLI command resolver migration` describe block.
-
----
-
-### FIDO Gap #2 — `.gitignore` non-mutation unverified
-
-**Ruling:** Closed.
-
-Extended both consult failure tests and the link failure test with ignore/exclude assertions:
-
-- `consult setup does not create local .squad/ when no squad is found` — added assertion that `TEST_ROOT/.gitignore` does not exist, and that `.git/info/exclude` (if present) does not contain `.squad/`.
-- `consult --check does not create .squad/config.json when no squad is found` — same assertions.
-- `link does not create .squad/config.json when no squad is found` — added assertion that `TEST_ROOT/.gitignore` does not exist.
-
-**Evidence:** `test/cli/legacy-resolver-migration.test.ts` lines in updated consult and link failure tests.
-
----
-
-### FIDO Gap #3 — Three assign-to-copilot failure modes
-
-**Ruling: Deferred to a future piece.**
-
-**Spec citation:** 08b spec §`assign-to-copilot` says "Preserve explicit callsign and URL handling. Resolver adoption must not make a URL without the required clone destination perform an implicit clone. Preserve rollback behavior for clone failures and host-verification failures."
-
-**Reasoning:** The verb "preserve" implies these behaviors exist in a prior implementation. The `assign-to-copilot` command is introduced as new work in 08b — there is no prior implementation to preserve. URL-based resolution, git clone operations, and host verification are distinct product features that require their own spec section, not part of the resolver-migration scope. The 08b spec's stated purpose is "each command must settle squad resolution before it performs any file write, registry update, payload installation, clone operation, or other external call." That precondition contract is satisfied.
-
-Deferring these three modes does not leave a safety gap: the current implementation accepts only `--callsign` (a registry key lookup, not a URL), performs no git clone, and has no host-verification step — so there is nothing to preserve and no silent failure to guard against. A future piece that adds URL-based assign or clone-on-assign behavior should spec and test those paths at introduction time.
-
-**Existing coverage for resolver failure and registry non-mutation:** `assign-to-copilot does not mutate registry when callsign is not found` covers the case where the callsign lookup fails after the dispatch guard passes.
-
----
-
-### FIDO Gap #4 — Dead `resolved` variable
-
-**Ruling:** Closed via two complementary fixes.
-
-**consult and link dispatch (cli-entry.ts):** The dispatch guard for both commands previously stored the result in a named variable that was never used: `const resolved = resolveSquadV2(...)`. Since the runner functions (`runConsult`, `runLink`) handle their own context independently and do not need the resolved struct, the correct fix is to remove the dead variable and use an inline guard check:
-
-```typescript
-// Before:
-const resolved = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
-if (!resolved) { ... }
-
-// After:
-if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) { ... }
-```
-
-This makes the gate-only semantics explicit: the dispatch layer checks existence; the runner operates from its own inputs.
-
-**assign-to-copilot (cli-entry.ts + assign.ts):** The runner needs the resolved struct (for callsign, path). Added `resolved?: ResolvedSquad` to `RunAssignOpts`. The dispatch guard stores its result and passes it:
-
-```typescript
-const guardResult = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
-if (!guardResult) { fatal(...); return; }
-// ...
-await runAssignToCopilot({ ..., resolved: guardResult });
-```
-
-The runner uses `opts.resolved ?? resolveSquad(...)`, so CLI invocations skip re-resolution while direct (test) invocations fall back gracefully.
-
-**Threading proof test:** Extended `assign-to-copilot reports already-assigned` to assert `result.stdout.toContain(fixture.hostSquad)`. The runner output includes `resolved.path` only if it received the correct resolved struct — proving guard and runner operated on the same context.
-
-**Evidence:** `packages/squad-cli/src/cli-entry.ts` (consult, link, assign dispatch blocks), `packages/squad-cli/src/commands/assign.ts` (`RunAssignOpts.resolved`, implementation), `test/cli/legacy-resolver-migration.test.ts` (threading assertion).
-
----
-
-### Flight Nit — Dual `resolveSquadV2` / `resolveSquad` imports, guard placement inconsistency
-
-**Ruling:** Closed.
-
-**Import harmonization:** `resolveSquadV2` in `cli-entry.ts` is a local alias for `resolveSquad` from `@bradygaster/squad-sdk` (the alias exists to avoid collision with the legacy `sdk.resolveSquad(path)` call pattern still present in that file). In `assign.ts`, the same function is imported directly as `resolveSquad`. With the threading change (dispatch guard passes result to runner), `assign.ts` no longer calls `resolveSquad` on the primary CLI path — the function is a fallback for direct programmatic invocation. This makes the two call sites non-competing.
-
-**Guard placement:** All three commands now use dispatch-level guards in `cli-entry.ts` as the primary protection. `assign.ts` retains an internal fallback guard (`opts.resolved ?? resolveSquad(...)`) for non-CLI callers only. This is consistent: dispatch is the authority for CLI invocations; internal resolution is a safety net for direct API use.
-
----
-
-### RETRO Nit — Path validation on `--home` and `opts.cwd`
-
-**Ruling:** Closed.
-
-Added `path.isAbsolute()` checks and `..`-segment detection in two locations:
-
-1. `runAssignToCopilot` (assign.ts): validates `opts.cwd` and `opts.home` before any file-write operation. Rejects non-absolute paths and paths containing `..` traversal segments.
-2. CLI dispatch block for `assign-to-copilot` (cli-entry.ts): validates the `--home` flag value before it is passed to the runner.
-
-**Evidence:** `packages/squad-cli/src/commands/assign.ts` top of `runAssignToCopilot`; `packages/squad-cli/src/cli-entry.ts` `assign-to-copilot` block.
-
----
-
-## Commit Strategy
-
-Follow-on commit on top of `ca413407` (Scribe adversarial-review-closure). Phase C will squash this with `012d6d16` before opening the upstream PR, maintaining the "single squashed commit per piece" invariant in the PR diff.
-
-Scrub gate: Gate 1 FAIL and Gate 3 WARN are pre-existing baseline contamination — accepted by akubly in all prior Phase B pieces. No new strip-listed paths introduced by this revision.
-
-Tests: 31 GREEN (17 `legacy-resolver-migration.test.ts` + 14 `consult.test.ts`). Build: clean.
-
----
-
-
-## 2026-05-14: Piece 08a Accepted — Final
-**By:** akubly (Brady) — via Copilot coordinator
-**Subject:** akubly/upstream-08a-migrate-readonly-commands @ revised piece 0e4f301e
-**What:** Piece 08a is complete. Post-revision delta triage by FIDO confirmed the 7-test full-suite delta was all flakes (3 flakes passed 3/3 on individual rerun; 0 real regressions; 2 tests actually fixed by the revision). User accepted the revision as final without further re-review.
-**Why:** All four concrete findings from the original review (CAPCOM's SDK barrel routing + dispatch unification; FIDO's --team-root parity + boundary test) were addressed by CAPCOM under strict lockout. Migration tests improved from 5/5 to 8/8 PASS. Build clean. Scrub gate baseline unchanged. Phase C will open the PR in a separate session.
-**Lockout status:** CONTROL remains locked out for piece 08a (artifact-scoped; does not affect their work on other pieces).
-
----
-
-## 2026-05-14: Piece 08a Revision Complete — CAPCOM, Awaiting User Re-verification
-
-**By:** CAPCOM (SDK Expert) — reviewer rejection lockout, independent revision  
-**Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `0e4f301e`  
-**Original author locked out:** CONTROL (CONTROL remains locked for this cycle)  
-
-### Revision Scope & Findings Addressed
-
-All four findings from the rejection cycle addressed in single pass:
-
-1. **CAPCOM boundary violation:** SDK barrel routing
-   - Added overload-compatible registry-aware `resolveSquad` path through `packages/squad-sdk/src/index.ts`
-   - Rerouted CLI resolver imports from SDK subpath to SDK root barrel
-   - All three CLI dispatch paths (`cli-entry`, `config`, `cross-squad`) now consume stable public surface
-   - `delegateCommand` unified with `discover` on v2 resolution
-
-2. **CAPCOM dispatch inconsistency:** Legacy fallback divergence
-   - Migrated `delegate` to v2 resolver with shared start-directory handling
-   - Removed legacy `detectSquadDir(process.cwd())` path from cross-squad delegation
-   - All cross-squad commands now thread `--team-root` / `SQUAD_TEAM_ROOT` through resolver
-
-3. **FIDO `--team-root` / `SQUAD_TEAM_ROOT` parity:** Test coverage gap
-   - Added test coverage for CLI start-directory resolution with env override
-   - `test/cli/legacy-resolver-migration.test.ts` expanded to prove override parity
-
-4. **FIDO action-command boundary test:** Weak regression sentinel
-   - Strengthened coverage: `consult --status` now proves action commands still use legacy dispatch path outside read-only migration
-
-### Test & Build Verification
-
-- **Migration tests:** 8/8 pass (expanded from 5/5)
-- **Full suite:** 6,308/6,432 tests pass (baseline: 6,312/6,429)
-  - **Drift note:** 7-test delta vs. baseline (124 failures vs. 117 pre-revision). Origin unclear — potential flakiness vs. minor regression from SDK barrel re-export. User flagged for investigation if needed.
-- **Scrub gate:** Gates 2/4/5/6 PASS; Gates 1/3 baseline (no new piece-08a strip-listed path contamination)
-- **Build:** PASS
-
-### Coordinator Synthesis
-
-CAPCOM revision complete. Strict lockout protocol applied: CAPCOM as revision owner replaced CONTROL. CONTROL remains locked out unless re-rejection cycle restarts.
-
-**Status:** Awaiting user decision on re-verification. Branch ready for re-review if requested. See `.squad/orchestration-log/` for per-finding resolution details.
-
----
-
-## 2026-05-14: Phase B Piece 08a Adversarial Review — REJECTED, CAPCOM Revision Assigned
-
-**Session:** Phase B piece 08a adversarial review  
-**Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `fcb0cf1a`  
-**Requested by:** akubly (Brady)  
-**Verdict:** REJECTED — strict lockout for CONTROL per Reviewer Rejection Protocol  
-**Revision Owner:** CAPCOM (self-nominated, accepted by coordinator)
-
-### Review Summary Table
-
-| Reviewer | Verdict | Key Finding | Model |
-|----------|---------|-------------|-------|
-| Flight (Lead) | APPROVE | Branch hygiene clean; spec tests 5/5 pass; compound `resolveSquadDir()` duplication acceptable per spec | claude-opus-4.6 |
-| FIDO (Quality) | REQUEST CHANGES | 5/5 migration tests pass; 117 pre-existing suite failures unrelated; gaps: `--team-root` / `SQUAD_TEAM_ROOT` parity not tested in `discoverCommand()`; boundary test weak | claude-sonnet-4.6 |
-| RETRO (Security) | APPROVE | Scrub-gate intersection EMPTY; PII clean; tone clean; Co-authored-by exact match | claude-opus-4.6 |
-| CAPCOM (SDK Expert) | REJECT | Boundary violations: CLI imports `resolveSquad` from subpath instead of root barrel; dispatch inconsistency between cross-squad discovery and delegateCommand | claude-sonnet-4.6 |
-
-### Flight — APPROVE
-
-**By:** Flight (Lead) — adversarial review  
-**Verdict:** APPROVE  
-**Subject branch:** akubly/upstream-08a-migrate-readonly-commands @ fcb0cf1a  
-
-**Findings:**
-
-1. **Branch hygiene: PASS.** Single squashed commit based on `akubly/upstream-07-register-merge-clones-origins`. Co-authored-by trailer present. 7 files, under 30-file cap. No strip-listed paths touched. No forbidden routing markers, preview-channel markers, or comparison framing in any diff hunk.
-
-2. **Spec test surface: PASS (5/5).** All five spec-required tests implemented in `test/cli/legacy-resolver-migration.test.ts`. Fixture structure matches spec (host repo with `.squad/`, consumer with no `.squad/`, registry with clones entry, `SQUAD_REGISTRY_PATH` env override).
-
-3. **Command substitutions: ACCEPTABLE.** Spec names `list-related` and `dev`; codebase equivalents are `discover` (cross-squad.ts) and `config model` (config.ts). Spec explicitly permits: "If the current upstream tree uses a different module name for `list-related` or `dev`, update the closest current command module." CONTROL documented substitutions in history.md.
-
-4. **Architecture compound effect: POSITIVE with minor note.** `resolveSquadDir()` is defined identically in three files (cli-entry.ts:118, config.ts:25, cross-squad.ts:27). Spec says "keep the helper local" so this is compliant. However, pieces 08b/08c will add more copies. Recommend consolidating into a shared import after the 08-series completes. `formatResolverReason()` uses exhaustive switch with `never` default — future source types get compile-time enforcement. This is a good compound pattern.
-
-5. **Status command enhancement: CLEAN.** Status now displays resolver source reason and optional callsign for registry-backed resolution (cli-entry.ts:803-808). Existing fallback paths (global, none) preserved. No output shape regression.
-
-6. **Scope boundary: CLEAN.** `detectSquadDir` import remains in cross-squad.ts because other functions in that file (outside 08a scope) still use it. No orphaned imports from this piece's changes.
-
-7. **Working-tree drift decision: DOCUMENTED.** CONTROL stashed pre-existing drift before branching. Decision recorded in `.squad/decisions/inbox/control-08a-working-tree-drift.md`. No drift carried into the piece branch.
-
-8. **Tone compliance: PASS.** No comparison framing, no fork residue, no version leaks in any artifact (changeset, history.md entry, decision record).
-
-### FIDO — REQUEST CHANGES
-
-**By:** FIDO (Quality Owner) — adversarial review  
-**Verdict:** REQUEST CHANGES  
-**Subject branch:** akubly/upstream-08a-migrate-readonly-commands @ fcb0cf1a  
-
-**Test runs:**
-
-- `npm test -- test/cli/legacy-resolver-migration.test.ts`: PASS — 1 file passed, 5 tests passed.
-- `npm run build`: PASS — SDK and CLI TypeScript builds completed.
-- `npm test`: FAIL — JSON report: 1,736 suites total, 1,720 passed, 16 failed; 6,429 tests total, 6,312 passed, 9 failed, 61 pending. Failed files included `test/cli-packaging-smoke.test.ts`, `test/docs-build.test.ts`, `test/init-scaffolding.test.ts`, `test/resolution-v2.test.ts`, `test/scheduler.test.ts`, `test/state-backend.test.ts`, and `test/cli/team-root-resolution.test.ts`.
-- `.only` / `.skip` / `.todo` scan for `test/cli/legacy-resolver-migration.test.ts`: PASS — no matches.
-
-**Findings:**
-
-1. **Blocking: cross-squad substitution bypasses the CLI start directory.** `discoverCommand()` resolves from `process.cwd()` (`packages/squad-cli/src/cli/commands/cross-squad.ts:31-37`) and `cli-entry.ts` invokes it without passing `getSquadStartDir()` (`packages/squad-cli/src/cli-entry.ts:1133-1136`). The shared start directory already honors `SQUAD_TEAM_ROOT` (`packages/squad-cli/src/cli-entry.ts:117-119`). The test only runs `discover` with the consumer repo as `cwd` (`test/cli/legacy-resolver-migration.test.ts:143-152`), so it does not catch this dispatch gap.
-
-2. **Blocking: the read-only boundary test is not a strong regression sentinel.** The scope test invokes `consult` and asserts only non-zero exit plus absence of the host path (`test/cli/legacy-resolver-migration.test.ts:167-175`). That can pass for unrelated setup failures and does not prove action commands were left out of the migrated dispatch surface.
-
-3. **Coverage gap: parity is clones-happy-path only.** The fixture writes one registry entry with one `clones` match and empty `origins` (`test/cli/legacy-resolver-migration.test.ts:97-100`). There is no adversarial coverage for missing registry, explicit callsign errors, missing `clones[]`, multi-remote origin selection, conflicting origins, or path case behavior.
-
-4. **Quality gate: full suite is red.** Targeted coverage is green, but the repository test command failed. Without a documented baseline comparison, this review cannot approve the change.
-
-### RETRO — APPROVE
-
-**By:** RETRO (Security)  
-**Verdict:** APPROVE  
-**Subject branch:** `akubly/upstream-08a-migrate-readonly-commands` @ `fcb0cf1a`  
-
-**Findings**
-
-#### Scrub gate cross-reference (primary audit)
-
-Gate 1 flagged 80+ pre-existing strip-listed paths; Gate 3 flagged 20+ pre-existing references. **Zero intersection** with the 7 files touched by `fcb0cf1a`. Coordinator's acceptance of Gate 1 FAIL and Gate 3 WARN as baseline contamination is **valid** — no piece-08a file introduced or modified any flagged path.
-
-#### Tone compliance
-
-Four tone-pattern classes triggered during scan, all acceptable:
-- `upstream.json` — established project data model (13+ files reference it)
-- `resolveSquadV2` / `resolution-v2` — actual SDK module identifiers
-- `@bradygaster/squad-cli` — the project's npm scope
-- "previously" — pre-existing context line, not introduced by 08a
-
-No comparison framing, version leaks, or fork residue detected in the commit message, CONTROL's history entry, or the decision entry.
-
-#### PII / secret hygiene
-
-Zero emails, tokens, credentials, or internal infrastructure paths in any of the 7 touched files or the decision entry. The Co-authored-by Copilot noreply address is the only email reference — acceptable per protocol.
-
-#### Co-authored-by trailer
-
-Required Copilot co-author trailer confirmed.
-
-### CAPCOM — REJECT
-
-**By:** CAPCOM — SDK Expert  
-**Verdict:** REJECT  
-**Subject branch:** `akubly/upstream-08a-migrate-readonly-commands` @ `fcb0cf1a`  
-
-**Findings**
-
-1. **Boundary violation:** The three reviewed CLI files import `resolveSquad` from `@bradygaster/squad-sdk/resolution-v2` instead of the SDK root barrel. `packages/squad-sdk/src/index.ts` exports only resolution-v2 types and helper functions, not the registry-aware `resolveSquad`; this forces CLI production code through a resolver subpath instead of the stable public entry.
-
-2. **Dispatch inconsistency:** `cli-entry.ts` and `config.ts` use the v2 resolver, and `cross-squad.ts` uses it for `discover`, but `delegateCommand` still calls legacy `detectSquadDir(process.cwd())`. The read-only migration therefore leaves one cross-squad command path outside the registry-aware resolver.
-
-3. **No SDK source regression observed:** Commit file list does not include `packages/squad-sdk/src/**`; the scope stayed in CLI/test/state files.
-
-4. **No new unsafe boundary casts observed:** The diff did not introduce `any`, `@ts-ignore`, `as unknown as`, or non-null assertions in the reviewed resolver boundary changes.
-
-#### Revision owner
-
-CAPCOM. The fix is specifically about SDK public API shape and CLI↔SDK boundary discipline: export a minimal stable registry-aware resolver surface through the SDK public entry, then update all three CLI dispatch paths to consume that same surface without legacy fallback divergence.
-
-### Coordinator Synthesis
-
-**By:** akubly (Brady) — Coordinator  
-**Date:** 2026-05-14T14:19:34.109-07:00  
-
-Four independent reviews received. One REJECT (CAPCOM), one REQUEST CHANGES (FIDO, effectively blocking), two APPROVE (Flight, RETRO).
-
-**Coordinator Verdict: REJECTED**
-
-Per Reviewer Rejection Protocol (strict enforcement):
-- CAPCOM's REJECT (boundary violation, core SDK concern) is definitive.
-- FIDO's REQUEST CHANGES (test gaps, full-suite gate unmet) is effectively blocking.
-- Combined: piece 08a does not proceed to Phase C.
-
-**Lockout:**
-- CONTROL (author) — locked out under strict lockout semantics for this revision cycle.
-- CAPCOM (self-nominated revision owner) — accepted and confirmed.
-
-**Revision Scope (CAPCOM):**
-All four findings must be addressed in a single pass:
-1. **Flight's note:** `resolveSquadDir()` duplication consolidation acceptable in post-08-series cleanup, no action required now.
-2. **FIDO's gaps:** Test coverage for `--team-root` / `SQUAD_TEAM_ROOT` parity and stronger boundary-crossing tests.
-3. **RETRO's findings:** No action; approval stands.
-4. **CAPCOM's violations:** SDK barrel export fix + all three CLI dispatch paths updated to use single registry-aware resolver surface.
-
-**Expected state after CAPCOM revision:**
-- SDK exports stable registry-aware resolver through root barrel.
-- All CLI dispatch paths (`cli-entry`, `config`, `cross-squad`, `delegateCommand`) use the same resolver entry.
-- Test coverage gap (FIDO) filled.
-- Build + full-suite gate requirements met per Piece 05 baseline agreement.
-
----
-
-## 2026-05-14: Piece 08a: Migrate Read-Only Commands to Cross-Squad Resolution
-
-**Author:** CONTROL  
-**Piece:** 08a — Migrate read-only commands from inline resolution to cross-squad delegation  
-**Status:** REJECTED — Under CAPCOM revision
-
-### Context
-
-Piece 08a implements REPLAY-PROTOCOL semantics: read-only commands (`config`, `cross-squad`) are migrated to delegate responsibility to a remote cross-squad resolver, establishing the pattern for Phase C upstream integration and multi-squad coordination.
-
-### Implementation
-
-- **Files modified (7):** `.changeset/migrate-readonly-commands.md`, `packages/squad-cli/src/cli-entry.ts`, `packages/squad-cli/src/cli/commands/{config,cross-squad}.ts`, `test/cli/legacy-resolver-migration.test.ts`
-- **Changeset:** Added `patch` for CLI read-only command delegation surface
-- **Branch:** `akubly/upstream-08a-migrate-readonly-commands` @ commit `fcb0cf1a`
-
-### Test Results
-
-- **Migration tests:** 5/5 pass (legacy mode detection, resolver delegation, all command paths)
-- **Scrub gate outcome:** Gate 1 FAIL (pre-existing baseline contamination — not piece-08a), Gate 2 PASS, Gate 3 WARN (pre-existing baseline content), Gates 4/5/6 PASS
-- **Scrub gate verdict:** Piece-diff-scoped in practice; baseline contamination is upstream's problem, not piece 08a's. Piece 08a is complete.
-
-### Original Coordinator Decision (superseded by review verdict)
-
-**akubly (Brady):** ACCEPT — scrub gate is piece-diff-scoped in practice; baseline contamination is upstream's problem, not 08a's. Piece 08a is complete. No PR opened (Phase B protocol — Phase C handles PRs).
-
-### Status: Rejected post-review
-
-See "Phase B Piece 08a Adversarial Review — REJECTED" section above for full review outcomes and CAPCOM revision scope.
-
-## 2026-05-15: Piece 07 Revision — Register Merges Clones/Origins
-
-**Author:** CONTROL  
-**Date:** 2026-05-15  
-**Context:** Post-rejection revision of piece 07 after all three reviewers (Flight, FIDO, CONTROL) issued REJECT verdicts on EECOM's commit `a1e82411`.
-
-### Decisions Made
-
-1. **"Already registered" wording kept** — more precise than "already active" for registry membership context.
-2. **Both dead values removed from `RunRegisterOutcome`** — now strictly `'registered' | 'merged'` with exhaustive type checking.
-3. **Spread-copy chosen over in-place mutation** — consistent with `mergeGitContext` pattern in codebase.
-4. **Gate 1 pre-existing failure acknowledged** — not caused by piece 07, documented in commit message.
-5. **B1 rebuild technique: reset + selective checkout + cherry-pick** — simpler than interactive rebase when stripping a single file.
-
-### All Blockers Resolved
-
-| Blocker | Raised by | Status |
-|---------|-----------|--------|
-| B1: `.squad/` in product commit | Flight | ✅ Resolved — product commit `9c3f0885` clean |
-| B2: No path-uniqueness guard | Flight | ✅ Resolved — guard added, test added, RED→GREEN |
-| B3: 3 failing dispatch-help tests | FIDO | ✅ Resolved — 28/28 tests GREEN |
-| B4: `--help` text incorrect | CONTROL | ✅ Resolved — usage line optional, flags documented |
-| B5: Nits | CONTROL | ✅ Resolved — all applied |
-
-### Test & Build Verification
-- 45 tests across 3 files: ALL PASS
-- Build: CLEAN
-- Scrub gate: PASSED
-
-### Handoff State
-Branch: `akubly/upstream-07-register-merge-clones-origins` (force-pushed)  
-Revision APPROVED de facto (blocker resolution complete, no second review requested).  
-Ready for Phase C (PR creation in future session).
-
-**⚠️ EECOM Reviewer Rejection Lockout:** EECOM remains locked out for this cycle per REPLAY-PROTOCOL. Revision is CONTROL's independent work.
-
----
-
-## 2026-05-13: Template path for register install step
-
-**By:** EECOM
-
-**What:** The spec for piece 06 lists `packages/squad-cli/templates/squad.agent.md` as the canonical coordinator template that `register` should copy to the user-global Copilot agents directory. The existing repo ships the coordinator template at `packages/squad-cli/templates/squad.agent.md.template` (used by `init`/`upgrade`). To avoid duplicating the 94 KB file, the install helper in `register.ts` tries `squad.agent.md` first and falls back to `squad.agent.md.template`. The fallback-first logic is forward-compatible with piece 11a, which is expected to formalize the unsuffixed path.
-
-**Why:** Duplicating the template file would create a maintenance burden and diverge from the existing `init`/`upgrade` pipeline. The two-candidate lookup preserves the spec's functional intent — stamped coordinator file installed at `<home>/.copilot/agents/squad.agent.md` — while staying consistent with the current template structure. If piece 11a creates the unsuffixed `squad.agent.md`, the helper will automatically prefer it with no code change required.
-
----
-
 ### 2026-05-18: Piece 14 Revision — CAPCOM Complete
 
 **By:** CAPCOM (SDK Expert)  
@@ -1136,137 +738,6 @@ Piece 05 wires the requested commands, but the user-facing behavior is not safe 
 - Success uses: `✓ <Verb> <object>: <name> → <path>`.
 - Data commands default to stable TSV when scriptability matters.
 - Diagnostics lead with text severity, then optional visual treatment.
-
----
-
-### 2026-05-14: Piece 08a test-count delta triage — FIDO Quality Gate
-
-**By:** FIDO (Quality Owner) — targeted investigation, not full re-review
-
-**Subject:** akubly/upstream-08a-migrate-readonly-commands baseline fcb0cf1a vs revision 0e4f301e
-
-**Method:** Full-suite run on both SHAs from reset/clean worktrees, Vitest JSON reporter, failure-set diff by `{test file} :: {full test name}`, then per-test re-run 3× on revision for newly failing IDs. Also confirmed SDK source delta is limited to `packages/squad-sdk/src/index.ts` barrel overload/re-export behavior.
-
-**New failures introduced by revision:** 3
-- `test/human-journeys.test.ts`: flake; `Journey 1: I just installed this (squad init) shows ceremony output — not raw technical logs` failed in full-suite with `STACK_TRACE_ERROR`, passed individually 3/3.
-- `test/human-journeys.test.ts`: flake; `Journey 1: I just installed this (squad init) tells the human what to do next` failed in full-suite with `STACK_TRACE_ERROR`, passed individually 3/3.
-- `test/init-scaffolding.test.ts`: flake; `no-remote resilience (#579) runInit succeeds in a git repo with no remote` failed in full-suite with Windows cleanup `ENOTEMPTY` under `.test-init-scaffold-*\.squad`, passed individually 3/3.
-
-**Tests fixed by revision (passing now, failing before):** 2
-- `test/state-backend.test.ts`: `GitNotesBackend exists reflects write state`
-- `test/template-sync.test.ts`: `sync-templates.mjs script execution exits with code 0 (no syntax errors, no crashes)`
-
-**Pre-existing baseline failures (both):** 9 failed-test IDs. Note: this clean rerun did not reproduce the reported 6308/6432 pass count; observed baseline `6310/6429 passed, 11 failed, 61 skipped, 47 todo` and revision `6312/6432 passed, 12 failed, 61 skipped, 47 todo`.
-
-**Severity:** all-flakes
-
-**Recommendation:** proceed to re-review. I found no deterministic regression attributable to CAPCOM's SDK barrel export. Keep the full-suite flakes visible for follow-up, but do not cycle CAPCOM solely for this delta.
-
----
-
-### FIDO Quality Gate — REJECT
-
-**By:** FIDO  
-**Date:** 2026-05-13
-
-Reviewed EECOM's piece 05 CLI command stubs against the spec test surface and quality bar. The targeted 32 tests pass and the build type-checks, but multiple required spec rows are missing or covered only by smoke assertions.
-
-**Blocking gaps:**
-1. CLI dispatch is not actually tested through the bin entry point, including exit codes.
-2. `runDoctor` origin resolution is specified but not implemented or tested.
-3. `runRegister` accepts paths without proving an existing `.squad/` path, contrary to the entry-write contract.
-4. Init clone/path collision coverage is missing.
-5. Doctor legacy-plus-registry sequencing has no regression test and may create confusing double-output.
-
-**Required follow-up:** Add adversarial tests for register path existence, init clone collision, doctor origin/clone/ambiguous resolution, corrupted registries, exact list table shape, URL boundary behavior, and real CLI dispatch for `init`, `register`, `list`, and `doctor`.
-
-**Validation observed:**
-- `npm test -- test/cli/init-v2.test.ts test/cli/register.test.ts test/cli/list-doctor.test.ts`: 32 passed.
-- `npm run build`: passed.
-- `npm test -- test/cli`: failed with 3 failed tests and 2 unhandled worker timeout errors.
-- `npm test`: failed with 42 failed tests and 4 unhandled worker timeout errors.
-
----
-
-### FIDO Regression Triage — Mixed, CONTROL Revision Scope
-
-**By:** FIDO  
-**Date:** 2026-05-13
-
-Piece 05 introduces 8 new failed test files + 1 new unhandled worker timeout. Pre-existing failures: 6 failed test files on piece 04.
-
-**New failures on piece 05:**
-- `test/init-scaffolding.test.ts` — API change regression: tests still call old string signature after piece 05 changed `runDoctor` to options object.
-- `test/speed-gates.test.ts` — Help output grew to 138 lines, threshold is 130.
-- `test/ux-gates.test.ts` — Help line exceeds 80 chars.
-- `test/e2e-shell.test.ts` — `/status` expected text not present.
-- `test/repl-ux.test.ts` — History flake under full-suite load.
-- `test/resolution-v2.test.ts` — Timeout under full-suite; solo passes.
-- `test/state-backend.test.ts` — Timeout under full-suite; solo passes.
-- `test/cli/watch-health.test.ts` — Timeout under full-suite; solo passes.
-
-**Verdict:** Mixed. CONTROL revision scope expands to the piece-05 subset above. Full-suite failures require explicit waivers or fixes per file.
-
----
-
-### CONTROL Piece 05 Revision — Commit 366dd6c8
-
-**By:** CONTROL  
-**Date:** 2026-05-20T01:50:00Z
-
-All ~25 blocking items from FIDO (A1-A5), INCO (B1-B7), CONTROL (C1-C3), Flight (D1-D2), and FIDO regression triage (E1-E4) have been resolved in a single squashed commit.
-
-**Blocker Resolution:** 20/20 blockers closed.
-
-**Test Results:**
-- 83 in-scope tests: ALL PASS
-- 4 regression tests: ALL PASS
-- 29 acceptance tests: ALL PASS
-- Build: CLEAN
-
-**Files Changed (14):**
-- `packages/squad-cli/src/commands/_registry-path.ts` (NEW)
-- `packages/squad-cli/src/commands/{init,register,list,doctor}.ts` (NEW/REVISED)
-- `packages/squad-cli/src/cli-entry.ts` (MODIFIED)
-- `packages/squad-cli/package.json` (MODIFIED)
-- `.changeset/cli-command-stubs.md` (NEW)
-- `test/cli/{dispatch-help,init-v2,register,list-doctor,doctor}.test.ts` (NEW/MODIFIED)
-- `test/init-scaffolding.test.ts` (MODIFIED)
-
-**Note:** EECOM remains under Strict Lockout per REPLAY-PROTOCOL. This commit is CONTROL's own work.
-
----
-
-### FIDO Re-verification — REJECT-AGAIN
-
-**By:** FIDO  
-**Date:** 2026-05-13
-
-A1-A5 are closed, and the four targeted regression fixes E1-E4 pass solo. The rejection is because the full-suite verification did not match the allowed piece-04 baseline: `test/journey-error-handling.test.ts` and `test/template-sync.test.ts` appeared in the failed-file set.
-
-**Per-blocker verification:** A1-A5 ✅ closed, E1-E4 ✅ closed.
-
-**Suite checks:**
-- Piece-05 in-scope: 5 files / 83 tests passed.
-- Build: exit 0.
-- Full suite: 8 failed test files / 7 failed tests / 3 unhandled errors.
-- Piece-04 baseline: 6 failed test files / 10 failed tests / 2 unhandled errors.
-
-**Regression delta:** 2 failed files outside allowed baseline (both pass solo).
-
-**Re-approval recommendation:** No re-approval. CONTROL fixed the targeted blockers, but full-suite gate still fails. Next revision must be owned by a third agent (lockout).
-
----
-
-### INCO Re-verification — APPROVE
-
-**By:** INCO  
-**Date:** 2026-05-13
-
-CONTROL's revision closes the seven UX blockers from the original INCO reject. Help is now side-effect-free, register validation is actionable, register outcomes are differentiated, doctor output has labeled sections and severity prefixes, NO_COLOR is respected, and the focused dispatch/help test suite passes.
-
-**Per-blocker verification:**
-- B1 `--help` side-effect-free: ✅ closed
 
 ---
 
@@ -2671,3 +2142,80 @@ All agent-facing write paths in `squad.agent.md` spawn templates must be anchore
 - Lightweight template decision writes
 - Scribe prompt file operations
 - Team-root-resolved read instructions that should stay aligned with write paths
+
+---
+
+### 2026-05-22: Piece 21 Branch-Relevant Fix Plan
+
+# Decision: Piece 21 Branch-Relevant Fix Plan — Scope, Drops, and Ship Gate
+
+**Author:** Flight  
+**Date:** 2026-05-22  
+**Context:** Turn 3 of the piece-21 audit thread. Prior turns: full gap audit (T1/T2/T3 + cross-command + dual-doctor), branch attribution pass.
+
+---
+
+## Scope Decision
+
+### Gaps DROPPED from the fix plan
+
+**T2-2 — Multi-format registry migration**  
+*Reason:* The registry feature (`registry.ts`, `loadRegistryFromDisk`, `parseRegistry`) is entirely new on branch `akubly/upstream-21-post-stack-review`. No users on `origin/dev` have a registry file in any format. The `squad-repos.json` legacy detection in `loadRegistryFromDisk` (registry.ts:279–286) already emits a warning. Full migration code would add complexity with zero consumers. **DROP.**
+
+**T3-6 — Backward-compatibility mode**  
+*Reason:* Same logic as T2-2. No shipped pre-release builds used a different registry shape. Any user who ran the CLI while this branch was in development would be an internal tester who can re-run `squad init`. **DROP.**
+
+### T2-5 vs T3-5 — Reconciliation
+
+These are the same gap at different severity labels. T2-5 (cross-platform path display in *new* registry doctor output) and T3-5 (cross-platform path display polish across *all* doctor output) overlap completely — fixing one means fixing both. **Merge into single FIX-7 at T2-5 severity.** T3-5 is retired as a duplicate label.
+
+---
+
+## In-Scope Fix List
+
+| ID    | Gap ID  | Bucket | Severity | Description |
+|-------|---------|--------|----------|-------------|
+| FIX-1 | T1-1    | (a)    | T1       | SDK export smoke-test in upgrade |
+| FIX-2 | T1-2    | (a)(c) | T1       | Upgrade copilot payload repair path |
+| FIX-3 | T1-4    | (b)    | T1       | Doctor verifies .gitattributes/.gitignore |
+| FIX-4 | T1-5    | (a)(c) | T1       | Registry schema migration in upgrade |
+| FIX-5 | T2-1    | (c)    | T2       | Per-entry corruption detection in doctor |
+| FIX-6 | T2-3    | (c)    | T2       | Bulk stale-path repair via --normalize |
+| FIX-7 | T2-5+T3-5 | (c) | T2       | Cross-platform path display (merged) |
+| FIX-8 | DUAL-DOCTOR | (a) | STRUCT  | Dual-doctor structural unification |
+| FIX-9 | CROSS-CMD | (b)  | T2       | Skills/instructions/global-agent doctor checks |
+
+---
+
+## Ship Gate Boundary
+
+### Must ship before piece 21 merges to `dev`
+
+FIX-1, FIX-2, FIX-3, FIX-4, FIX-5, FIX-9
+
+Rationale: These 6 fixes are the minimum set needed for the shared-squad workflow to be correctly diagnosable and repairable. Without them, `squad upgrade` silently skips payload refresh for registered repos, `squad doctor` cannot verify the .gitattributes/.gitignore writes that enable team-state conflict resolution, and per-entry registry corruption causes silent "no registry found" responses.
+
+### Can follow as immediate dev PRs post-merge
+
+FIX-6, FIX-7, FIX-8
+
+Rationale: FIX-6 (bulk stale repair) and FIX-7 (path display) are polish — current behavior is functional, just suboptimal. FIX-8 (dual-doctor unification) is deliberately deferred to piece 22: it is L complexity, doesn't unblock any piece-21 functionality, and the compounding architectural benefit is better captured as a standalone PR with its own test sweep.
+
+---
+
+## Dual-Doctor Architectural Ruling
+
+**Decision: Defer FIX-8 to piece 22.**
+
+Arguments for landing in piece 21:
+- Unification removes the root cause of the asymmetries that generated FIX-3 and FIX-9
+- Without it, FIX-3/FIX-9 add checks to the legacy doctor in a form that will need to be reworked when unification lands
+
+Arguments for deferral:
+- L complexity (new shared type, refactor of both rendering paths in cli-entry.ts, two doctor modules)
+- FIX-3 and FIX-9 can be added to the legacy doctor with a comment marking them for unification
+- Piece 21's PR blast radius is already large; adding an architectural refactor increases review risk
+- The dual-doctor structural debt existed before this branch and isn't required for feature correctness
+
+**Ruling:** Add FIX-3/FIX-9 checks to legacy doctor with `// TODO(piece-22): merge into unified doctor` markers. Piece 22 PR will be a pure refactor: no behavior change, only structural unification.
+
