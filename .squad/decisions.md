@@ -2565,3 +2565,109 @@ The scrub gate's path patterns are too broad for a codebase that uses `casting`,
 ## No Commit Required
 
 RETRO made no source changes. All violations are baseline. Per procedure: STOP and report. Do not silently modify earlier branches. This decision drop is the artifact for Scribe to process and the coordinator to act on.
+
+---
+
+# 2026-05-21 — Canonical callsign validation helper
+
+## Decision
+
+Callsign validation is centralized in `packages/squad-sdk/src/callsign.ts`.
+
+The canonical rule is:
+- lowercase alphanumeric plus internal hyphens only
+- 1-64 characters
+- no leading or trailing hyphen
+- no uppercase letters, underscores, or periods
+
+Future code MUST import the shared helper and MUST NEVER duplicate the callsign regex inline.
+
+## Rationale
+
+The SDK reader (`resolution-v2.ts`), Copilot payload namespace code (`copilot-payload.ts`), and CLI doctor purge guard had diverged into incompatible callsign checks. Centralizing the regex, max length, validator, and shared error text keeps writer/reader/CLI behavior aligned and gives one place to tighten or document the rule.
+
+The earlier path-traversal hardening decisions in `.squad/decisions.md` (entries around 2168 and 2423) remain valid. The new callsign rule is strictly stricter than those guards and preserves the same security goal while eliminating uppercase/underscore drift.
+
+
+---
+
+# EECOM Decision — upgrade global agent sync, doctor misplaced `.squad`, registry dedup
+
+## Decision
+
+1. `squad upgrade` must refresh the global coordinator agent install when `~/.copilot/agents/squad.agent.md` already exists.
+2. `squad doctor` should warn when a consumer repo contains a leaked `.squad/` directory but registry resolution points to a different squad root.
+3. `upsertEntry()` is the defense-in-depth boundary for registry normalization and must deduplicate canonical `origins[]` and normalized `clones[]` before returning.
+
+## Rationale
+
+- Upgrade owns both the repo-local `.github/agents/squad.agent.md` mirror and the user-scoped coordinator install created by `squad assign`; letting only one refresh causes silent drift.
+- The leaked consumer `.squad/` directory is real user-facing contamination but not a blocking runtime failure, so doctor reports it as `warn` severity with cleanup guidance.
+- CLI callers already try to deduplicate registry values, but SDK callers can bypass that path. The registry write-preparation helper must enforce canonical uniqueness itself.
+
+## Verification
+
+- `npm run build`
+- `npx vitest run test/cli/upgrade.test.ts packages/squad-cli/src/commands/__tests__/doctor.test.ts test/registry-schema.test.ts`
+
+
+---
+
+# Decision: Upgrade and Doctor are the Repair/Diagnosis Surfaces (Not Init)
+
+**Author:** Flight (Lead)  
+**Date:** 2026-05-21T17:10:56-07:00  
+**Context:** Piece 21 smoke test revealed silent template no-ops in `squad init`. Audit of pieces 1–21 confirms the right fix surface.
+
+## Decision
+
+1. **`squad init` must NOT attempt repair.** Its contract is: create scaffold + register. If partial state exists, it short-circuits (by design). This is correct — repair belongs in `upgrade` and `doctor`.
+
+2. **`squad upgrade` owns "bring to latest."** Any new artifact introduced by a piece (files, directory layout, agent files, copilot payloads, registry schema migrations) that should be refreshable → add to upgrade.
+
+3. **`squad doctor` owns "diagnose drift."** For every artifact `upgrade` writes, `doctor` should verify presence/validity. For every invariant the registry or payload system maintains, `doctor` should detect violations.
+
+4. **Cross-command coherence rule:** For every `doctor` finding with severity ≥ warn, there must be either (a) a corresponding `upgrade` repair path, or (b) an actionable user instruction in the finding message. Findings that say "something is wrong" without a path to resolution are UX failures.
+
+## Rationale
+
+The smoke test failure was caused by `init`'s scaffold-presence guard short-circuiting when partial scaffold exists — exactly its designed behavior. The correct response is to extend `upgrade` to repair the state `init` cannot safely re-create, and `doctor` to detect the drift before the user notices.
+
+## Applies To
+
+All future pieces that introduce:
+- New files in `.squad/`, `.github/`, or `~/.copilot/`
+- New registry fields or invariants
+- New SDK exports that CLI commands depend on
+- New failure modes the user can hit
+
+Each such piece should include: (1) an upgrade handler for the new artifact, (2) a doctor check for its absence/corruption.
+
+## Consequences
+
+- **Adopting:** Upgrade/doctor become the canonical "squad health" surface. Users run `squad doctor` to diagnose, `squad upgrade` to repair. Init stays simple.
+- **Not adopting:** Repair logic leaks into init (violating its fail-fast guard contract) or into ad-hoc command flags, fragmenting the UX.
+
+
+---
+
+### 2026-05-21: TEAM_ROOT-prefixed spawn template writes
+
+**Author:** Procedures  
+**Date:** 2026-05-21T13:45:30-07:00  
+**Context:** Shared-squad consumer repos run agents from the consumer repo CWD, so bare `.squad/` write paths in spawn templates leak state into the wrong repository.
+
+## Decision
+
+All agent-facing write paths in `squad.agent.md` spawn templates must be anchored at `TEAM_ROOT`, or at `SQUAD_DIR` when the prompt defines `SQUAD_DIR` as `{TEAM_ROOT}/.squad`.
+
+## Rationale
+
+`TEAM_ROOT` is the actual owner of squad state. Agent CWD is not a safe anchor in shared-squad mode, so bare relative `.squad/` paths create state pollution and break decision/history hygiene.
+
+## Applies to
+
+- Agent AFTER-work writes
+- Lightweight template decision writes
+- Scribe prompt file operations
+- Team-root-resolved read instructions that should stay aligned with write paths
