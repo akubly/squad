@@ -7,7 +7,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { FSStorageProvider, defaultRegistryFilePath } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@bradygaster/squad-sdk';
+import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import { installCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
@@ -15,8 +17,8 @@ import { TEMPLATE_MANIFEST, getTemplatesDir } from './templates.js';
 import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
-import { installCoordinatorAgent } from '../../commands/assign.js';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from './squad-file-conventions.js';
+import { installCoordinatorAgent } from '../../commands/assign.js';
 
 const storage = new FSStorageProvider();
 
@@ -41,6 +43,8 @@ export interface UpgradeOptions {
   homeDir?: string;
   /** When --self, install the insider (prerelease) tag instead of latest. */
   insider?: boolean;
+  /** Install or refresh the per-repo Copilot payload (test seam). */
+  copilotPayloadInstaller?: typeof installCopilotPayload;
 }
 
 export interface UpdateInfo {
@@ -48,6 +52,34 @@ export interface UpdateInfo {
   toVersion: string;
   filesUpdated: string[];
   migrationsRun: string[];
+}
+
+function refreshCopilotPayloadForUpgrade(dest: string, squadPath: string, options: UpgradeOptions): void {
+  try {
+    const registryPath = defaultRegistryFilePath(options.homeDir);
+    const { registry } = loadRegistryFromDisk({ registryPath });
+    const matchingEntry = registry?.squads.find(entry =>
+      normalisedPathKey(entry.path) === normalisedPathKey(squadPath),
+    );
+
+    if (!matchingEntry?.callsign) {
+      return;
+    }
+
+    const payloadInstaller = options.copilotPayloadInstaller ?? installCopilotPayload;
+    const result = payloadInstaller({
+      hostDir: dest,
+      callsign: matchingEntry.callsign,
+      copilotHome: options.homeDir ? path.join(options.homeDir, '.copilot') : undefined,
+    });
+
+    success(
+      `refreshed Copilot payload (${result.skillsInstalled} skills, ${result.agentsInstalled} agents, ${result.instructionsInstalled} instructions)`,
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`Could not refresh Copilot payload during upgrade: ${message}`);
+  }
 }
 
 function smokeTestSdkSymbolResolution(homeDir: string): void {
@@ -598,6 +630,7 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
       console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
     }
+    refreshCopilotPayloadForUpgrade(dest, squadDirInfo.path, options);
     smokeTestSdkSymbolResolution(homeDir);
     
     return {
@@ -690,6 +723,7 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
     console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
   }
+  refreshCopilotPayloadForUpgrade(dest, squadDirInfo.path, options);
   smokeTestSdkSymbolResolution(homeDir);
   
   console.log();

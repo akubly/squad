@@ -5,16 +5,34 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'fs';
 import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { runInit } from '@bradygaster/squad-cli/core/init';
-import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli } from '@bradygaster/squad-cli/core/upgrade';
+import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli, type UpgradeOptions } from '@bradygaster/squad-cli/core/upgrade';
 import { getPackageVersion } from '@bradygaster/squad-cli/core/version';
 import { defaultRegistryFilePath } from '@bradygaster/squad-sdk';
 
 const TEST_ROOT = join(os.tmpdir(), `.test-cli-upgrade-${randomBytes(4).toString('hex')}`);
+type PayloadInstaller = NonNullable<UpgradeOptions['copilotPayloadInstaller']>;
+
+function successfulPayloadResult(overrides: Partial<ReturnType<PayloadInstaller>> = {}): ReturnType<PayloadInstaller> {
+  return {
+    coordinatorInstalled: true,
+    skillsInstalled: 2,
+    agentsInstalled: 3,
+    instructionsInstalled: 4,
+    mcpServersAdded: 1,
+    ...overrides,
+  };
+}
+
+async function writeUpgradeRegistry(homeDir: string, squads: Array<Record<string, unknown>>): Promise<void> {
+  const registryPath = defaultRegistryFilePath(homeDir);
+  await mkdir(dirname(registryPath), { recursive: true });
+  await writeFile(registryPath, JSON.stringify({ version: 1, squads }, null, 2));
+}
 
 describe('CLI: upgrade command', () => {
   beforeEach(async () => {
@@ -132,6 +150,94 @@ describe('CLI: upgrade command', () => {
       vi.doUnmock('@bradygaster/squad-sdk');
       vi.resetModules();
     }
+  });
+
+  it('refreshes per-repo Copilot payload for a registered squad callsign', async () => {
+    const homeDir = join(TEST_ROOT, 'home-payload-refresh');
+    await writeUpgradeRegistry(homeDir, [{ callsign: 'alpha', path: join(TEST_ROOT, '.squad') }]);
+    const payloadCalls: Parameters<PayloadInstaller>[0][] = [];
+    const copilotPayloadInstaller: PayloadInstaller = (opts) => {
+      payloadCalls.push(opts);
+      return successfulPayloadResult();
+    };
+
+    await runUpgrade(TEST_ROOT, { homeDir, copilotPayloadInstaller });
+
+    expect(payloadCalls).toHaveLength(1);
+    expect(payloadCalls[0]).toMatchObject({
+      hostDir: TEST_ROOT,
+      callsign: 'alpha',
+      copilotHome: join(homeDir, '.copilot'),
+    });
+  });
+
+  it('skips per-repo Copilot payload refresh when no registry exists', async () => {
+    const homeDir = join(TEST_ROOT, 'home-no-registry');
+    const payloadCalls: Parameters<PayloadInstaller>[0][] = [];
+    const copilotPayloadInstaller: PayloadInstaller = (opts) => {
+      payloadCalls.push(opts);
+      return successfulPayloadResult();
+    };
+
+    await expect(runUpgrade(TEST_ROOT, { homeDir, copilotPayloadInstaller })).resolves.toMatchObject({
+      toVersion: getPackageVersion(),
+    });
+
+    expect(payloadCalls).toHaveLength(0);
+  });
+
+  it('skips per-repo Copilot payload refresh when the matching registry entry has no callsign', async () => {
+    const homeDir = join(TEST_ROOT, 'home-no-callsign');
+    await writeUpgradeRegistry(homeDir, [{ path: join(TEST_ROOT, '.squad') }]);
+    const payloadCalls: Parameters<PayloadInstaller>[0][] = [];
+    const copilotPayloadInstaller: PayloadInstaller = (opts) => {
+      payloadCalls.push(opts);
+      return successfulPayloadResult();
+    };
+
+    await runUpgrade(TEST_ROOT, { homeDir, copilotPayloadInstaller });
+
+    expect(payloadCalls).toHaveLength(0);
+  });
+
+  it('warns but completes when per-repo Copilot payload refresh fails', async () => {
+    const homeDir = join(TEST_ROOT, 'home-payload-throws');
+    await writeUpgradeRegistry(homeDir, [{ callsign: 'alpha', path: join(TEST_ROOT, '.squad') }]);
+    const copilotPayloadInstaller: PayloadInstaller = () => {
+      throw new Error('simulated payload failure');
+    };
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await expect(runUpgrade(TEST_ROOT, { homeDir, copilotPayloadInstaller })).resolves.toMatchObject({
+        toVersion: getPackageVersion(),
+      });
+      const calls = spy.mock.calls.map(c => String(c[0]));
+      expect(calls.some(c => c.includes('Could not refresh Copilot payload during upgrade'))).toBe(true);
+      expect(calls.some(c => c.includes('simulated payload failure'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('matches registry paths with normalized path comparison before refreshing payload', async () => {
+    const homeDir = join(TEST_ROOT, 'home-path-normalized');
+    const squadPath = join(TEST_ROOT, '.squad');
+    const equivalentSquadPath = process.platform === 'win32'
+      ? squadPath.replace(/\\/g, '/')
+      : join(TEST_ROOT, 'path-normalized', '..', '.squad');
+    expect(equivalentSquadPath).not.toBe(squadPath);
+    await writeUpgradeRegistry(homeDir, [{ callsign: 'alpha', path: equivalentSquadPath }]);
+    const payloadCalls: Parameters<PayloadInstaller>[0][] = [];
+    const copilotPayloadInstaller: PayloadInstaller = (opts) => {
+      payloadCalls.push(opts);
+      return successfulPayloadResult({ skillsInstalled: 1, agentsInstalled: 1, instructionsInstalled: 1 });
+    };
+
+    await runUpgrade(TEST_ROOT, { homeDir, copilotPayloadInstaller });
+
+    expect(payloadCalls).toHaveLength(1);
+    expect(payloadCalls[0]?.callsign).toBe('alpha');
   });
 
   it('should overwrite squad-owned template files', async () => {

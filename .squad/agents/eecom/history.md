@@ -71,6 +71,10 @@ If a command owns both an in-repo mirror and a user-scoped install of the same t
 
 `loadRegistryFromDisk` surfaces registry parse/schema problems as SDK `SquadError` instances with `category === ErrorCategory.VALIDATION`, `context.operation === "registry"`, and non-recoverable error severity. The exported `validateEntry(value: unknown, entryIndex: number): RegistryEntry` contract validates only one entry, preserves forward-compatible unknown fields, and throws `SquadError` messages that include the registry index. Doctor's seam pattern: catch only registry validation errors, re-read raw JSON, split syntax failures from per-entry validation failures, and rethrow non-validation I/O/permission errors to preserve existing behavior.
 
+### Upgrade payload refresh seam and registry matching (2026-05-22)
+
+`installCopilotPayload` takes `{ hostDir, callsign, copilotHome?, skillsFrom?, cwd? }` and returns counts for coordinator, skills, agents, instructions, and MCP servers. `runUpgrade` follows FIX-1's direct `UpgradeOptions` seam style with `copilotPayloadInstaller?: typeof installCopilotPayload`, defaulting to the SDK function so tests can inject a recording or throwing stub. Registry matching is by `normalisedPathKey(entry.path) === normalisedPathKey(squadDirInfo.path)` before using the matched entry's `callsign`; raw path equality is not safe across separators, relative segments, or OS casing rules.
+
 ## Known Issues
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.
