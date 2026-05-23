@@ -998,6 +998,84 @@ The canonical rule is:
 
 Future code MUST import the shared helper and MUST NEVER duplicate the callsign regex inline.
 
+---
+
+### 2026-05-22: Piece 22 Doctor Unification — FIDO Rejection & Reassignment
+
+**Verdict:** 🛑 REJECT (2 blockers)  
+**Author:** FIDO (Quality Owner)  
+**Commit:** `ef09d3d3` on `squad/piece-22-unify-doctors`  
+**Reassign to:** CONTROL  
+
+#### Blocker 1 — Warn findings routed to stdout instead of stderr
+
+**Location:** `packages/squad-cli/src/cli-entry.ts:200–204`
+
+Spec §2.3 states: "warn → 0 (warnings to stderr)". Implementation uses `console.log` (stdout) for ALL severities. The comment just above `process.exit(2)` correctly says "Warnings go to stderr" — but the code contradicts it.
+
+**Fix:** For `f.severity === 'warn'`, route to `process.stderr.write(...)` or `console.error(...)`.
+
+#### Blocker 2 — Missing cross-source severity escalation test
+
+**Location:** `test/cli/doctor.test.ts` — absent from all 5 new tests
+
+Spec §5 explicitly mandates: "A test where system doctor produces a `warn` and registry doctor produces an `error` → overall exit code is 2."
+
+This is the core behavioral claim of the unification. None of the 5 new tests cover it — all run against a healthy scaffold that produces zero errors. 
+
+**Fix:** Add a test that stubs findings with `warn`-level system results and `error`-level registry results, asserting the overall exit code is 2.
+
+#### Rationale
+
+All other implementation details are correct: type unification, TODO removal, deprecation markers, test structure, exit-code change decision, LOC budget. The two blockers are mechanical fixes required before merge.
+
+---
+
+### 2026-05-22: Type-Design Directives — Piece 22 Doctor Unification
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS  
+**Author:** CONTROL (TypeScript Engineer)  
+**Scope:** `doctor-types.ts`, `runUnifiedDoctor`, `cli-entry.ts` renderer  
+**Status:** Advisory (no blocking rejection)
+
+#### Directive 1 — Exit-Code Derivation Must Be Exhaustiveness-Guarded
+
+**File:** `packages/squad-cli/src/cli-entry.ts:1097–1102`
+
+Current code uses `.filter(f => f.severity === 'error')` to derive exit code — a string comparison with no `never` guard. If `DoctorSeverity` gains a new member, the renderer's `switch` (which has a `never` guard) will fail at compile time, but this `.filter()` will silently count the new level as neither error nor warn, yielding exit code 0 when it should exit 2.
+
+**Fix:** Extract a typed `deriveExitCode` helper with a severity switch and `never` default arm.
+
+#### Directive 2 — `DoctorSource` Grouping Must Not Silently Drop Findings
+
+**File:** `packages/squad-cli/src/cli-entry.ts:1085–1086`
+
+Two `.filter()` calls split findings by source. A future third `DoctorSource` value would be silently omitted from both groups and never rendered.
+
+**Fix (preferred):** Add a post-grouping exhaustiveness assertion that throws if any finding has source !== 'system' && source !== 'registry'.
+
+**Fix (alternative):** Switch to a `Map<DoctorSource, DoctorFinding[]>` with `never` guard.
+
+**Priority:** Fix before adding a third `DoctorSource`.
+
+#### Directive 3 — `DoctorFinding` Fields Should Be `readonly`
+
+**File:** `packages/squad-cli/src/cli/commands/doctor-types.ts`
+
+`DoctorFinding` is a value object / diagnostic result. Mutation after construction has no valid use case. Adding `readonly` to all fields enforces immutability and prevents callers from patching severity mid-flow.
+
+**Priority:** Low-cost, high-clarity fix. Recommended for next touch of this file.
+
+#### Non-Directives (noted, not mandated)
+
+- **Two import paths for the same types:** `cli-entry.ts` imports directly from `'./cli/commands/doctor-types.js'`; all other consumers use the barrel. Recommend aligning to the barrel for consistency (not blocking).
+- **Batch severity on registry findings:** All registry findings receive the max/batch severity. Information-preserving given the old API shape; design choice is acceptable.
+- **`message: string` lacks non-empty guard:** TypeScript cannot enforce non-empty strings without branded types. Accepted.
+
+#### Summary
+
+`tsc --noEmit` exits clean. Type contract matches spec §2.1. Directives 1–3 are recommended follow-up items for the revision, not blockers to merge.
+
 ## Rationale
 
 The SDK reader (`resolution-v2.ts`), Copilot payload namespace code (`copilot-payload.ts`), and CLI doctor purge guard had diverged into incompatible callsign checks. Centralizing the regex, max length, validator, and shared error text keeps writer/reader/CLI behavior aligned and gives one place to tighten or document the rule.

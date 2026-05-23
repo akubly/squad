@@ -104,3 +104,26 @@ The highest-severity debt items (D-1, D-5, D-18) all occur where a new piece add
 - [x] `npm run lint` passes
 - [x] No new `eslint-disable` or `@ts-expect-error`
 - [x] `.changeset/piece-22-unify-doctors.md` present (patch bump)
+
+---
+
+## 🔴 Piece 22 Adversarial Review — Doctor Unification (2026-05-22)
+
+**Status:** 🛑 REJECTED (2 blockers)
+
+**Commit:** `ef09d3d3` on `squad/piece-22-unify-doctors`  
+**Verdict:** REJECTED — Flight locked out per strict protocol  
+**Revision candidate:** CONTROL (recommended)
+
+**Blockers:** 
+1. **cli-entry.ts warn-to-stdout bug:** Spec §2.3 requires "warn → 0 (warnings to stderr)". Implementation uses `console.log` for all severities. Comment contradicts code. Fix: route `f.severity === 'warn'` to `console.error()` or `process.stderr.write()`.
+2. **Missing cross-source severity escalation test:** Spec §5 mandates: "A test where system doctor produces `warn` and registry doctor produces `error` → overall exit code is 2." Core behavioral claim of unification. All 5 new tests run against a healthy scaffold (zero errors). Fix: add a test scenario mixing `warn` and `error` findings from both sources.
+
+**Non-blocking:** list-doctor tests, native registry migration, per-finding granularity, weak pre-existing gate.
+
+**Pattern learned:** Warn-to-stderr contracts require verifying BOTH exit code AND stream routing in the renderer. Comment intentions ≠ code. Always grep for `console.log` in severity-keyed render helpers.
+
+**Learnings for CONTROL revision:**
+- Directive 1: Exit-code derivation needs a `never`-guarded helper, not inline `.filter()`.
+- Directive 2: `DoctorSource` grouping needs exhaustiveness assertion or Map-based dispatch.
+- Directive 3: `DoctorFinding` fields should be `readonly` to enforce immutability of value objects.
