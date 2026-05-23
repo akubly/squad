@@ -15,6 +15,7 @@ import os from 'node:os';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '../core/squad-file-conventions.js';
 import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
+import { RED, YELLOW, DIM, RESET } from '../core/output.js';
 import type { DoctorFinding, DoctorSeverity } from './doctor-types.js';
 export type { DoctorFinding, DoctorSeverity, DoctorSource, DoctorRepair } from './doctor-types.js';
 
@@ -766,4 +767,58 @@ function _findingLabel(finding: string): string {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .slice(0, 40);
+}
+
+// ── Rendering & exit-code helpers ─────────────────────────────────────────────
+
+/**
+ * Render a single doctor finding to the appropriate output stream.
+ * `error` and `warn` → stderr; `info` → stdout.
+ */
+export function renderFinding(f: DoctorFinding, noColor: boolean): void {
+  let prefix: string;
+  switch (f.severity) {
+    case 'error':
+      prefix = noColor ? '[error]' : `${RED}[error]${RESET}`;
+      break;
+    case 'warn':
+      prefix = noColor ? '[warn]' : `${YELLOW}[warn]${RESET}`;
+      break;
+    case 'info':
+      prefix = noColor ? '[info]' : `${DIM}[info]${RESET}`;
+      break;
+    default: {
+      const _exhaustive: never = f.severity;
+      throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
+    }
+  }
+  const line =
+    f.source === 'system' ? `${prefix} ${f.label} — ${f.message}` : `${prefix} ${f.message}`;
+  if (f.severity === 'info') {
+    console.log(line);
+  } else {
+    console.error(line);
+  }
+}
+
+/**
+ * Derive the process exit code from a set of findings.
+ * Returns `2` if any finding has `severity === 'error'`, else `0`.
+ * The exhaustive switch ensures new `DoctorSeverity` variants are caught at compile time.
+ */
+export function deriveExitCode(findings: readonly DoctorFinding[]): 0 | 2 {
+  for (const f of findings) {
+    switch (f.severity) {
+      case 'error':
+        return 2;
+      case 'warn':
+      case 'info':
+        break;
+      default: {
+        const _exhaustive: never = f.severity;
+        throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
+      }
+    }
+  }
+  return 0;
 }

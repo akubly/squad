@@ -6,7 +6,7 @@
  * Doctor command inspired by @spboyer (Shayne Boyer)'s PR bradygaster/squad#131.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
@@ -21,6 +21,8 @@ import {
   checkCopilotSkillsSync,
   checkCopilotInstructions,
   checkGlobalAgent,
+  renderFinding,
+  deriveExitCode,
 } from '@bradygaster/squad-cli/cli/commands/doctor';
 import type { DoctorCheck, DoctorFinding } from '@bradygaster/squad-cli/cli/commands/doctor';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '@bradygaster/squad-cli/core/squad-file-conventions';
@@ -534,5 +536,46 @@ describe('runUnifiedDoctor', () => {
       (f: DoctorFinding) => f.source === 'system' && f.label === '.squad/ directory exists' && f.severity === 'error',
     );
     expect(squadDirError).toBeDefined();
+  });
+});
+
+// ── piece-22 rev: cross-source escalation + stderr routing ───────────────────
+
+describe('renderFinding + deriveExitCode', () => {
+  it('cross-source escalation: warn from system + error from registry → exit 2; both on stderr not stdout', () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const findings: DoctorFinding[] = [
+      { severity: 'warn', label: 'some-check', message: 'degraded state', source: 'system' },
+      { severity: 'error', label: 'callsign-check', message: 'not registered', source: 'registry' },
+    ];
+
+    for (const f of findings) renderFinding(f, /* noColor */ true);
+
+    expect(stderrSpy).toHaveBeenCalledTimes(2);
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(deriveExitCode(findings)).toBe(2);
+
+    stderrSpy.mockRestore();
+    stdoutSpy.mockRestore();
+  });
+
+  it('info findings go to stdout, not stderr', () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const findings: DoctorFinding[] = [
+      { severity: 'info', label: 'esm-check', message: 'expected for global installs', source: 'system' },
+    ];
+
+    for (const f of findings) renderFinding(f, /* noColor */ true);
+
+    expect(stdoutSpy).toHaveBeenCalledTimes(1);
+    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(deriveExitCode(findings)).toBe(0);
+
+    stderrSpy.mockRestore();
+    stdoutSpy.mockRestore();
   });
 });

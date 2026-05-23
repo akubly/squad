@@ -99,7 +99,6 @@ import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
 import { runCost } from './cli/commands/cost.js';
 import { getPackageVersion } from './cli/core/version.js';
-import type { DoctorFinding } from './cli/commands/doctor-types.js';
 
 // Lazy-load squad-sdk to avoid triggering @github/copilot-sdk import on Node 24+
 // (Issue: copilot-sdk has broken ESM imports - vscode-jsonrpc/node without .js extension)
@@ -180,30 +179,6 @@ function formatResolverReason(source: ResolvedSquad['source']): string {
 }
 
 /** Render a single unified doctor finding with a severity-keyed color prefix. */
-function _renderFinding(f: DoctorFinding, noColor: boolean): void {
-  let prefix: string;
-  switch (f.severity) {
-    case 'error':
-      prefix = noColor ? '[error]' : `${RED}[error]${RESET}`;
-      break;
-    case 'warn':
-      prefix = noColor ? '[warn]' : `${YELLOW}[warn]${RESET}`;
-      break;
-    case 'info':
-      prefix = noColor ? '[info]' : `${DIM}[info]${RESET}`;
-      break;
-    default: {
-      const _exhaustive: never = f.severity;
-      throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
-    }
-  }
-  if (f.source === 'system') {
-    console.log(`${prefix} ${f.label} — ${f.message}`);
-  } else {
-    console.log(`${prefix} ${f.message}`);
-  }
-}
-
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const noColor = !process.stdout.isTTY || !!process.env['NO_COLOR'];
@@ -1076,7 +1051,7 @@ async function main(): Promise<void> {
     }
 
     // Unified doctor: system + registry findings in a single pass
-    const { runUnifiedDoctor } = await import('./cli/commands/doctor.js');
+    const { runUnifiedDoctor, renderFinding, deriveExitCode } = await import('./cli/commands/doctor.js');
     const { findings, passCount } = await runUnifiedDoctor({
       cwd: getSquadStartDir(),
       registryPath,
@@ -1087,19 +1062,20 @@ async function main(): Promise<void> {
 
     if (systemFindings.length > 0) {
       console.log(noColor ? '=== System ===' : `${BOLD}=== System ===${RESET}`);
-      for (const f of systemFindings) _renderFinding(f, noColor);
+      for (const f of systemFindings) renderFinding(f, noColor);
     }
     if (registryFindings.length > 0) {
       console.log(noColor ? '\n=== Registry ===' : `\n${BOLD}=== Registry ===${RESET}`);
-      for (const f of registryFindings) _renderFinding(f, noColor);
+      for (const f of registryFindings) renderFinding(f, noColor);
     }
 
+    const exitCode = deriveExitCode(findings);
     const warnCount = findings.filter(f => f.severity === 'warn').length;
     const errorCount = findings.filter(f => f.severity === 'error').length;
     console.log(`\n${passCount} passed, ${errorCount} errors, ${warnCount} warnings`);
 
     // Exit code: error → 2, else 0. Warnings go to stderr.
-    if (errorCount > 0) process.exit(2);
+    if (exitCode === 2) process.exit(2);
     return;
   }
 

@@ -22,13 +22,13 @@ export interface DoctorRepair {
 
 /** A single diagnostic finding from the unified doctor. */
 export interface DoctorFinding {
-  severity: DoctorSeverity;
+  readonly severity: DoctorSeverity;
   /** Short identifier for the check that produced this finding (kebab or title). */
-  label: string;
+  readonly label: string;
   /** Human-readable description of the finding. */
-  message: string;
+  readonly message: string;
   /** Subsystem that produced the finding. */
-  source: DoctorSource;
+  readonly source: DoctorSource;
   /** Optional repair hint — deferred to future piece. */
-  repair?: DoctorRepair;
+  readonly repair?: DoctorRepair;
 }
