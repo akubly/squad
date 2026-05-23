@@ -141,3 +141,40 @@ The artifact `squad/piece-22-unify-doctors` (commit ef09d3d3) that was locked ou
 2. Cross-source escalation test added with full gate coverage
 
 All gates green: build CLEAN, lint CLEAN, 53/53 doctor tests, 159/200 LOC budget, no .squad/ leaks. FIDO re-verdict: ✅ APPROVE. Lockout for this artifact has lapsed.
+
+---
+
+## Piece 23 — Shared CLI Conventions Spec + Handoff (2026-05-22)
+
+### Item selected: D-3, D-5, D-11, D-13 (the full "typing hygiene + convention decisions" cluster)
+
+**Spec:** `docs/proposals/piece-23-shared-cli-conventions.md`  
+**Handoff:** session-state `41b7998d.../files/piece-23-shared-cli-conventions-handoff.md`  
+**Expected LOC:** ~22 net production LOC (~90 gross). Well under 200 LOC ceiling.
+
+### Why this cluster
+
+D-3 was the clear primary pick: fragile emoji-string heuristic across 4 call sites, divergent variant in `watch/index.ts`, and a named home (`squad-file-conventions.ts`) already established by FIX-3. It compounds by making every future agent-detection feature use a tested, named function rather than an inline string check.
+
+D-5 pairs naturally: the `resolveSquadDir` duplication is mechanically identical to the `hasCodingAgent` problem (copy-paste per-file, no shared utility). Extracting it to `cli/core/squad-resolver.ts` applies the same pattern at the resolver layer.
+
+D-11 (qrcode types) is a 2-line removal plus a 12-line addition — trivially small, fits the "typing hygiene" theme, and removes two lint suppression comments.
+
+D-13 (seam convention) generates a decision document with zero production LOC — it belongs in this piece because piece 24 (OTel hardening) will add injectable seams and needs the convention documented first.
+
+### Items rejected for piece 23
+
+- D-6, D-8, D-9, D-14, D-16 (OTel hardening + SDK adapter): SDK-internal, piece 24's scope.
+- D-7, D-12: Absorbed into piece 22.
+- D-10, D-17: Won't fix (intentional, documented).
+- D-18 (resolveSquad v1/v2 rename): Breaking change, piece 25's scope.
+
+### Tensions with piece 22 in-flight diff
+
+`cli/commands/doctor.ts` is modified by both pieces: piece 22 changes check function return types; piece 23 updates one inline string check inside `checkGlobalAgent`. These are sequential edits on the same file — no conflict since piece 23 stacks on piece 22's branch. Spec §1.1 explicitly calls this out and instructs the implementer to locate `checkGlobalAgent` by function name.
+
+`cli-entry.ts` has a local `resolveSquadDir` function (piece 23's target) AND was heavily modified by piece 22 for the unified renderer. Piece 23 only removes the local resolver function — completely orthogonal to piece 22's renderer changes.
+
+### Discovery: economy.ts resolver is a manual walk
+
+The audit stated economy.ts wrapped `resolveSquadV2` — it does not. It has a hand-written 10-level `FSStorageProvider` walk. Both approaches return the `.squad/` directory path (semantically equivalent), but the implementation difference is real. Spec §6 documents this as a Low-likelihood risk with a mitigation (test `runEconomy` happy path before committing).

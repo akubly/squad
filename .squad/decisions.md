@@ -1402,3 +1402,43 @@ CONTROL's revision (`78297559`) addressed all issues raised in FIDO's original r
 - Flight: 🔒 locked out (original author, did not fix both blockers)
 - CONTROL: ✅ cleared — revision accepted
 
+
+### 2026-05-22: Piece 23 Scope
+
+**Author:** Flight (Lead)  
+**Date:** 2026-05-22  
+**Status:** Proposed  
+
+## Summary
+
+Piece 23 covers the four "typing hygiene + convention decisions" debt items (D-3, D-5, D-11, D-13) from the ship-debt audit (\docs/proposals/ship-debt-audit-pieces-1-21.md\).
+
+## Chosen Audit Items
+
+| Debt # | Description | Rationale for inclusion |
+|---|---|---|
+| D-3 | Extract \hasCodingAgent()\ to \squad-file-conventions.ts\ | Primary item; fixes fragile 4-site emoji heuristic; highest compound value |
+| D-5 | Extract shared \esolveSquadDir\ to \cli/core/squad-resolver.ts\ | Eliminates 4 duplicate local wrappers; same extraction pattern as D-3 |
+| D-11 | Add \qrcode-terminal.d.ts\ ambient declaration | Removes 2× TypeScript suppression comments; trivially small |
+| D-13 | Document options-bag test seam convention | Zero production LOC; decision needed before piece 24 adds OTel seams |
+
+## LOC Budget
+
+≤200 production LOC (hard ceiling). Expected: ~22 net LOC.
+
+## Owner
+
+Flight (Lead) authored the spec + handoff. Implementation can be assigned to any CLI-layer agent. CAPCOM is recommended given piece 22 revision experience.
+
+## Expected Start Branch
+
+\squad/piece-22-unify-doctors\ — piece 23 stacks on piece 22 (approved on commit \78297559\, not yet merged to dev).
+
+New branch: \squad/piece-23-shared-cli-conventions\
+
+## Spec + Handoff Paths
+
+- Spec: \docs/proposals/piece-23-shared-cli-conventions.md\
+- Handoff: \~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/piece-23-shared-cli-conventions-handoff.md\
+
+---
