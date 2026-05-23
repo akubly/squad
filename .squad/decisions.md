@@ -5,6 +5,23 @@
 
 ---
 
+### 2026-05-22: Piece 22 — Exit Code 2 for Doctor Errors
+
+`squad doctor` now exits with code **2** when any finding has `severity: 'error'`. Previously, the registry doctor exited with code **1** on error and the system doctor always exited **0**.
+
+**Rationale:**
+- Piece 14 established exit code 2 as "operation blocked by state" (used in `assign`, `init` conflict cases).
+- Exit code 1 is reserved for unexpected errors caught by the top-level catch block.
+- Doctor error findings are state-based ("callsign not in registry", ".squad/ missing") — they match the exit-2 semantic.
+- The old exit-1 from registry doctor was inconsistent with the codebase-wide convention.
+
+**Impact:**
+- No CI scripts were found parsing `squad doctor` exit codes directly (doctor is a diagnostic tool, not a gate).
+- Any automation that relied on `exit 1` from `squad doctor` on error should be updated to check for `exit 2`.
+- The changeset entry `.changeset/piece-22-unify-doctors.md` calls this out.
+
+---
+
 ### 2026-05-22: Piece 22 Scope + Ship-Debt Priority
 
 **Author:** Flight (Lead)  

@@ -41,3 +41,66 @@ Initial review identified guard-ordering test gap (A15 identity mock doesn't pro
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+## Learnings
+
+### Piece 22 Scope Decision (2026-05-22)
+
+**Mechanical vs. enriched unification:** Chose mechanical-only scope for piece 22. The `DoctorFinding` type includes an optional `repair` field but piece 22 will NOT populate it — that's semantic enrichment for a later piece. Rationale: the dual-doctor debt has existed since piece 18 (4 pieces of compounding); the minimum viable fix is type unification + single renderer. Adding repair commands or correlated findings would triple the PR size and require new test infrastructure.
+
+**Scope expansion decision:** Included D-4, D-7, D-12, D-15 in piece 22 because they are ≤5 LOC each, touch files already being modified, and avoid four separate PRs. Set a 200 LOC production-code ceiling as the expansion gate.
+
+### Ship-Debt Sniff Methodology (2026-05-22)
+
+Developed a systematic methodology for identifying technical debt across a multi-piece project:
+1. Decision ledger walk (look for "deferred", "follow-up", conditional approvals)
+2. Orchestration log scan (deferral keywords)
+3. Literal markers (TODO/FIXME grep)
+4. Escape hatches (eslint-disable, @ts-expect-error, @ts-ignore)
+5. @internal audit (forced exposure vs legitimate encapsulation)
+6. Duplication detection (same constant/function in 2+ files)
+7. Resolver sprawl (same SDK function wrapped differently per file)
+8. Silent returns (functions that return early without caller signal)
+
+**Key finding:** 18 debt items across pieces 1–21. Severity breakdown: 8S, 7M, 3L (but 2 of the L's are "won't fix"). The dual-doctor (D-1) was the only L-severity item requiring its own proposal. Most debt is M-severity single-file refactors that cluster into "typing hygiene" (piece 23) and "OTel hardening" (piece 24) themes.
+
+### Pattern: Ship-speed debt concentrates at integration boundaries
+
+The highest-severity debt items (D-1, D-5, D-18) all occur where a new piece added a module that interfaces with existing code through a seam rather than by extending the existing module. This is the "parallel module" anti-pattern — it's the fastest way to ship without breaking existing tests, but compounds into resolver confusion and type fragmentation. Future pieces should flag this pattern in adversarial review.
+
+---
+
+## Piece 22 — Dual-Doctor Unification (2026-05-22)
+
+**Branch:** `squad/piece-22-unify-doctors` | **LOC:** 165 diff lines (126 added + 39 removed in production src, +35 for new `doctor-types.ts`). Net production delta: ~87 LOC. Well under 200 LOC ceiling.
+
+### Key decisions
+
+**Architecture:** `runUnifiedDoctor` lives in `cli/commands/doctor.ts` (the legacy layer) rather than a new file. This keeps the cli-entry.ts import surface minimal — one import, one function. The registry `runDoctor` (in `commands/doctor.ts`) stays unchanged as an internal helper; its tests pass with zero modifications.
+
+**Exit-code change:** `error → 2` (was `error → 1`). Rationale: piece 14 established `process.exit(2)` as the convention for "operation blocked by state" errors. Using 1 only for unexpected/catch-block failures. The old exit-1 on registry doctor error was inconsistent with this convention. Noted in PR description and changeset.
+
+**Test seam:** `runUnifiedDoctor` inherits the `copilotHome` option from the registry doctor opts so tests can pass a fake home directory and avoid reading the user's real `.copilot` directory. This seam is essential — the real `.copilot` directory may contain invalid callsigns (e.g., "gethelp.app") that cause `diagnoseCopilotPayload` to throw.
+
+**Registry finding severity:** Used batch severity (the global `RunDoctorResult.severity`) applied uniformly to all registry findings. This is "existing behavior preserved" per spec §2.2. Per-finding severities in the registry doctor would require a deeper refactor deferred to a later piece.
+
+### Spec contradictions found
+
+**None.** The spec migration table was accurate for all 5 TODO-marked checks. The test migration guidance in spec §5 assumed `runDoctor` would be removed; instead it's kept as a deprecated export so existing tests work without assertion changes. This is a valid deviation — removing the export would have required a large test migration with zero behavior change.
+
+### Acceptance checklist
+
+- [x] `DoctorFinding` type in `cli/commands/doctor-types.ts`
+- [x] All 5 `TODO(piece-22)` markers removed (grep confirms zero)
+- [x] `cli-entry.ts` dual-banner block replaced with single unified pass
+- [x] Exit code: error → 2, else 0
+- [x] `passCount` in summary line
+- [x] All existing doctor tests pass
+- [x] New tests: source grouping, passCount, empty-findings, error finding shape
+- [x] `DoctorCheck` marked `@deprecated`
+- [x] `npm run build` passes
+- [x] `npm run lint` passes
+- [x] No new `eslint-disable` or `@ts-expect-error`
+- [x] `.changeset/piece-22-unify-doctors.md` present (patch bump)
