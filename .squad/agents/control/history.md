@@ -121,3 +121,40 @@ Initial review identified three TypeScript pattern violations: (T1) error codes 
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+## Learnings
+
+### Piece 22 adversarial type-design review — doctor unification (2026-05-22)
+
+- **Exit-code derivation must use a `never`-guarded helper, not inline `.filter()`.**  
+  The `_renderFinding` switch on `DoctorSeverity` has a correct `never` arm. But the exit-code block at `cli-entry.ts:1097–1102` uses `.filter(f => f.severity === 'error')` — an open string comparison with no exhaustiveness guard. If `DoctorSeverity` grows a new level (e.g., `'critical'`), the renderer will fail at compile time but exit-code logic will silently return 0. Fix: extract a typed `deriveExitCode(findings: DoctorFinding[]): number` helper with a severity switch and a `never` default.
+
+- **`DoctorSource` grouping in the renderer has no exhaustiveness guard.**  
+  `cli-entry.ts:1085–1086` uses two `.filter()` calls to split findings by source. A future third `DoctorSource` value would produce findings that are silently never rendered — they fall through both filter buckets and disappear. Either use a `Map<DoctorSource, DoctorFinding[]>` with a `never` guard, or add an assertion after grouping that the union is exhausted.
+
+- **Public types on the barrel are public API — semver implications.**  
+  `DoctorFinding`, `DoctorSeverity`, `DoctorSource`, and `DoctorRepair` are all re-exported from `packages/squad-cli/src/cli/index.ts`. Any breaking shape change (adding a required field, removing a field, narrowing a type) requires a minor or major changeset bump, not just a patch.
+
+- **Two canonical import paths for the same types.**  
+  `cli-entry.ts` imports `DoctorFinding` directly from `'./cli/commands/doctor-types.js'`, bypassing the barrel. The convention across the codebase is to import from the module barrel. Drift here makes future type moves (e.g., if `doctor-types.ts` is renamed) require updating multiple import sites.
+
+- **`DoctorFinding` fields should be `readonly`.**  
+  Interfaces representing value objects / diagnostic results should be immutable. Omitting `readonly` allows callers to mutate findings after construction, which could cause subtle bugs if findings are cached or passed between layers.
+
+### Piece 22 FIDO rejection revision — warn→stderr + exhaustive exit-code (2026-05-22)
+
+**Revision shipped (commit 78297559) on branch `squad/piece-22-unify-doctors`.**
+
+- **Fixes shipped:**
+  1. **Blocker 1 (stderr routing):** `_renderFinding` routed all findings to `console.log`. Spec §2.3 says warn→stderr, and the comment above `process.exit(2)` explicitly claimed "Warnings go to stderr" — direct contradiction. Fixed by extracting `renderFinding()` to `doctor.ts` with `console.error` for warn+error, `console.log` for info only.
+  2. **Blocker 2 (cross-source escalation test):** Added `renderFinding + deriveExitCode` describe block with two tests — cross-source (system warn + registry error → exit 2, both on stderr) and info-on-stdout companion.
+  3. **N1 (exhaustive exit-code helper):** `deriveExitCode(findings: readonly DoctorFinding[]): 0 | 2` exported from `doctor.ts` with exhaustive severity switch + `never` arm. `cli-entry.ts` now destructures it from the dynamic import and uses it instead of `if (errorCount > 0)`.
+  4. **N3 (readonly fields):** All `DoctorFinding` fields marked `readonly`.
+  5. **N4 (import alignment):** Static `DoctorFinding` import from `doctor-types.js` removed from `cli-entry.ts`; `renderFinding`/`deriveExitCode` destructured from the existing dynamic import of `doctor.js`.
+
+- **LOC count:** Flight's commit ~111 net production + my rev +29 net production = **~140 net total**. Under the 200-LOC ceiling.
+- **Optional cleanups folded in:** N3 (readonly), N4 (import alignment). N2 (source-grouping exhaustiveness) deferred per instructions.
+- **Spec contradiction encountered:** Comment at `cli-entry.ts:1101` read "Warnings go to stderr" but `_renderFinding` used `console.log` for all findings. After fix, comment and code now agree.
+- **Build:** CLEAN. **Lint:** CLEAN. **Doctor tests:** 46/46 GREEN.

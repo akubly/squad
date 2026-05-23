@@ -125,3 +125,69 @@ Older learnings (prior to 2026-05-14) have been archived to history-archive.md f
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+### Piece 22 Adversarial Review — Doctor Unification (2026-05-22)
+
+**Verdict:** 🛑 REJECT (2 blockers)
+
+**Commit reviewed:** `ef09d3d3` on `squad/piece-22-unify-doctors`
+
+**What Flight got right:**
+- `DoctorFinding` type file created correctly (doctor-types.ts)
+- All 5 `TODO(piece-22)` markers removed ✅
+- `DoctorCheck` marked `@deprecated` ✅
+- cli-entry.ts renderer is single-pass with source grouping ✅
+- Exit code changed to 2 for errors (decision logged in decisions.md) ✅
+- LOC budget: 111 net production LOC — well within 200 ceiling ✅
+- Build passes clean ✅
+- 44/44 doctor tests pass ✅
+- Changeset present and correct ✅
+- No new deps, no `.squad/` state committed ✅
+
+**Blocker 1 — Warn findings go to stdout (cli-entry.ts:201-203):**
+`_renderFinding` uses `console.log` for ALL severities. Spec says "warn → 0 (warnings to stderr)". The comment just above `process.exit(2)` even says "Warnings go to stderr" — but the implementation uses stdout. Warn findings should use `console.error`. Without this, piped tooling can't distinguish warnings from info output, and the spec contract is broken.
+
+**Blocker 2 — Missing "unified severity derivation" test:**
+Spec §5 "New Tests Needed" explicitly mandates: "A test where system doctor produces a `warn` and registry doctor produces an `error` → overall exit code is 2." This is the core behavioral claim of the unification (cross-source severity escalation). None of the 5 new tests cover it. The other 4 new tests are all run against a healthy scaffold that produces zero errors — they cannot surface a severity escalation bug.
+
+**Non-blocking concerns:**
+- `test/cli/list-doctor.test.ts` not updated (spec §5 requires parallel assertions via unified runner) — pre-existing tests still pass, but new coverage was skipped
+- Registry doctor (`commands/doctor.ts`) not natively migrated — Flight adapted at the boundary in `runUnifiedDoctor` which is consistent with spec §2.4 ("internal helpers"), but deviates from handoff "done when" letter
+- Registry batch severity stamps all findings with max severity — per-spec ("existing behavior preserved") but loses per-finding granularity from migration table
+- `doctor-registry-cli.test.ts` CLI2 uses `not.toBe(0)` for `--purge` usage error — pre-existing weak gate, no `toBe(1)` to update per spec instructions
+
+**Pattern learned — Warn-to-stderr contracts:** When a spec uses the phrase "warn → N (warnings to stderr)", verify BOTH the exit code AND the stream routing in the rendering function. They are independent. A code comment saying "warnings go to stderr" is not the same as `console.error`. Always grep for `console.log` calls in severity-keyed render helpers.
+
+**Reassigned to:** CONTROL (Flight locked out)
+
+---
+
+### Piece 22 Re-Verdict — CONTROL Revision (2026-05-22)
+
+**Verdict:** ✅ APPROVE
+
+**Commit reviewed:** `78297559` on `squad/piece-22-unify-doctors`
+
+**Blocker 1 (warn→stderr) — RESOLVED:**
+`renderFinding()` in `doctor.ts:780–802` uses `console.error` for both `error` and `warn` severities; `info` correctly routes to `console.log`. The old `_renderFinding` in `cli-entry.ts` (which used `console.log` for all severities) is fully removed. The comment at `cli-entry.ts:1077` — `// Exit code: error → 2, else 0. Warnings go to stderr.` — now accurately describes the implementation.
+
+**Blocker 2 (cross-source escalation test) — RESOLVED:**
+Test at `doctor.test.ts:545` constructs a system `warn` + registry `error` finding set, calls `renderFinding` on each, and asserts: `stderrSpy.toHaveBeenCalledTimes(2)`, `stdoutSpy` never called, `deriveExitCode(findings) === 2`. A companion test at line 564 asserts `info` goes to stdout only. Both tests would have **failed on ef09d3d3** because the old code called `console.log` for all severities — stderrSpy would have received 0 calls.
+
+**N1 (exhaustive deriveExitCode) — RESOLVED:**
+`deriveExitCode()` at `doctor.ts:809–824` uses a `switch` over `DoctorSeverity` with a `never` default arm. `renderFinding()` carries the same exhaustive switch. `cli-entry.ts:1072` uses `deriveExitCode(findings)` — the old inline `.filter(f => f.severity === 'error').length > 0` is gone.
+
+**Gate results:**
+- Build: ✅ CLEAN (`tsc` + postbuild)
+- Lint: ✅ CLEAN (`tsc --noEmit`)
+- Doctor tests: ✅ 53/53 (46 in doctor.test.ts + 7 in doctor-registry-cli.test.ts)
+- LOC budget: ✅ 159 net new lines (166 insertions, 7 deletions) — within 200 ceiling
+- State hygiene: ✅ No `.squad/` files in commit
+
+**Spot-check cleanups (N3, N4):**
+- N3: All `DoctorFinding` interface fields are `readonly` in `doctor-types.ts`. ✅
+- N4: The static `import type { DoctorFinding } from './cli/commands/doctor-types.js'` removed from `cli-entry.ts`; `renderFinding`/`deriveExitCode` destructured from the existing dynamic `import('./cli/commands/doctor.js')`. ✅
+
+**Pattern learned — Revision verification discipline:** When re-reviewing after a rejection, always run the new test against the mental model of the old code to confirm it would have caught the bug. For stream-routing assertions, spy on `console.error` directly — a test that only checks `console.log` cannot prove stderr routing.

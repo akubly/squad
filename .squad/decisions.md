@@ -1316,3 +1316,89 @@ Create `packages/squad-cli/src/cli/core/squad-file-conventions.ts` as the single
 - Future artifact checks should prefer shared convention modules over re-declaration.
 - The module remains dependency-light and safe for CLI core imports. 
 ---
+
+
+---
+
+# Piece 22 Revision Verdict — CONTROL (2026-05-22)
+
+**Branch:** `squad/piece-22-unify-doctors`  
+**Revision commit:** `78297559`  
+**Author:** CONTROL (revision owner per FIDO rejection + reassign-to-CONTROL recommendation)  
+**Flight lockout:** Active — Flight is locked out of this revision per strict Reviewer Rejection Protocol.
+
+---
+
+## What Was Resolved
+
+### FIDO Blocker 1 — warn findings routed to stderr
+`_renderFinding` in `cli-entry.ts` sent all findings to `console.log` (stdout), including `warn`-severity. The comment at line 1101 claimed "Warnings go to stderr" — a direct contradiction. Fix: extract `renderFinding()` to `doctor.ts`; `warn` and `error` now use `console.error`; `info` stays on `console.log`.
+
+### FIDO Blocker 2 — cross-source escalation test
+Added `renderFinding + deriveExitCode` describe block in `test/cli/doctor.test.ts`:
+- Asserts system-warn + registry-error → `deriveExitCode` returns 2 AND both rendered via `console.error` (stderr).
+- Asserts info findings go to `console.log` (stdout) only.
+
+---
+
+## Directive Fixes Folded In
+
+| Directive | Status | Notes |
+|---|---|---|
+| N1 — exhaustive exit-code helper | ✅ Shipped | `deriveExitCode(): 0 \| 2` with `never` arm; replaces inline `if (errorCount > 0)` |
+| N3 — readonly DoctorFinding fields | ✅ Shipped | All fields marked `readonly` in `doctor-types.ts` |
+| N4 — import alignment | ✅ Shipped | Static `DoctorFinding` import from `doctor-types.js` removed; `renderFinding`/`deriveExitCode` from dynamic import of `doctor.js` |
+| N2 — source-grouping exhaustiveness | ⏭ Deferred | Scope-growth risk; deferred to follow-up piece per instructions |
+
+---
+
+## Final Metrics
+
+- **Production LOC (rev only):** +29 net
+- **Production LOC (Flight + rev combined):** ~140 net (ceiling: 200)
+- **Build:** CLEAN
+- **Lint:** CLEAN
+- **Doctor tests:** 46/46 GREEN
+
+
+---
+
+# Piece 22 Doctor Unification — FIDO Approval
+
+**Date:** 2026-05-22  
+**Reviewer:** FIDO (Quality Owner)  
+**Branch:** `squad/piece-22-unify-doctors`  
+**Revision commit:** `78297559`  
+**Original rejection commit:** `ef09d3d3`  
+
+## Decision
+
+✅ **APPROVED** — both blockers resolved, all gates green.
+
+## Resolution Summary
+
+CONTROL's revision (`78297559`) addressed all issues raised in FIDO's original rejection:
+
+1. **Blocker 1 (warn→stderr):** `renderFinding()` extracted to `doctor.ts` with correct stream routing — `error` and `warn` → `console.error`; `info` → `console.log`. The old `_renderFinding` in `cli-entry.ts` that used `console.log` for all severities is fully removed.
+
+2. **Blocker 2 (cross-source escalation test):** New test at `doctor.test.ts:545` proves: system `warn` + registry `error` → `deriveExitCode` returns `2`, both findings rendered via `console.error` (stderrSpy asserted ×2), stdout untouched. Companion info-on-stdout test also added.
+
+3. **N1 (exhaustive deriveExitCode):** `deriveExitCode()` uses a `switch` over `DoctorSeverity` with `never` default arm. `cli-entry.ts` delegates to the helper — inline filter removed.
+
+4. **N3/N4 cleanups:** `DoctorFinding` fields are `readonly`; static `DoctorFinding` import removed from `cli-entry.ts`.
+
+## Gate Results
+
+| Gate | Result |
+|------|--------|
+| Build | ✅ CLEAN |
+| Lint | ✅ CLEAN |
+| Doctor tests | ✅ 53/53 |
+| LOC budget | ✅ 159/200 net |
+| State hygiene | ✅ No `.squad/` in commit |
+
+## Lockout Record
+
+- Flight: 🔒 locked out (original author, did not fix both blockers)
+- CONTROL: ✅ cleared — revision accepted
+

@@ -127,3 +127,17 @@ The highest-severity debt items (D-1, D-5, D-18) all occur where a new piece add
 - Directive 1: Exit-code derivation needs a `never`-guarded helper, not inline `.filter()`.
 - Directive 2: `DoctorSource` grouping needs exhaustiveness assertion or Map-based dispatch.
 - Directive 3: `DoctorFinding` fields should be `readonly` to enforce immutability of value objects.
+
+---
+
+## 📌 Piece 22 Revision Approved — Flight Lockout Lapsed
+
+**Date:** 2026-05-22  
+**Revision commit:** `78297559`  
+**Revision author:** CONTROL  
+
+The artifact `squad/piece-22-unify-doctors` (commit ef09d3d3) that was locked out from Flight following rejection has now been approved on CONTROL's revision (commit 78297559). Both blockers resolved:
+1. warn→stderr routing fixed in `renderFinding()`
+2. Cross-source escalation test added with full gate coverage
+
+All gates green: build CLEAN, lint CLEAN, 53/53 doctor tests, 159/200 LOC budget, no .squad/ leaks. FIDO re-verdict: ✅ APPROVE. Lockout for this artifact has lapsed.
