@@ -13,7 +13,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
-import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '../core/squad-file-conventions.js';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from '../core/squad-file-conventions.js';
 import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
 import { RED, YELLOW, DIM, RESET } from '../core/output.js';
 import type { DoctorFinding, DoctorSeverity } from './doctor-types.js';
@@ -390,7 +390,7 @@ export function checkCopilotInstructions(cwd: string, squadDir: string): DoctorC
   if (!fileExists(teamPath)) return undefined;
 
   const teamContent = storage.readSync(teamPath) ?? '';
-  if (!teamContent.includes('🤖 Coding Agent')) return undefined;
+  if (!hasCodingAgent(teamContent)) return undefined;
 
   const instructionsPath = path.join(cwd, '.github', 'copilot-instructions.md');
   const exists = fileExists(instructionsPath);

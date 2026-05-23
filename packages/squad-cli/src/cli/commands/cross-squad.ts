@@ -13,19 +13,15 @@ import { promisify } from 'node:util';
 import { success, warn, info, BOLD, RESET, DIM } from '../core/output.js';
 import { fatal } from '../core/errors.js';
 import {
-  resolveSquad as resolveSquadV2,
   discoverSquads,
   formatDiscoveryTable,
   findSquadByName,
   buildDelegationArgs,
   type DiscoveredSquad,
 } from '@bradygaster/squad-sdk';
+import { resolveSquadDir } from '../core/squad-resolver.js';
 
 const execFileAsync = promisify(execFile);
-
-function resolveSquadDir(cwd: string): string | null {
-  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
-}
 
 export async function discoverCommand(cwd = process.env['SQUAD_TEAM_ROOT'] || process.cwd()): Promise<void> {
   const squadDir = resolveSquadDir(cwd);

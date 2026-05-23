@@ -261,8 +261,7 @@ export async function runRC(cwd: string, options: RCOptions): Promise<void> {
 
         // Show QR code
         try {
-          // @ts-ignore - no type declarations for qrcode-terminal
-          const qrcode = (await import('qrcode-terminal')) as any;
+          const qrcode = await import('qrcode-terminal');
           qrcode.default.generate(tunnel.url, { small: true }, (code: string) => {
             console.log(code);
           });

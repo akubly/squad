@@ -99,6 +99,7 @@ import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
 import { runCost } from './cli/commands/cost.js';
 import { getPackageVersion } from './cli/core/version.js';
+import { resolveSquadDir } from './cli/core/squad-resolver.js';
 
 // Lazy-load squad-sdk to avoid triggering @github/copilot-sdk import on Node 24+
 // (Issue: copilot-sdk has broken ESM imports - vscode-jsonrpc/node without .js extension)
@@ -151,10 +152,6 @@ function findInitUrlLikeArg(args: string[], isUrlLikeArg: (arg: string) => boole
   }
 
   return undefined;
-}
-
-function resolveSquadDir(cwd: string): string | null {
-  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
 }
 
 function formatResolverReason(source: ResolvedSquad['source']): string {

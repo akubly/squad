@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 import { detectSquadDir } from '../../core/detect-squad-dir.js';
 import { fatal } from '../../core/errors.js';
 import { GREEN, RED, DIM, BOLD, RESET, YELLOW } from '../../core/output.js';
+import { hasCodingAgent } from '../../core/squad-file-conventions.js';
 import {
   parseRoutingRules,
   parseModuleOwnership,
@@ -762,7 +763,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     console.log(`${DIM}Labels: ensured ${roster.length + 1} squad labels exist${RESET}`);
   }
 
-  const hasCopilot = content.includes('🤖 Coding Agent') || content.includes('@copilot');
+  const hasCopilot = hasCodingAgent(content);
   const autoAssign = content.includes('<!-- copilot-auto-assign: true -->');
   const monitorSessionId = 'ralph-watch';
   const eventBus = new EventBus();

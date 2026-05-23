@@ -138,8 +138,7 @@ export async function runStart(cwd: string, options: StartOptions): Promise<void
       tunnelUrl = tunnelUrlWithToken;
       console.log(`${GREEN}✓${RESET} Remote: ${BOLD}${tunnelUrlWithToken}${RESET}`);
       try {
-        // @ts-expect-error — qrcode-terminal is an optional dependency
-        const qrcode = (await import('qrcode-terminal')) as any;
+        const qrcode = await import('qrcode-terminal');
         qrcode.default.generate(tunnelUrlWithToken, { small: true }, (code: string) => { console.log(code); });
       } catch {}
       console.log(`${DIM}Scan QR or open URL on phone. Starting copilot...${RESET}\n`);

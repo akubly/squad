@@ -17,7 +17,7 @@ import { TEMPLATE_MANIFEST, getTemplatesDir } from './templates.js';
 import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
-import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from './squad-file-conventions.js';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from './squad-file-conventions.js';
 import { installCoordinatorAgent } from '../../commands/assign.js';
 
 const storage = new FSStorageProvider();
@@ -706,7 +706,7 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   
   if (storage.existsSync(teamMdPath)) {
     const teamContent = storage.readSync(teamMdPath) ?? '';
-    const copilotEnabled = teamContent.includes('🤖 Coding Agent');
+    const copilotEnabled = hasCodingAgent(teamContent);
     
     if (copilotEnabled && storage.existsSync(copilotInstructionsSrc)) {
       storage.mkdirSync(path.dirname(copilotInstructionsDest), { recursive: true });

@@ -8,27 +8,10 @@
  */
 
 import { join } from 'node:path';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import { writeEconomyMode, readEconomyMode } from '@bradygaster/squad-sdk/config';
-
-const storage = new FSStorageProvider();
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM } from '../core/output.js';
-
-function resolveSquadDir(cwd: string): string | null {
-  // Walk up to find .squad/
-  let dir = cwd;
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, '.squad');
-    if (storage.existsSync(candidate)) {
-      return candidate;
-    }
-    const parent = join(dir, '..');
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
+import { resolveSquadDir } from '../core/squad-resolver.js';
 
 export async function runEconomy(cwd: string, subArgs: string[]): Promise<void> {
   const squadDir = resolveSquadDir(cwd);

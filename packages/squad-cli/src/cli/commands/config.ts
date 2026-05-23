@@ -12,7 +12,6 @@
 import { join } from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
 import {
-  resolveSquad as resolveSquadV2,
   readModelPreference,
   writeModelPreference,
   readAgentModelOverrides,
@@ -21,10 +20,7 @@ import {
 } from '@bradygaster/squad-sdk';
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
-
-function resolveSquadDir(cwd: string): string | null {
-  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
-}
+import { resolveSquadDir } from '../core/squad-resolver.js';
 
 function listAgents(squadDir: string): string[] {
   const agentsDir = join(squadDir, 'agents');
