@@ -14,10 +14,16 @@ import path from 'node:path';
 import os from 'node:os';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '../core/squad-file-conventions.js';
+import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
+import type { DoctorFinding, DoctorSeverity } from './doctor-types.js';
+export type { DoctorFinding, DoctorSeverity, DoctorSource, DoctorRepair } from './doctor-types.js';
 
 const storage = new FSStorageProvider();
 
-/** Result of a single diagnostic check. */
+/**
+ * Result of a single diagnostic check.
+ * @deprecated Use `DoctorFinding` from the unified doctor (`runUnifiedDoctor`).
+ */
 export interface DoctorCheck {
   name: string;
   status: 'pass' | 'fail' | 'warn';
@@ -288,7 +294,6 @@ function findMissingConventions(required: readonly string[], content: string): s
   });
 }
 
-// TODO(piece-22): merge into unified doctor
 export function checkGitattributes(cwd: string): DoctorCheck {
   const filePath = path.join(cwd, '.gitattributes');
   if (!fileExists(filePath)) {
@@ -316,7 +321,6 @@ export function checkGitattributes(cwd: string): DoctorCheck {
   };
 }
 
-// TODO(piece-22): merge into unified doctor
 export function checkGitignore(cwd: string): DoctorCheck {
   const filePath = path.join(cwd, '.gitignore');
   if (!fileExists(filePath)) {
@@ -344,7 +348,6 @@ export function checkGitignore(cwd: string): DoctorCheck {
   };
 }
 
-// TODO(piece-22): merge into unified doctor
 export function checkCopilotSkillsSync(cwd: string, squadDir: string): DoctorCheck | undefined {
   if (!isDirectory(squadDir)) return undefined;
 
@@ -381,7 +384,6 @@ export function checkCopilotSkillsSync(cwd: string, squadDir: string): DoctorChe
   };
 }
 
-// TODO(piece-22): merge into unified doctor
 export function checkCopilotInstructions(cwd: string, squadDir: string): DoctorCheck | undefined {
   const teamPath = path.join(squadDir, 'team.md');
   if (!fileExists(teamPath)) return undefined;
@@ -398,7 +400,6 @@ export function checkCopilotInstructions(cwd: string, squadDir: string): DoctorC
   };
 }
 
-// TODO(piece-22): merge into unified doctor
 export function checkGlobalAgent(homeDir?: string): DoctorCheck {
   const agentPath = path.join(homeDir ?? os.homedir(), '.copilot', 'agents', 'squad.agent.md');
   const exists = fileExists(agentPath);
@@ -696,4 +697,73 @@ export async function doctorCommand(cwd?: string): Promise<void> {
   const mode = getDoctorMode(resolvedCwd);
   const checks = await runDoctor(resolvedCwd);
   printDoctorReport(checks, mode);
+}
+
+// ── Unified doctor ───────────────────────────────────────────────────
+
+export interface UnifiedDoctorOpts {
+  cwd: string;
+  registryPath?: string;
+  /** Override user-scoped Copilot home for orphan detection (test seam). */
+  copilotHome?: string;
+}
+
+/**
+ * Run both the system doctor and the registry doctor, returning a unified
+ * `DoctorFinding[]` sorted by source. `passCount` tracks system checks that
+ * passed (passes are not included in `findings`).
+ */
+export async function runUnifiedDoctor(opts: UnifiedDoctorOpts): Promise<{
+  findings: DoctorFinding[];
+  passCount: number;
+}> {
+  const { cwd, registryPath, copilotHome } = opts;
+
+  // ── System checks ──────────────────────────────────────────────────
+  const checks = await runDoctor(cwd);
+  let passCount = 0;
+  const systemFindings: DoctorFinding[] = [];
+
+  for (const check of checks) {
+    if (check.status === 'pass') {
+      passCount++;
+      continue;
+    }
+    let severity: DoctorSeverity;
+    if (check.status === 'fail') {
+      severity = 'error';
+    } else {
+      // status === 'warn'
+      severity = check.severity === 'info' ? 'info' : 'warn';
+    }
+    systemFindings.push({
+      severity,
+      label: check.name,
+      message: check.message,
+      source: 'system',
+    });
+  }
+
+  // ── Registry checks ────────────────────────────────────────────────
+  const registryResult = await runRegistryDoctor({ cwd, registryPath, copilotHome });
+  const registryFindings: DoctorFinding[] = registryResult.findings.map(f => ({
+    severity: registryResult.severity,
+    label: _findingLabel(f),
+    message: f,
+    source: 'registry',
+  }));
+
+  return { findings: [...systemFindings, ...registryFindings], passCount };
+}
+
+/** Derive a short kebab-case label from a registry finding string. */
+function _findingLabel(finding: string): string {
+  const clean = finding.replace(/^Warning:\s+/i, '');
+  const first = clean.split(/[:.]/)[0] ?? clean;
+  return first
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 40);
 }

@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
 import {
   runDoctor,
+  runUnifiedDoctor,
   getDoctorMode,
   checkNodeVersion,
   checkGitattributes,
@@ -21,7 +22,7 @@ import {
   checkCopilotInstructions,
   checkGlobalAgent,
 } from '@bradygaster/squad-cli/cli/commands/doctor';
-import type { DoctorCheck } from '@bradygaster/squad-cli/cli/commands/doctor';
+import type { DoctorCheck, DoctorFinding } from '@bradygaster/squad-cli/cli/commands/doctor';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '@bradygaster/squad-cli/core/squad-file-conventions';
 
 const TEST_ROOT = join(process.cwd(), `.test-doctor-${randomBytes(4).toString('hex')}`);
@@ -457,5 +458,81 @@ describe('squad doctor', () => {
 
     expect(result.status).toBe('warn');
     expect(result.message).toContain("Run 'squad upgrade'");
+  });
+});
+
+// ── piece-22: runUnifiedDoctor ────────────────────────────────────────────────
+
+describe('runUnifiedDoctor', () => {
+  beforeEach(async () => {
+    if (existsSync(TEST_ROOT)) {
+      await rm(TEST_ROOT, { recursive: true, force: true });
+    }
+    await mkdir(TEST_ROOT, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (existsSync(TEST_ROOT)) {
+      await rm(TEST_ROOT, { recursive: true, force: true });
+    }
+  });
+
+  it('returns DoctorFinding[] with source=system for system checks', async () => {
+    await scaffold(TEST_ROOT);
+    const { findings } = await runUnifiedDoctor({
+      cwd: TEST_ROOT,
+      registryPath: join(TEST_ROOT, 'no-registry.json'),
+      copilotHome: join(TEST_ROOT, 'fake-home'),
+    });
+    const systemFindings = findings.filter((f: DoctorFinding) => f.source === 'system');
+    const systemErrors = systemFindings.filter((f: DoctorFinding) => f.severity === 'error');
+    expect(systemErrors).toHaveLength(0);
+  });
+
+  it('passCount reflects system checks that passed', async () => {
+    await scaffold(TEST_ROOT);
+    const { passCount } = await runUnifiedDoctor({
+      cwd: TEST_ROOT,
+      registryPath: join(TEST_ROOT, 'no-registry.json'),
+      copilotHome: join(TEST_ROOT, 'fake-home'),
+    });
+    expect(passCount).toBeGreaterThan(0);
+  });
+
+  it('empty-findings path: healthy setup has no error findings', async () => {
+    await scaffold(TEST_ROOT);
+    const { findings } = await runUnifiedDoctor({
+      cwd: TEST_ROOT,
+      registryPath: join(TEST_ROOT, 'no-registry.json'),
+      copilotHome: join(TEST_ROOT, 'fake-home'),
+    });
+    const errors = findings.filter((f: DoctorFinding) => f.severity === 'error');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('source grouping: system and registry findings have correct source tags', async () => {
+    await scaffold(TEST_ROOT);
+    const { findings } = await runUnifiedDoctor({
+      cwd: TEST_ROOT,
+      registryPath: join(TEST_ROOT, 'no-registry.json'),
+      copilotHome: join(TEST_ROOT, 'fake-home'),
+    });
+    for (const f of findings) {
+      expect(['system', 'registry']).toContain(f.source);
+    }
+    const registryFindings = findings.filter((f: DoctorFinding) => f.source === 'registry');
+    expect(registryFindings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('missing .squad/ directory produces an error finding with source=system', async () => {
+    const { findings } = await runUnifiedDoctor({
+      cwd: TEST_ROOT,
+      registryPath: join(TEST_ROOT, 'no-registry.json'),
+      copilotHome: join(TEST_ROOT, 'fake-home'),
+    });
+    const squadDirError = findings.find(
+      (f: DoctorFinding) => f.source === 'system' && f.label === '.squad/ directory exists' && f.severity === 'error',
+    );
+    expect(squadDirError).toBeDefined();
   });
 });
