@@ -136,7 +136,7 @@ This entry is informational — no file rename is required. It is written to pre
 
 **Author:** CONTROL (TypeScript Engineer)  
 **For:** Flight (Lead) — fold into spec revision before piece-24 implementation  
-**Status:** Pending Brady decision
+**Status:** Approved (implemented in Flight piece-24 spec revision)
 
 **Directive:** Replace the proposed variadic generic signature for `OTelTracerLike.startActiveSpan` with three concrete overloads. Extract the noop implementation as a standalone function. Both changes: zero-suppression, ~+8 LOC over baseline.
 
@@ -158,6 +158,33 @@ In `OTelTracerLike`, use 3 concrete overloads. Extract the noop as a standalone 
 **LOC Delta:** ~+8 over baseline; well within 149 LOC headroom.
 
 **Confidence:** High. Verified against `node_modules/@opentelemetry/api/build/src/trace/tracer.d.ts` and TypeScript type narrowing semantics.
+
+---
+
+### 2026-05-27: Flight — Piece 24 Spec Revision Complete: Ready for Implementation Kickoff
+
+**Author:** Flight (Lead)  
+**Status:** Complete, approved by Brady (CONTROL directive incorporated)
+
+**Outcome:** Piece 24 spec (`docs/proposals/piece-24-sdk-adapter-otel-typing.md`) has been revised per CONTROL's noop-tracer typing directive. All changes merged into both spec and handoff. Design is ready for implementation kickoff; no open design questions remain.
+
+**Changes Made:**
+
+1. **`OTelTracerLike.startActiveSpan`** — replaced the variadic generic approximation with OTel's 3 concrete overloads, matching `@opentelemetry/api` exactly.
+2. **Standalone noop function** — `_noopStartActiveSpan` is now specified as a standalone function (4 signatures: 3 overloads + 1 implementation body); TypeScript narrowing via `typeof callback !== 'function'` eliminates any need for `any`/`as`/`@ts-*`.
+3. **All eslint-disable concession language removed** — the "acceptable single targeted suppression" fallback is gone from §2.2, §6 risk table, and §9 acceptance criteria.
+4. **LOC envelope updated** — from ~51 net to ~59 net (+8 per CONTROL's analysis); ceiling remains 200 (141 LOC headroom).
+5. **§9 acceptance criteria** — lint criterion now requires zero `eslint-disable` or `@ts-*` of any kind; new criterion added requiring zero suppression in the typed noop surface.
+6. **Handoff updated** — eslint-disable exception removed from constraints, Done When checklist tightened, Prior Context section notes the spec was revised before kickoff.
+7. **Revision history** — appended to spec and to `flight/history.md`.
+
+**Risk Assessment:**
+
+No new risks surfaced by this revision. CONTROL's directive resolves the only Medium-rated risk in the original spec (the variadic typing risk is now closed). The revised design is strictly cleaner: it matches OTel's actual API, preserves `ReturnType<F>` inference, and imposes zero lint exceptions on the implementer.
+
+The piece remains SDK-only, patch-bump, under 200 LOC ceiling. Cluster selection (D-6/D-8/D-9/D-16, D-14 deferred) is unchanged.
+
+**Piece 24 is ready to assign to an implementer.**
 
 ---
 

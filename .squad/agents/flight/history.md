@@ -10,6 +10,12 @@ See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, p
 
 ---
 
+## Summary (Recent)
+
+**Pieces 22–24 Wave (2026-05-22 to 2026-05-27):** Led three interconnected specs across doctor unification (piece 22, 165 LOC diff), shared CLI conventions (piece 23, 17 net LOC), and OTel typing hardening (piece 24, 59 net LOC). Key learnings: (1) mechanical vs. enriched scope split prevents compounding; (2) ship-debt sniff methodology systematically identifies 18 high-priority items; (3) parallel modules at integration boundaries concentrate debt; (4) variadic approximations lose type inference compared to real interfaces; (5) lint rule presence must be verified before granting suppression concessions. Developed patterns for adversarial review feedback (warn-to-stderr routing, cross-source severity escalation), resolver chain testing, and feature/cleanup split heuristics. Piece 24 spec ready for implementation kickoff post-CONTROL revision (3-overload noop typing closes Medium risk).
+
+---
+
 ## 📌 Team Updates — Recent
 
 **2026-05-27 CONTROL Design Directive Filed — Piece 24 §2.2 Revision Required Before Implementation:** CONTROL investigated the eslint-disable concession on `_noopTracer.startActiveSpan` and filed a high-confidence directive: the rule being suppressed (`@typescript-eslint/no-explicit-any`) is NOT in the project's ESLint config — all suppressions are dead code. CONTROL recommends Alt 1 (3-overload interface + standalone function, ~+8 LOC, zero suppression). Flight's piece-24 spec must rev §2.2 before implementation kickoff. Brady's decision pending. See `.squad/decisions.md` → 2026-05-27 entries and `.squad/orchestration-log/2026-05-27T1315-control.md` for full directive.
@@ -192,7 +198,7 @@ Piece 23 stacks on `squad/piece-22-unify-doctors` which is pending Brady's local
 
 **Spec:** `docs/proposals/piece-24-sdk-adapter-otel-typing.md`  
 **Handoff:** session-state `41b7998d.../files/piece-24-sdk-adapter-otel-typing-handoff.md`  
-**Expected LOC:** ~51 net production LOC (~130 gross). Well under 200 LOC ceiling.
+**Expected LOC:** ~59 net production LOC (~138 gross, revised from ~51 per CONTROL's 3-overload directive). Well under 200 LOC ceiling.
 
 ### Learnings
 
@@ -219,3 +225,19 @@ The audit's suggested piece groupings are not always coherent in work type. D-14
 #### Tension with Piece 23 In-Flight Diff
 
 Piece 23 (in `squad/piece-23-shared-cli-conventions`, EECOM rev pending) touches only CLI files. Piece 24 touches only SDK files (`packages/squad-sdk/src/`). Zero structural overlap. The stacking is clean; piece 24's branch should form from piece 23's tip regardless of whether EECOM's rev has landed. No spec design-around was required.
+
+---
+
+## Learnings
+
+### CONTROL Catch: Variadic `startActiveSpan` Was Both Unnecessary AND Weaker (2026-05-27)
+
+**What happened:** When authoring piece 24's spec, I approximated `OTel.Tracer.startActiveSpan` as a variadic generic (`<T>(...args: [string, ...unknown[], (span: OTelSpanLike) => T]): T | undefined`) because I assumed a variadic rest-arg was the cleanest way to capture OTel's multi-arity signature. I added a concession allowing a single `eslint-disable-next-line` on that method if TypeScript narrowing proved difficult.
+
+**CONTROL's findings:**
+1. **The eslint rule being suppressed (`@typescript-eslint/no-explicit-any`) is not in the project's ESLint config.** The `eslint.config.mjs` has only 3 rules — `no-explicit-any` is not one of them. The "acceptable single suppression" would have suppressed dead code, misleading any future reader who assumes the rule is active.
+2. **OTel's actual interface is 3 concrete overloads, not variadic.** The real `Tracer.startActiveSpan` in `@opentelemetry/api` is defined as `(name, fn)`, `(name, opts, fn)`, and `(name, opts, ctx, fn)`. Matching the real interface exactly — as a standalone function so overload signatures attach cleanly — gives TypeScript the full overload information and preserves `ReturnType<F>` inference at call sites. The variadic approximation loses this.
+
+**Lesson: Check the actual interface before approximating it.** When a third-party API's types are available in `node_modules`, look at the `.d.ts` before reaching for a variadic approximation. The real signature is almost always cleaner than an approximation, and approximations can silently lose type inference that callers depend on (like `ReturnType<F>`). This applies doubly to OTel, whose API surface is stable and well-typed.
+
+**Lesson: Verify that a lint rule is in the config before treating a suppression as a concession.** Granting a "one targeted suppression is acceptable" exception is meaningless if the rule does not fire. Future spec concessions should confirm rule presence in `eslint.config.mjs` before describing them as acceptable fallbacks.
