@@ -9,6 +9,7 @@
  */
 
 import { trace, metrics, diag, DiagConsoleLogger, DiagLogLevel, type Tracer, type Meter } from './otel-api.js';
+import type { OTelNodeSDKConstructor, OTelResourceConstructor, OTelMetricReaderConstructor, OTelExporterConstructor } from './otel-types.js';
 import { createRequire } from 'node:module';
 
 // ============================================================================
@@ -43,7 +44,7 @@ function resolveEndpoint(config?: OTelConfig): string | undefined {
   return config?.endpoint ?? process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? undefined;
 }
 
-function buildResource(config?: OTelConfig, Resource?: any): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+function buildResource(config?: OTelConfig, Resource?: OTelResourceConstructor): unknown {
   if (!Resource) return undefined;
   const req = createRequire(import.meta.url);
   let version = 'unknown';
@@ -72,8 +73,8 @@ function ensureSDK(config?: OTelConfig): void {
 
   // Lazy-load optional OTel SDK packages via createRequire (#247)
   const req = createRequire(import.meta.url);
-  let NodeSDK: any, Resource: any, PeriodicExportingMetricReader: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let OTLPTraceExporter: any, OTLPMetricExporter: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let NodeSDK: OTelNodeSDKConstructor | undefined, Resource: OTelResourceConstructor | undefined, PeriodicExportingMetricReader: OTelMetricReaderConstructor | undefined;
+  let OTLPTraceExporter: OTelExporterConstructor | undefined, OTLPMetricExporter: OTelExporterConstructor | undefined;
   try {
     const sdkNode = req('@opentelemetry/sdk-node');
     NodeSDK = sdkNode.NodeSDK;
@@ -88,6 +89,7 @@ function ensureSDK(config?: OTelConfig): void {
     }
     return;
   }
+  if (!NodeSDK || !OTLPTraceExporter || !OTLPMetricExporter || !PeriodicExportingMetricReader) return;
 
   const debugMode = config?.debug || process.env['SQUAD_DEBUG'] === '1';
   if (debugMode) {
@@ -181,7 +183,7 @@ export async function shutdownOTel(): Promise<void> {
  * Return a Tracer instance. Falls back to the no-op tracer when
  * tracing has not been initialized.
  */
-export function getTracer(name = 'squad-sdk'): Tracer {
+export function getTracer(name = 'squad-sdk') {
   return trace.getTracer(name);
 }
 
@@ -189,6 +191,6 @@ export function getTracer(name = 'squad-sdk'): Tracer {
  * Return a Meter instance. Falls back to the no-op meter when
  * metrics have not been initialized.
  */
-export function getMeter(name = 'squad-sdk'): Meter {
+export function getMeter(name = 'squad-sdk') {
   return metrics.getMeter(name);
 }

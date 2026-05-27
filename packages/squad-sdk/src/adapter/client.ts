@@ -31,6 +31,23 @@ import type {
 
 const tracer = trace.getTracer('squad-sdk');
 
+/** Minimal shape of the raw Copilot SDK session object passed to CopilotSessionAdapter. */
+interface CopilotSessionLike {
+  readonly sessionId?: string;
+  send(options: unknown): Promise<unknown>;
+  sendAndWait(options: unknown, timeout?: number): Promise<unknown>;
+  abort(): Promise<void>;
+  getMessages(): Promise<unknown[]>;
+  destroy(): Promise<void>;
+  on(type: string, handler: (event: CopilotSessionRawEvent) => void): () => void;
+}
+
+/** Minimal shape of a raw Copilot SDK session event before normalization. */
+interface CopilotSessionRawEvent {
+  type: string;
+  data?: Record<string, unknown>;
+}
+
 /**
  * Adapts @github/copilot-sdk CopilotSession to our SquadSession interface.
  * Maps sendMessage() → send(), off() via unsubscribe tracking, close() → destroy().
@@ -63,12 +80,10 @@ class CopilotSessionAdapter implements SquadSession {
     Object.entries(CopilotSessionAdapter.EVENT_MAP).map(([k, v]) => [v, k])
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly inner: any;
+  private readonly inner: CopilotSessionLike;
   private readonly unsubscribers = new Map<SquadSessionEventHandler, Map<string, () => void>>();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(copilotSession: any) {
+  constructor(copilotSession: CopilotSessionLike) {
     this.inner = copilotSession;
   }
 
@@ -98,8 +113,7 @@ class CopilotSessionAdapter implements SquadSession {
    * flattens `event.data` onto the top-level object so callers
    * can access fields directly (e.g., `event.inputTokens`).
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private static normalizeEvent(sdkEvent: any): SquadSessionEvent {
+  private static normalizeEvent(sdkEvent: CopilotSessionRawEvent): SquadSessionEvent {
     const squadType = CopilotSessionAdapter.REVERSE_EVENT_MAP[sdkEvent.type] ?? sdkEvent.type;
     return {
       type: squadType,
@@ -109,8 +123,7 @@ class CopilotSessionAdapter implements SquadSession {
 
   on(eventType: SquadSessionEventType, handler: SquadSessionEventHandler): void {
     const sdkType = CopilotSessionAdapter.EVENT_MAP[eventType] ?? eventType;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const wrappedHandler = (sdkEvent: any) => {
+    const wrappedHandler = (sdkEvent: CopilotSessionRawEvent) => {
       handler(CopilotSessionAdapter.normalizeEvent(sdkEvent));
     };
     const unsubscribe = this.inner.on(sdkType, wrappedHandler);
