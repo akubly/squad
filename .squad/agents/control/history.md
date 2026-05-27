@@ -6,6 +6,13 @@
 
 ## Learnings
 
+### Piece 23 adversarial type review — shared CLI conventions (2026-05-27)
+
+- **`export default { generate }` in ambient `declare module` is non-idiomatic but compiles.** TypeScript accepts the object-literal form in `declare module` blocks; the idiomatic alternative is `const _default: { generate(...): void }; export default _default;`. Both satisfy the caller's `qrcode.default.generate(...)` access pattern. Reserve the nit for any future revision pass.
+- **`resolveSquadDir` hardcodes `process.env` — no injectable seam.** This is internally consistent with the spec (which mandates integration-style smoke tests for the resolver), but it directly conflicts with the D-13 options-bag convention being shipped in the same piece. Future test authors who need to isolate env-sensitive logic will have no injection point. Consider a `resolveSquadDir(cwd: string, env?: NodeJS.ProcessEnv): string | null` overload in piece 25 when the resolver gets its semver treatment.
+- **`string | null` return on a shared utility that drives all four CLI commands is correct here.** The pattern is widely understood, all four callsites guard with `if (!squadDir)`, and the `?.` chaining at the call site satisfies `noUncheckedIndexedAccess`. A `Result<string, Error>` shape would be over-engineering for a single-failure-mode utility.
+- **Barrel hygiene matters at the `cli/index.ts` level.** `squad-resolver.ts` is internal-only (not re-exported from `cli/index.ts`). If it ever gets added to the barrel it immediately becomes public API with semver implications. Watch for accidental `export *` additions during refactors.
+
 ### Piece 18 adversarial revision — doctor enhancements (2026-05-19)
 
 - **`loadRegistryFromDisk` throws on corrupt JSON; don't assume null return.** When the registry file contains invalid JSON, the function throws a `SquadError` rather than returning `{ registry: null }`. Callers that need null-safe handling (like `noRegistry` guard) must wrap in try/catch.

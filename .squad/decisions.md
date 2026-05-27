@@ -1442,3 +1442,156 @@ New branch: \squad/piece-23-shared-cli-conventions\
 - Handoff: \~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/piece-23-shared-cli-conventions-handoff.md\
 
 ---
+
+---
+
+### 2026-05-27: FIDO Review — Piece 23 Shared CLI Conventions
+
+**Reviewer:** FIDO (Quality Owner)  
+**Commit:** fced6e99 on squad/piece-23-shared-cli-conventions  
+**Author:** Flight (Lead) — lockout adversary context
+
+**Verdict: ⚠️ APPROVE-WITH-NITS**
+
+No blockers. Ship is clear. Nits documented for the next maintainer.
+
+#### Gates
+
+| Gate | Result | Notes |
+|------|--------|-------|
+| A — Scope (D-3/D-5/D-11/D-13) | ✅ PASS | All four items addressed |
+| B — Behavior preservation | ⚠️ BOUNDED | .git-absent regression real but graceful |
+| C — Test coverage | ⚠️ NITS | Happy paths pass; .git-absent failure mode untested |
+| E — LOC budget ≤200 | ✅ PASS | Net +15 production LOC |
+| F — State hygiene | ✅ PASS | No .squad/ files in commit |
+| G — No new npm deps | ✅ PASS | FSStorageProvider import cleanly removed |
+| H — Changeset | ✅ PASS | patch bump for @bradygaster/squad-cli |
+| I — Build + tests | ✅ PASS | Build clean; 11/11 tests pass |
+| J — Decision capture | ⚠️ NITS | File exists on disk; naming convention violation |
+
+#### Nits (non-blocking)
+
+1. **Missing .git-absent regression test** — economy-command.test.ts and both resolveSquadDir smoke tests create .git/ explicitly. No test covers .squad/ present + .git/ absent → resolveSquadDir returns null. This edge case is rare and fails gracefully, but the untested assumption should be documented.
+
+2. **Decision file naming violation** — flight-piece-23-options-bag-seam.md should be copilot-piece-23-options-bag-seam.md per the copilot-{brief-slug}.md convention in .copilot-instructions.md.
+
+3. **Commit message misleads on decision file** — Message says "Decision: .squad/decisions/inbox/flight-piece-23-options-bag-seam.md" implying it's committed, but the file is on-disk only. Technically correct per state conventions, but the phrasing is ambiguous.
+
+4. **watch/index.ts local variable rename skipped** — Handoff §5 step 5 said rename const hasCopilot to agentEnabled. Flight kept the name. Functionally harmless (no hasCopilot imported from team-md.ts in this file), but deviates from the handoff contract.
+
+#### .git-marker divergence assessment
+
+The SDK resolver (resolution-v2.ts:69–80) requires a .git marker. Without it, findGitRoot() returns null and the local .squad/ detection (Step 2) is skipped. The old economy.ts manual walk checked .squad/ existence directly. This is a real behavioral regression for downloaded zips and non-git directories. All callers handle null via fatal() — failure is graceful. The risk is bounded and documented. No production squad project lacks .git/, but the assumption is untested.
+
+#### Recommendation
+
+Merge when the piece-22 base is merged to dev. The four nits above are acceptable carry-forward — add the .git-absent regression test in piece 24 or as a standalone hygiene PR if the resolver is touched again.
+
+---
+
+### 2026-05-27: Type Directive — Piece 23 Shared CLI Conventions
+
+**Author:** CONTROL  
+**Scope:** packages/squad-cli/src/cli/core/squad-resolver.ts, src/types/qrcode-terminal.d.ts
+
+#### Directive 1 — Ambient module export default form (non-blocking)
+
+qrcode-terminal.d.ts uses export default { generate } inside declare module. This is syntactically accepted by tsc but is non-idiomatic for ambient declarations. All future ambient module declarations in this codebase MUST use the canonical const _default: { ... }; export default _default; form to make the shape explicit and avoid confusion about whether an expression or a type is being exported.
+
+Canonical form:
+\\\	ypescript
+declare module 'some-package' {
+  interface SomeOptions { small?: boolean; }
+  const _default: {
+    generate(text: string, opts: SomeOptions, cb: (result: string) => void): void;
+  };
+  export default _default;
+}
+\\\
+
+#### Directive 2 — Resolver env seam (flag for piece 25)
+
+resolveSquadDir(cwd: string): string | null hardcodes process.env. This prevents env injection in unit tests, which contradicts the D-13 options-bag seam convention shipped in the same piece. When piece 25 addresses the resolveSquad v1/v2 renaming, add a seam:
+
+\\\	ypescript
+export function resolveSquadDir(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  return resolveSquadV2({ cwd, env })?.path ?? null;
+}
+\\\
+
+This is a backward-compatible, non-breaking addition (optional parameter with default). No semver bump required.
+
+#### Directive 3 — squad-resolver.ts must NOT be added to the CLI barrel
+
+packages/squad-cli/src/cli/index.ts must not re-export anything from squad-resolver.ts. It is an internal CLI utility with no contract stability. Adding it to the barrel makes it public API subject to semver constraints. If an external consumer ever needs squad-directory resolution, that belongs on the SDK barrel (@bradygaster/squad-sdk), not the CLI barrel.
+
+---
+
+### 2026-05-23: Options-Bag Test Seam Convention (D-13)
+
+**Author:** Flight (Lead)  
+**Piece:** 23 — Shared CLI Conventions  
+**Status:** Approved. ⚠️ **File naming convention violation noted:** This decision was written as flight-piece-23-options-bag-seam.md per pilot usage but must be referenced as copilot-piece-23-options-bag-seam.md per .copilot-instructions.md convention for future decisions.
+
+#### Context
+
+Three distinct test-seam injection patterns existed across CLI command files:
+
+1. **Options-bag seam** (cli/core/upgrade.ts): copilotHome? and copilotPayloadInstaller? as optional properties on the options object.
+2. **Options-bag seam** (commands/assign.ts): getGitRoot and getRemoteUrls as injectable overrides.
+3. **Implicit / none** (cli/commands/watch/index.ts): no explicit seam — tests must spawn the process.
+
+Piece 24 (OTel hardening) will add injectable seams. Without a documented convention, it may introduce a fourth pattern.
+
+#### Decision
+
+**Canonical pattern: options-bag seam.**
+
+All injectable test seams in CLI command functions MUST be expressed as optional properties on the function's options object. Rules:
+
+1. The property type must exactly match the real dependency's type — no any.
+2. The default is the real implementation: const fn = opts.overrideFn ?? realFn;
+3. No dependency injection container. No class-based DI. No module-level globals for test override.
+4. The seam property should be named after the function it replaces: writeFileFn, getGitRoot, etc.
+
+#### Rationale
+
+- Options-bag is already dominant (2 of 3 existing sites).
+- TypeScript-native: the compiler validates seam types against the real API.
+- No test framework coupling: tests inject via normal function call, not module mocking.
+- Consistent with Squad's general preference for pure-function composition over OOP.
+
+#### Canonical Examples
+
+\\\	ypescript
+// upgrade.ts — the reference implementation
+export async function runUpgrade(opts: {
+  copilotHome?: string;
+  copilotPayloadInstaller?: (home: string) => Promise<void>;
+}) {
+  const installer = opts.copilotPayloadInstaller ?? installCopilotPayload;
+  ...
+}
+
+// assign.ts — same pattern for multiple seams
+export async function assign(opts: {
+  getGitRoot?: () => Promise<string>;
+  getRemoteUrls?: (root: string) => Promise<string[]>;
+}) {
+  const getRoot = opts.getGitRoot ?? resolveGitRoot;
+  const getUrls = opts.getRemoteUrls ?? collectCwdRemoteUrls;
+  ...
+}
+\\\
+
+#### What NOT to Do
+
+- ❌ Module-level variable replacement: export let realFn = ...; /* tests overwrite this */
+- ❌ Separate DI container or provider pattern
+- ❌ jest.mock() / vi.mock() module stubbing for internal logic (use sparingly for third-party I/O)
+- ❌ Seam properties typed as any or using a broader interface than the real function
+
+---

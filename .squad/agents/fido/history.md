@@ -111,6 +111,42 @@ All 30 tests pass (16 migration + 14 consult). Parity is structurally present bu
 
 **Pattern learned:** Guard-only tests (prove failure-path exit) are not sufficient when the spec also requires success-path verification and side-effect non-mutation assertions on ignore entries. Always check: (a) is the success path exercised for every guarded command? (b) are ALL named spec side effects (not just config.json) explicitly asserted absent in failure paths?
 
+---
+
+### Piece 23 Adversarial Review — Shared CLI Conventions (2026-05-27)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS
+
+**Commit reviewed:** `fced6e99` on `squad/piece-23-shared-cli-conventions`
+
+**What Flight got right:**
+- All four debt items addressed: D-3 (`hasCodingAgent`), D-5 (`resolveSquadDir`), D-11 (qrcode-terminal types), D-13 (decision documented) ✅
+- Net production LOC: +15 (well under the 200 ceiling; 53 insertions, 38 deletions across 12 prod files) ✅
+- Build: ✅ CLEAN (`tsc` + postbuild)
+- 11 new tests, 11/11 pass ✅ — hasCodingAgent suite covers all 6 spec-mandated cases
+- No `.squad/` state files in commit ✅
+- No new npm dependencies; `FSStorageProvider` import correctly removed from economy.ts ✅
+- Changeset: ✅ `.changeset/piece-23-shared-cli-conventions.md`, patch bump for `@bradygaster/squad-cli`
+- Decision file content is well-written and captures D-13 intent ✅
+
+**`.git`-marker divergence — bounded but undertested:**
+
+Read `packages/squad-sdk/src/resolution-v2.ts:69–80`. `findGitRoot()` walks up looking for a `.git` marker (file or directory). `resolveSquad` Step 2 (line 322) calls `findGitRoot` first — if no `.git` exists, it returns null and Step 2 is skipped entirely. The fallback chain (Steps 3–7) cannot find a **local** `.squad/` directory without either registry registration or platform-scope. The old manual walk in `economy.ts` checked `.squad/` existence directly, with no `.git` dependency.
+
+This is a real behavioral regression for: (a) downloaded repo zips with `.squad/` but no `.git/`, (b) any non-git directory with `.squad/` manually placed. Failure is **graceful** — all callers check for null and call `fatal()` with a clear error message.
+
+The test fixture at `economy-command.test.ts:20` explicitly creates `.git/` and comments "Squad projects always have .git/; resolveSquadDir (via SDK) requires it" — proving Flight knows the constraint. Both `resolveSquadDir` smoke tests in `squad-file-conventions.test.ts` also create `.git/` explicitly. **There is no test for `.squad/` present, `.git/` absent → null**, so the claim "graceful failure in this scenario" is untested.
+
+**Non-blocking nits:**
+1. **[test/cli/squad-file-conventions.test.ts]** — Missing regression test: `.squad/` present, `.git/` absent → `resolveSquadDir` returns null. Without this, a future change that removes the `.git` requirement would have no safety net to restore the old walk behavior.
+2. **[.squad/decisions/inbox/flight-piece-23-options-bag-seam.md]** — Naming convention violation. `.copilot-instructions.md` mandates `copilot-{brief-slug}.md`. File should be `copilot-piece-23-options-bag-seam.md`.
+3. **[commit message]** — References decision file as if it's in the commit, but it's not. The file lives on disk only (consistent with "do not commit .squad/ state" convention), but the commit message line `Decision: .squad/decisions/inbox/...` implies it was staged. Misleading.
+4. **[packages/squad-cli/src/cli/commands/watch/index.ts]** — Handoff §5 step 5 explicitly said to rename the local `hasCopilot` variable to `agentEnabled` (or similar) to avoid confusion with the `team-md.ts` export. Flight kept the name as `hasCopilot`. Functionally non-breaking (no `hasCopilot` is imported from `team-md.ts` in this file), but violates the handoff spec.
+
+**Pattern learned — `.git`-anchor resolver migrations:** When migrating from a raw filesystem walk to an SDK resolver that anchors on `.git`, the regression test set MUST include a case where `.squad/` exists but `.git/` does not. The fact that "production projects always have `.git/`" is a runtime assumption, not a tested invariant. Any future dev who sees the economy test fixture creating `.git/` will wonder why — that question is only answerable if a companion test proves what happens when `.git/` is absent.
+
+---
+
 ## Archive
 
 Older learnings (prior to 2026-05-14) have been archived to history-archive.md for reference.
