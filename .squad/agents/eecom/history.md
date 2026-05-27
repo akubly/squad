@@ -31,6 +31,8 @@ Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routi
 
 ## Team Updates — Recent
 
+📌 **2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented). All gates green. Flight authored piece 24 spec + handoff. Decisions merged, orchestration logs prepared.
+
 📌 **2026-05-19 Piece 18 Revision Complete:** CONTROL completed piece 18 revision under Strict Lockout Protocol (EECOM locked out). Applied F1–F7 fixes + N1–N5 nits. 33 unit + 7 CLI tests GREEN. Build CLEAN. Re-verify flight for Flight (architecture) and FIDO (test/build/scrub).
 
 📌 **2026-05-18 Piece 14 Revision Complete:** All findings addressed (git `--` separator, typed error codes, CLI `--flag=value` parsing, exhaustiveness guards). Build CLEAN, 47 tests GREEN. Branch ready for Phase C.

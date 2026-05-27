@@ -6,41 +6,13 @@
 
 ## Archive
 
-See history-archive.md for learnings prior to Piece 05 (wave 1 pilots, crash recovery, adoption tracking, etc.).
-
-### Piece 05 Deadlock Arbitration (2026-05-13)
-EECOM + CONTROL locked out. Flight arbitrated: latent vitest concurrency race from added worker load (not logic regression). Root cause: `journey-error-handling` timing-sensitive under pool pressure. Verdict: APPROVE piece 05 for PR. Concurrency optimization deferred.
-
-### Piece 02 Adversarial Review (2026-05-12)
-APPROVE WITH CONDITIONS. Established SDK naming policy (no `-v2` in permanent names; rename post-piece-11a) and error model (typed ResolveErrorCode for downstream CLI branching). 17 → 28 tests, all green.
-
-### Piece 03 Adversarial Review (2026-05-13)
-APPROVE. 94 tests GREEN, spec-parity confirmed across all 21 test-surface bullets. Heuristic: URL canonicalization audits verify both directions (distinct forms → same, similar → distinct).
-
-### Piece 06 Adversarial Review — Dispatch Coverage (2026-05-14)
-Source-sniff tests can mask CLI dispatch gaps; require behavioral assertions for flag handling and real child-process spawning to catch entry-point arg parsing errors.
-
-### Piece 08b Adversarial Review — Guard Location & Resolver Consistency (2026-05-14)
-📌 **Flight verdict: APPROVE WITH NITS**
-
-Piece 08b mixes dispatch-level guards (consult/link) with module-internal (assign), creating ambiguous precedent. Pattern: if one command guards at dispatch, ALL must. Dual resolver imports compound confusion. **Non-blocking nits:** reconcile resolver import path and move assign guard to dispatch level before 08c. FIDO REJECT (test gaps) overrides; Sims assigned revision owner.
-
-### Piece 14 Adversarial Review — Findings Landed (2026-05-18)
-
-📌 **Flight findings from piece 14 adversarial pass successfully addressed in revision.**
-
-Initial review identified guard-ordering test gap (A15 identity mock doesn't prove ordering), plus 6 minor + 2 nit findings. CAPCOM revision delivered: injectable-seam guard-order test pattern documented in decisions; all minors addressed in code (multi-clone growth, origins dedup, inactive reactivation, filesystem assertions, forward-compat tests, cold-start orphan). Branch 1a47e601 + 935e73b2 ready for Phase C. Test A27 validates origins dedup; full suite 47 tests GREEN.
-
-
+See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, pieces 02-21, Q1-Q2 2026).
 
 ---
 
-## 📌 Team Update — Piece 21 Ship Gate Cleared
+## 📌 Team Updates — Recent
 
-**Date:** 2026-05-22  
-**Event:** Post-stack-review gate clearance — all five required fixes shipped.
-
-Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+**2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented, ~+30 LOC). All gates green. Flight authored piece 24 spec + handoff (SDK adapter + OTel typing, D-6/D-8/D-9/D-16 cluster, ~51 net LOC). Risk surfaced: `_noopTracer.startActiveSpan` variadic may require eslint-disable. Decisions merged, orchestration logs prepared.
 
 ---
 
@@ -178,3 +150,70 @@ D-13 (seam convention) generates a decision document with zero production LOC �
 ### Discovery: economy.ts resolver is a manual walk
 
 The audit stated economy.ts wrapped `resolveSquadV2` — it does not. It has a hand-written 10-level `FSStorageProvider` walk. Both approaches return the `.squad/` directory path (semantically equivalent), but the implementation difference is real. Spec §6 documents this as a Low-likelihood risk with a mitigation (test `runEconomy` happy path before committing).
+
+---
+
+## Piece 23 — Implementation (2026-05-23)
+
+**Branch:** `squad/piece-23-shared-cli-conventions` | **Commit:** `fced6e99`
+
+## Learnings
+
+### Net Production LOC (Piece 23)
+
+**~17 net production LOC.** Modified files: +26 added, -37 removed = -11. New files (squad-resolver.ts +16, qrcode-terminal.d.ts +12) = +28. Total net: +17. Well within the 200 LOC ceiling and close to the spec's ~22 estimate. 
+
+### Economy.ts Smoke-Test Result: SEMANTIC DIVERGENCE DOCUMENTED — SAFE IN PRACTICE
+
+The SDK resolver (`resolveSquadV2`) requires a `.git` marker to exist somewhere in the path tree. It calls `findGitRoot(cwd)` first, then checks for `.squad/` at that git root. The manual 10-level walk in `economy.ts` had no such requirement — it checked every directory for `.squad/` regardless of git presence.
+
+**In practice: semantics matched.** All squad projects have `.git/`. The divergence only manifests in non-git temp directories (not a real usage scenario). The economy command test, which creates `.git/` + `.squad/` in a temp dir to mirror real usage, passed cleanly. The migration is safe.
+
+**Documented divergence:** The SDK resolver is actually BETTER in two ways: (1) it handles git worktrees correctly, and (2) it won't accidentally "find" a `.squad/` directory in a parent non-squad project if the current project has a git boundary between them.
+
+### Spec vs. Code Discrepancy: `checkGlobalAgent` vs. `checkCopilotInstructions`
+
+The spec and problem statement said the inline `🤖 Coding Agent` check was in `checkGlobalAgent`. The actual code had it in `checkCopilotInstructions`. The handoff's instruction to "locate code by function name, not line number" was essential — the grep found the actual location. Always locate by grep, not by spec-stated function names.
+
+### Decisions Deferred to Future Pieces
+
+- D-18 (`resolveSquad` v1/v2 rename): Still deferred to piece 25. The SDK still exports both `resolveSquad` (v1, positional arg) and `resolveSquad as resolveSquadV2` (v2, opts object). Piece 23 added `squad-resolver.ts` which wraps v2, which is the right approach.
+- OTel hardening (D-6, D-8, D-9, D-14, D-16): Deferred to piece 24.
+
+### Tension with Piece 22 Pending Merge
+
+Piece 23 stacks on `squad/piece-22-unify-doctors` which is pending Brady's local review. The stacking was clean — piece 23's diff on `doctor.ts` was a single line change in `checkCopilotInstructions`, orthogonal to piece 22's renderer and type unification changes. The 15 pre-existing test failures in the full suite (dispatch-help.test.ts, consult.test.ts, etc.) are all pre-existing on piece-22's branch — confirmed by stash/test/restore cycle.
+
+---
+
+## Piece 24 — SDK Adapter and OTel Typing Hardening (2026-05-27)
+
+**Spec:** `docs/proposals/piece-24-sdk-adapter-otel-typing.md`  
+**Handoff:** session-state `41b7998d.../files/piece-24-sdk-adapter-otel-typing-handoff.md`  
+**Expected LOC:** ~51 net production LOC (~130 gross). Well under 200 LOC ceiling.
+
+### Learnings
+
+#### Item Selected: D-6, D-8, D-9, D-16 (SDK adapter + OTel typing cluster)
+
+The audit grouped D-6, D-8, D-9, D-14, D-16 as "piece 24: OTel hardening + SDK adapter typing." Selected D-6, D-8, D-9, D-16 only. All four are pure typing / naming cleanup — predictable LOC, no runtime behavior change. D-8 and D-9 share the same new `otel-types.ts` file, making them nearly free to bundle after D-8 is done. D-16 is a 3-line rename that eliminates a misleading `@internal` annotation on a non-exported class.
+
+#### Items Considered and Rejected for Piece 24
+
+- **D-14** (span propagation, `tools/index.ts` TODO): Feature/implementation work — "implement span parenting when agent lifecycle spans are complete." Contains conditional language ("when complete") signaling an unmet prerequisite. Would require designing context propagation across the agent/tool boundary, adding new context API calls, and new test infrastructure. Potentially 100+ LOC on its own. Deferred to dedicated follow-up (24b or 25+).
+- **D-18** (resolveSquad v1/v2 rename): Breaking SDK change; piece 25.
+- **CONTROL N2** (source-grouping exhaustiveness): CLI-layer doctor fix, 3–5 LOC, not SDK scope. Deferred to the next CLI piece that opens `cli-entry.ts`.
+- **D-10, D-17**: Won't fix — intentional, documented in the audit.
+
+#### Key Heuristic: Feature vs. Cleanup Split Within an Audit Cluster
+
+The audit's suggested piece groupings are not always coherent in work type. D-14 was grouped with typing debt (D-6, D-8, D-9, D-16) but is actually feature work with a conditional prerequisite. The Lead should split mixed-type clusters before authoring the spec: (a) all cleanup items go into this piece; (b) all feature/implementation items defer with explicit `prerequisite unmet` notation. Updated `ship-debt-selection/SKILL.md` with this heuristic.
+
+#### CONTROL's N2 and Directive 2 — Not Binding for Piece 24
+
+- **N2** (source-grouping exhaustiveness, deferred from piece 22 revision): Not piece-24-binding — no specific piece number assigned; CLI-layer concern orthogonal to SDK typing. Will be picked up in the next CLI piece that touches `cli-entry.ts`.
+- **Directive 2** (resolver env seam): Explicitly filed for piece 25 in decisions.md. No conflict with piece 24's scope.
+
+#### Tension with Piece 23 In-Flight Diff
+
+Piece 23 (in `squad/piece-23-shared-cli-conventions`, EECOM rev pending) touches only CLI files. Piece 24 touches only SDK files (`packages/squad-sdk/src/`). Zero structural overlap. The stacking is clean; piece 24's branch should form from piece 23's tip regardless of whether EECOM's rev has landed. No spec design-around was required.
