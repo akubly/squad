@@ -227,3 +227,81 @@ Test at `doctor.test.ts:545` constructs a system `warn` + registry `error` findi
 - N4: The static `import type { DoctorFinding } from './cli/commands/doctor-types.js'` removed from `cli-entry.ts`; `renderFinding`/`deriveExitCode` destructured from the existing dynamic `import('./cli/commands/doctor.js')`. ✅
 
 **Pattern learned — Revision verification discipline:** When re-reviewing after a rejection, always run the new test against the mental model of the old code to confirm it would have caught the bug. For stream-routing assertions, spy on `console.error` directly — a test that only checks `console.log` cannot prove stderr routing.
+
+---
+
+### Piece 24 Adversarial Review — SDK Adapter + OTel Typing Hardening (2026-05-27)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS
+
+**Commit reviewed:** `b1a710fd` on `squad/piece-24-sdk-adapter-otel-typing`
+
+**What Flight got right:**
+- D-6: Exactly 4 `any`s removed from `adapter/client.ts`. `CopilotSessionLike` and `CopilotSessionRawEvent` interfaces correctly shaped; all `inner` access sites covered. ✅
+- D-8: Blanket `/* eslint-disable */` block removed. All 3 inline `eslint-disable-line` comments removed. `_noopStartActiveSpan` standalone function with 3 overloads + 1 implementation body, zero `any`/`as`/`@ts-*`. ✅
+- D-9: 3 `eslint-disable-line` comments removed from `otel.ts`. Constructor interfaces (`OTelNodeSDKConstructor`, `OTelResourceConstructor`, `OTelMetricReaderConstructor`, `OTelExporterConstructor`) added to `otel-types.ts`. Null guard added at `otel.ts` — required consequence of typed `| undefined` variables, not scope creep. ✅
+- D-16: `markIdle` → `setIdle` rename complete; `@internal` removed; updated JSDoc. Zero `markIdle` references remain in production `.ts` files. ✅
+- D-14: Confirmed NOT in this commit. ✅
+- No `.squad/` files in commit. ✅
+- No new npm dependencies. ✅
+- Changeset present: `.changeset/piece-24-sdk-adapter-otel-typing.md`, `patch` bump for `@bradygaster/squad-sdk`. ✅
+- `tsc --noEmit`, `npm run build -w packages/squad-sdk`, `npm run lint`: all clean (independently verified). ✅
+- All production changes in `packages/squad-sdk/src/` only; no CLI files touched. ✅
+
+**Nits (required before PR merge):**
+
+1. **[test/otel-provider.test.ts — spec §9 criterion] — REQUIRED** — Spec §9 explicitly requires "Smoke test: `startSpan`, `setAttribute`, `end`, `isRecording` do not throw." Existing test covers `startSpan`, `end`, `spanContext` but NOT `setAttribute` or `isRecording`. Add two assertions (~3 lines) to `otel-provider.test.ts` line ~158.
+
+2. **[test — adversarial FIDO standard] — REQUIRED** — No test exercises all 3 `_noopStartActiveSpan` overload arities (`(name, fn)`, `(name, opts, fn)`, `(name, opts, ctx, fn)`). The 3-overload form is the entire substance of CONTROL's directive. FIDO's 100%-on-critical-paths standard requires runtime verification that each arity resolves the callback correctly. Add a test in `otel-provider.test.ts` or `otel-bridge.test.ts`.
+
+3. **[packages/squad-sdk/src/runtime/otel.ts:183,191 — undisclosed API change] — REQUIRES BRADY SIGN-OFF** — `getTracer()` and `getMeter()` had their explicit `: Tracer` and `: Meter` return type annotations removed. Spec §2.3 does not list this change. The handoff explains the technical reason (structural incompatibility between real OTel `Tracer` and local `OTelTracerLike` because `Span.addEvent` signatures differ). The TypeScript inferred return type is now a union `OTelTracerLike | Tracer` instead of the narrower `Tracer`. This changes the public `.d.ts` contract. Brady must explicitly sign off before PR merge.
+
+4. **[packages/squad-sdk/src/agents/lifecycle.ts:316 — micro-nit]** — `agent.setIdle()` has 12 leading spaces vs surrounding code's 10 spaces. Cosmetic only.
+
+5. **[chain handoff date]** — `stack-chain-piece-21-thru-24-handoff.md` header says "Date: 2025-07" — should be 2026-05-27.
+
+**LOC Drift Assessment:**
+- Actual net production LOC: ~125 (173 insertions − 12 changeset − 36 deletions)
+- Flight's stated claim: ~114 (comment/blank-line counting difference)
+- Forecast (CONTROL): ~59 net
+- Delta: +55-66 above forecast (~2x)
+- Breakdown:
+  - `otel-types.ts` (104 LOC vs 63 spec estimate): `OTelDiagLoggerLike` split required because `DiagConsoleLogger` implements `DiagLogger` (5 log methods), not `DiagAPI` (which adds `setLogger`/`disable`). Spec underestimated. +41 LOC over estimate.
+  - `otel-api.ts`: Full `NoopDiagLogger` class with 5 method implementations required for type conformance (`{ new(): OTelDiagLoggerLike }`). Spec estimated empty class. +6 LOC.
+  - Other files (`client.ts`, `otel.ts`, `lifecycle.ts`): Minor overages consistent with fuller interface method counts.
+- Classification: **All justified** — extra LOC is from the real API having two distinct logger interfaces (`DiagAPI` vs `DiagLogger`) that the spec treated as one. NOT scope creep. Process discipline note: the §8 LOC estimate was based on a single `OTelDiagLike` covering both surfaces.
+
+**Pattern learned — OTel interface surface underestimation:** When writing LOC estimates for OTel shim typing, `DiagConsoleLogger` (instances) and `diag` (the singleton) implement DIFFERENT interfaces in the real OTel API: `DiagLogger` (5 log methods) vs `DiagAPI` (which adds `setLogger`/`disable`). Treating them as the same interface in the spec produces a 6-line undercount per split. Future OTel typing estimates should account for this bifurcation.
+
+**Pattern learned — compile-time vs runtime test balance for overload functions:** 3-overload TypeScript functions have compile-time type correctness guaranteed by the type checker. However, FIDO's 100%-on-critical-paths standard still requires runtime tests for all arity paths to catch implementation body errors (wrong callback resolution logic) that type checking cannot catch. For any function with N≥2 overloads on a critical path, require N runtime arity tests.
+
+---
+
+## Piece 24 Adversarial Review — SDK Adapter & OTel Typing Hardening (2026-05-27T16:00Z)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS (three mandatory, two cosmetic)
+
+**Commitment assigned:** Flight locked out. Recommend EECOM for test additions (N1+N2).
+
+**Mandatory nits:**
+
+1. **N1 — Missing smoke tests (spec §9)** — Spec criterion "smoke test: `startSpan`, `setAttribute`, `end`, `isRecording` do not throw" only partially covered. Existing no-op tracer test covers `startSpan`/`end`/`spanContext` but NOT `setAttribute` and NOT `isRecording`. Add two assertions (~3 lines) to verify these methods don't throw when called on the noop.
+
+2. **N2 — Incomplete arity coverage (FIDO critical-path standard)** — `_noopStartActiveSpan` has 3 distinct overloads: `(name, fn)`, `(name, opts, fn)`, `(name, opts, ctx, fn)`. No test exercises all three paths. Compile-time type checking guarantees signature conformance but cannot detect wrong callback-resolution logic in the implementation body. Add three test cases (one per arity) to `test/otel-provider.test.ts` or `test/otel-bridge.test.ts`. This is a 100%-on-critical-paths gate.
+
+3. **N3 — Undisclosed return-type removal, Brady sign-off required** — `getTracer()` and `getMeter()` had explicit `: Tracer` and `: Meter` return type annotations removed (now inferred union `OTelTracerLike | Tracer`). Spec §2.3 does not document this. Technical reason in handoff explains structural incompatibility (OTel's `Span.addEvent` vs local `OTelSpanLike`). Public `.d.ts` contract changed. Brady must explicitly sign off before PR merge.
+
+**Cosmetic nits:**
+
+- N4: `agent.setIdle()` at lifecycle.ts:316 has 12-space indent vs surrounding 10-space. Cosmetic.
+- N5: Chain handoff header date "2025-07" should be "2026-05-27".
+
+**LOC drift assessment:**
+
+- **Actual:** ~125 net production (173 insertions − 12 changeset − 36 deletions); Flight's ~114 is comment/blank-line variant of same count.
+- **Forecast:** ~59 net (CONTROL's +8 over Flight's ~51 baseline).
+- **Delta:** +55–66 LOC (~2× forecast). Justified.
+- **Root cause:** Spec treated OTel's `DiagConsoleLogger` (instance, implements `DiagLogger`: 5 log methods) and `diag` (singleton, is `DiagAPI`: adds `setLogger`/`disable`) as a single interface (`OTelDiagLike`). Real API has two. Requires split `OTelDiagLoggerLike` (+6 LOC) + full `NoopDiagLogger` class (+6 LOC). Unavoidable once type system enforces structural conformance.
+- **Not scope creep** — all extra LOC traces to real API surface requirements. This is the kind of drift that reveals underestimation in the spec, not author overreach.
+
+**Process lesson for future LOC estimates:** OTel's `Diag*` surface bifurcates into instance (`DiagLogger`, 5 methods) and singleton (`DiagAPI`, adds `setLogger`/`disable`). When estimating piece-sized OTel typing work, budget for both interfaces explicitly in the LOC envelope.

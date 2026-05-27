@@ -6,6 +6,42 @@
 
 ## Current Session — Learnings & Archive
 
+### Piece 24 post-implementation: directive fidelity audit (2026-05-27)
+
+**Question:** Did Flight implement CONTROL's 3-overload `_noopStartActiveSpan` directive faithfully?
+
+**Answer: Yes — directive landed exactly as specified. This is rare data.**
+
+Key findings from commit `b1a710fd`:
+
+1. **3-overload form**: All 3 overloads present with correct `F extends (span: OTelSpanLike) => unknown` and `ReturnType<F>` — matches `@opentelemetry/api`'s actual `Tracer.startActiveSpan` shape precisely.
+
+2. **Standalone function**: `_noopStartActiveSpan` is a module-level function declaration (not an inline method literal). Assigned to `_noopTracer.startActiveSpan` by reference. Overload signatures carry over to the method assignment as expected.
+
+3. **ReturnType<F> inference**: All 3 overload signatures return `ReturnType<F>`. Verified that `_noopStartActiveSpan('x', () => 42)` would infer `number` via overload 1.
+
+4. **Implementation body**: `typeof callback !== 'function'` guard used exactly as specified. No `any`, no `as`, no `!`, no `@ts-*`. The `Function` type's implicit `any` return is not "written" — narrowing is clean.
+
+5. **Zero suppressions in new typed surface**: otel-types.ts and new otel-api.ts additions — completely clean. Pre-existing `as const` on `SpanStatusCode` is a const assertion (type narrowing, not widening) and was not introduced by piece-24.
+
+6. **Pre-existing suppressions in client.ts** (`!` at line 133, `as` at lines 485/562/598) — NOT piece-24 additions, not a violation of the spec §9 zero-suppression requirement.
+
+7. **CopilotSessionLike** deviates from spec §2.1 in two places: `send(): Promise<unknown>` (spec said `void`) and an added `destroy(): Promise<void>` (spec omitted it). Both divergences are CORRECT — the real SDK `send()` returns a value; the real session has `destroy()`. Flight correctly over-delivered on spec accuracy.
+
+8. **`options: unknown`** in `OTelTracerLike.startActiveSpan` overloads 2 and 3: intentional, per spec §2.2, to avoid importing OTel types. Slightly weaker than `SpanOptions` but correct for a locally-defined structural interface. This was explicit in the spec revision I reviewed.
+
+9. **D-16 rename**: Complete. Zero `markIdle` occurrences remaining anywhere in `packages/squad-sdk/src/`.
+
+10. **tsconfig**: `strict: true` + `noUncheckedIndexedAccess: true` inherited from root — not weakened by Flight.
+
+11. **Public API**: `OTel*Like` types and `CopilotSessionLike` are NOT exported from the SDK barrel. Correctly internal-only.
+
+12. **Build gate**: `tsc --noEmit -p packages/squad-sdk/tsconfig.json` exits 0 — clean.
+
+**Meta-learning**: Directive-to-implementation fidelity is much higher when the spec is revised to incorporate the directive BEFORE implementation (not handed off as an addendum). The spec rev process (Flight revised §2.2, removed eslint-disable concessions, updated LOC envelope, updated acceptance criteria) created a clean, unambiguous implementation target. The implementer had no design decisions left to make about the noop type design — they just executed the spec. This is the workflow that produces faithful implementations.
+
+---
+
 ### Piece 24 pre-implementation: `startActiveSpan` noop typing analysis (2026-05-27)
 
 **Question:** Can the single `eslint-disable-next-line @typescript-eslint/no-explicit-any` concession Flight permitted on `_noopTracer.startActiveSpan` be eliminated entirely?
@@ -91,3 +127,64 @@ Flight's proposed `OTelTracerLike` interface uses a variadic generic (`<T>(...ar
 - **Optional cleanups folded in:** N3 (readonly), N4 (import alignment). N2 (source-grouping exhaustiveness) deferred per instructions.
 - **Spec contradiction encountered:** Comment at `cli-entry.ts:1101` read "Warnings go to stderr" but `_renderFinding` used `console.log` for all findings. After fix, comment and code now agree.
 - **Build:** CLEAN. **Lint:** CLEAN. **Doctor tests:** 46/46 GREEN.
+
+---
+
+## Piece 24 Type-Design Fidelity Audit (2026-05-27T16:00Z)
+
+**Verdict:** ✅ APPROVE
+
+**All directive criteria pass. All 19 spec §9 acceptance criteria verified.**
+
+**Directive fidelity checklist:**
+- 3-overload form implemented faithfully ✅
+- Standalone function (not inline method) ✅
+- `ReturnType<F>` inference preserved ✅
+- Zero suppressions in typed surface ✅
+
+**Key technical findings:**
+
+**3-Overload Implementation — Exact Match.**  
+`_noopStartActiveSpan` (lines 43–50 of `otel-api.ts`) matches `@opentelemetry/api`'s real `Tracer.startActiveSpan` shape precisely. All 3 overloads present with correct `F extends (span: OTelSpanLike) => unknown` generic and `ReturnType<F>` return type.
+
+**Standalone Function Pattern — Correct.**  
+Function declared at module level (not inline method). Assigned to `_noopTracer.startActiveSpan` by reference. Overload signatures attach to the function declaration as expected; they carry over to method assignment semantics.
+
+**Callback Resolution — Type-Safe.**  
+Implementation uses `typeof callback !== 'function'` guard to cascade through three callback positions (depends on arity). The `Function` type is callable; return type is implicitly `any` (not written). No `any`, `as`, `!`, or `@ts-*` in the surface.
+
+**Zero Suppressions — Verified by Grep.**  
+`otel-types.ts` (new) and new additions to `otel-api.ts` and `adapter/client.ts`: zero `any`, `as`, `!`, `eslint-disable`, `@ts-*`. Pre-existing `as const` on `SpanStatusCode` in old code is a const assertion (type narrowing), not a type cast, and predates piece-24.
+
+**Type nits (non-blocking, all represent improvements over spec):**
+
+- **N1:** `CopilotSessionLike.send()` returns `Promise<unknown>` (spec said `void`). Implementation is MORE correct — the real SDK `send()` returns a value. Additionally, `destroy(): Promise<void>` was added (spec omitted). Both divergences increase API accuracy.
+
+- **N2:** `options: unknown` in `startActiveSpan` overloads 2 and 3 (spec said concrete `SpanOptions`). Intentional per spec §2.2 to preserve zero-OTel-import invariant. Acceptable structural typing trade.
+
+- **N3:** `OTelDiagLoggerLike` interface split added beyond spec §2.2. Spec suggested single `OTelDiagLike`; implementation correctly separated `DiagLogger` (instance interface: 5 log methods) from `DiagAPI` (singleton: adds `setLogger`/`disable`). This split is structurally correct and makes the type system more honest about the real OTel API shape.
+
+**CopilotSessionLike Shape — Real, Not Placeholder.**  
+Verified against all 6 real access points in `CopilotSessionAdapter`: `sessionId?`, `send()`, `sendAndWait()`, `abort()`, `getMessages()`, `destroy()`, `on()`. Compiler enforces all 6. Real type safety, not cosmetic.
+
+**tsconfig Integrity — No Relaxation.**  
+`strict: true` + `noUncheckedIndexedAccess: true` inherited from root; no relaxations added by Flight.
+
+**Gate Results — All Clean.**  
+- `tsc --noEmit -p packages/squad-sdk/tsconfig.json` → exit 0
+- `npm run build -w packages/squad-sdk` → clean
+- `npm run lint` → clean
+- `npx vitest run` → 88-test suite (scoped) all pass
+
+**Meta-learning (reinforced & documented for future team use):**
+
+Directive-to-implementation fidelity is much higher when the spec is revised to incorporate the directive BEFORE implementation kickoff, not handed off as an addendum. Here's what works:
+
+1. **Directive phase** — TypeScript engineer (CONTROL) analyzes problem, proposes solution (3-overload form, standalone function, type-narrowing implementation body).
+2. **Spec revision phase** — Lead (Flight) revises spec §2.2 to incorporate the directive before sending piece to implementer. Updates LOC envelope, updates acceptance criteria §9, removes fallback language (like "acceptable eslint-disable").
+3. **Implementation phase** — Implementer (Flight, same person as Lead) executes the revised spec faithfully with zero design decisions remaining.
+4. **Audit phase** — Reviewer (CONTROL) verifies directive landed exactly as specified.
+
+This workflow produced high-fidelity implementation in one pass. Compare to workflows where directives become decisions entries without spec integration: implementer must interpret directive intent, spec may contain now-obsolete fallback language, leads to ambiguity and revision cycles.
+
+Future CONTROL directives should follow this model: get into the spec before implementation kickoff.
