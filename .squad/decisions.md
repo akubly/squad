@@ -188,3 +188,53 @@ The piece remains SDK-only, patch-bump, under 200 LOC ceiling. Cluster selection
 
 ---
 
+### 2026-05-27: Flight — Piece 24 Implementation Complete
+
+**Author:** Flight (Copilot CLI session `41b7998d-8288-47fe-b3d3-eee538d89231`)  
+**Status:** Implementation complete; commit-only (no PR) per Brady's directive
+
+**Summary:** Piece 24 (SDK adapter + OTel typing hardening, D-6/D-8/D-9/D-16) has been implemented and committed to local branch `squad/piece-24-sdk-adapter-otel-typing`. All gates passed; PR awaits piece-23 merge to dev.
+
+**Implementation Details:**
+
+| Field | Value |
+|-------|-------|
+| Branch | `squad/piece-24-sdk-adapter-otel-typing` |
+| Commit | `b1a710fd` |
+| Based on | `squad/piece-23-shared-cli-conventions` |
+| Net production LOC | ~114 (ceiling 200 ✅; variance explained in Flight history) |
+| Debt items addressed | D-6, D-8, D-9, D-16 |
+| Debt items deferred | D-14 (span propagation, prerequisite unmet) |
+
+**Gate Results:**
+
+| Gate | Result |
+|------|--------|
+| tsc --noEmit | ✅ Clean |
+| npm run build | ✅ Clean |
+| npm run lint | ✅ Clean |
+| vitest (88 tests) | ✅ All pass |
+| Zero suppressions in typed surface | ✅ Clean |
+
+**Files Modified/Created:**
+- `packages/squad-sdk/src/otel/otel-types.ts` (new)
+- `packages/squad-sdk/src/otel/otel-api.ts` (3-overload noop, 0 suppressions)
+- `packages/squad-sdk/src/adapter/client.ts` (`CopilotSessionLike`, 4 `any` removed)
+- `packages/squad-sdk/src/...otel.ts` (constructor typing, null guards)
+- Rename callsites: `markIdle → setIdle`
+- Tests in same commit (test discipline)
+- `.changeset/piece-24-sdk-adapter-otel-typing.md` (new)
+- `.squad/agents/flight/history.md` (appended)
+
+**Chain Handoff:** Written to `~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/stack-chain-piece-21-thru-24-handoff.md`. Contains stack state table, gate results, implementation decisions, next-session PR checklist.
+
+**Next Steps:**
+1. Verify piece-23 merged to dev
+2. Rebase piece-24 onto dev
+3. Push + open PR
+4. Changelog gate will pass (`.changeset/piece-24-sdk-adapter-otel-typing.md` present)
+
+**Mode:** Commit-only per Brady's directive. Stack now: piece-21 → 22 → 23 → 24, all on local branches awaiting Brady's merge cascade.
+
+---
+

@@ -18,6 +18,8 @@ See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, p
 
 ## 📌 Team Updates — Recent
 
+**2026-05-27 Piece 24 Implementation Complete — Commit b1a710fd:** Piece 24 (SDK adapter + OTel typing hardening, D-6/D-8/D-9/D-16) implemented and committed to `squad/piece-24-sdk-adapter-otel-typing` off piece-23. All gates passed: tsc clean, build clean, lint clean, 88 vitest tests pass, zero suppressions in typed surface. Net LOC: ~114 (variance vs. ~59 spec estimate explained by cross-file call-site typing folding in more than noop redesign). Commit-only per Brady's directive — PR awaits piece-23 merge to dev. Chain handoff written to session artifact. Scribe merging decisions and staging for commit.
+
 **2026-05-27 CONTROL Design Directive Filed — Piece 24 §2.2 Revision Required Before Implementation:** CONTROL investigated the eslint-disable concession on `_noopTracer.startActiveSpan` and filed a high-confidence directive: the rule being suppressed (`@typescript-eslint/no-explicit-any`) is NOT in the project's ESLint config — all suppressions are dead code. CONTROL recommends Alt 1 (3-overload interface + standalone function, ~+8 LOC, zero suppression). Flight's piece-24 spec must rev §2.2 before implementation kickoff. Brady's decision pending. See `.squad/decisions.md` → 2026-05-27 entries and `.squad/orchestration-log/2026-05-27T1315-control.md` for full directive.
 
 **2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented, ~+30 LOC). All gates green. Flight authored piece 24 spec + handoff (SDK adapter + OTel typing, D-6/D-8/D-9/D-16 cluster, ~51 net LOC). Decisions merged, orchestration logs prepared.
@@ -241,3 +243,37 @@ Piece 23 (in `squad/piece-23-shared-cli-conventions`, EECOM rev pending) touches
 **Lesson: Check the actual interface before approximating it.** When a third-party API's types are available in `node_modules`, look at the `.d.ts` before reaching for a variadic approximation. The real signature is almost always cleaner than an approximation, and approximations can silently lose type inference that callers depend on (like `ReturnType<F>`). This applies doubly to OTel, whose API surface is stable and well-typed.
 
 **Lesson: Verify that a lint rule is in the config before treating a suppression as a concession.** Granting a "one targeted suppression is acceptable" exception is meaningless if the rule does not fire. Future spec concessions should confirm rule presence in `eslint.config.mjs` before describing them as acceptable fallbacks.
+
+---
+
+## Piece 24 — Implementation Learnings (2026-07)
+
+**Branch:** `squad/piece-24-sdk-adapter-otel-typing` | **Commit:** `b1a710fd`  
+**Net production LOC:** ~114 (target ~59; ceiling 200 ✅)  
+**Gates:** tsc CLEAN · build CLEAN · lint CLEAN · 88/88 tests PASS
+
+### Variance from LOC Estimate
+
+Spec estimated ~59 net; implementation landed at ~114 net. Variance is justified:
+1. **`OTelDiagLoggerLike` interface** (+6 LOC, not in spec): `DiagConsoleLogger` implements only `DiagLogger` (5 log methods), NOT `DiagAPI` (setLogger/disable). Two separate interfaces were required — `OTelDiagLoggerLike` for logger instances, `OTelDiagLike` for the `diag` singleton. The spec did not anticipate this split.
+2. **`NoopDiagLogger` inline class** (+5 extra LOC): The 5-method interface requires a 5-method implementation. The spec estimated a simpler 1-method shape.
+3. **`_noopStartActiveSpan` lives in `otel-api.ts`** (not `otel-types.ts` as spec placed it): The function references `_noopSpan`, which is defined in `otel-api.ts`. Cross-file reference would have required an export from `otel-api.ts` to `otel-types.ts` creating a circular dependency. Moving the function to its dependency site was the correct decision.
+
+### `getTracer`/`getMeter` Return Type Strategy
+
+`Tracer` (real OTel) is NOT structurally assignable to `OTelTracerLike` (local) because `Span.addEvent` takes `TimeInput | Attributes` but `OTelSpanLike.addEvent` takes `Record<string, unknown>`. Similarly `Meter`/`OTelMeterLike` incompatible because `Counter` lacks `record()`/`addCallback()`/`removeCallback()`. Solution: remove explicit return type annotations from `getTracer()`/`getMeter()` and let TypeScript infer `Tracer | OTelTracerLike`. All call sites use only methods present in both shapes — no inference gap.
+
+### `_noopStartActiveSpan` Shape (3-overload)
+
+```typescript
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, fn: F): ReturnType<F>;
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, opts: object, fn: F): ReturnType<F>;
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, opts: object, ctx: object, fn: F): ReturnType<F>;
+function _noopStartActiveSpan(name: string, ...args: unknown[]): unknown { ... }
+```
+
+The implementation uses `typeof fn === 'function'` narrowing + `typeof callback !== 'function'` guard. After the guard, TypeScript narrows `callback` to `Function`. Returns `unknown` — safe because TypeScript uses overload signatures for call-site checking, never the implementation signature.
+
+### Chain Handoff
+
+Written to: `~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/stack-chain-piece-21-thru-24-handoff.md`
