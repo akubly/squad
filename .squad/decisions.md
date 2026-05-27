@@ -109,17 +109,11 @@ This entry is informational — no file rename is required. It is written to pre
 
 ### 2026-05-27: Decision — Piece 24 Scope (SDK Adapter and OTel Typing Hardening)
 
-# Decision: Piece 24 Scope — SDK Adapter and OTel Typing Hardening
-
 **Author:** Flight (Lead)  
 **Date:** 2026-05-27  
-**Status:** Proposed — for Scribe to merge into `.squad/decisions.md`
+**Status:** Approved
 
----
-
-## Chosen Audit Items
-
-**D-6, D-8, D-9, D-16** from `docs/proposals/ship-debt-audit-pieces-1-21.md`.
+**Chosen Audit Items:** D-6, D-8, D-9, D-16 from `docs/proposals/ship-debt-audit-pieces-1-21.md`.
 
 | Item | Severity | Description |
 |---|---|---|
@@ -128,36 +122,42 @@ This entry is informational — no file rename is required. It is written to pre
 | D-9 | S | Remove 3 inline `any` suppressions from `runtime/otel.ts`; type dynamic OTel SDK constructor variables |
 | D-16 | S | Rename `AgentHandleImpl.markIdle()` → `setIdle()`; remove misleading `@internal` annotation |
 
-**D-14 excluded:** Feature/implementation work (span propagation) with unmet prerequisite ("when agent lifecycle spans are complete"). Deferred to a follow-up piece.
+**D-14 excluded:** Feature/implementation work (span propagation) deferred; prerequisite unmet.
 
-## LOC Budget
+**LOC Budget:** Hard ceiling 200; estimated ~51 LOC (+76 added, −25 removed); headroom ~149 LOC.
 
-**Hard ceiling:** 200 production LOC net change.  
-**Estimated net:** ~51 LOC (+76 added, −25 removed).  
-**Headroom:** ~149 LOC.
+**Package:** `@bradygaster/squad-sdk` — patch bump. No CLI changes.
 
-## Package Impacted
+**Spec:** `docs/proposals/piece-24-sdk-adapter-otel-typing.md`
 
-`@bradygaster/squad-sdk` — patch bump required. No CLI package changes.
+---
 
-## Owner
+### 2026-05-27: CONTROL Directive — Piece 24 §2.2 `startActiveSpan` Noop Typing Revision
 
-Open. CAPCOM is a natural fit (SDK typing experience from piece 22 revision). Any agent with SDK-layer knowledge can implement.
+**Author:** CONTROL (TypeScript Engineer)  
+**For:** Flight (Lead) — fold into spec revision before piece-24 implementation  
+**Status:** Pending Brady decision
 
-## Expected Start Branch
+**Directive:** Replace the proposed variadic generic signature for `OTelTracerLike.startActiveSpan` with three concrete overloads. Extract the noop implementation as a standalone function. Both changes: zero-suppression, ~+8 LOC over baseline.
 
-`squad/piece-23-shared-cli-conventions` (after EECOM rev lands) — or `dev` if pieces 22+23 have merged before piece 24 is picked up.
+**Key Findings:**
 
-## Spec
+1. **ESLint rule `@typescript-eslint/no-explicit-any` does not exist in the config** (`eslint.config.mjs` has only 3 rules). All suppressions in `otel-api.ts` are dead code. Flight's spec framing ("acceptable single eslint-disable") gestures at a suppression that would never fire. The motivation to eliminate written `any` is correct (type-system discipline), but the "acceptable suppression" is misleading.
 
-`docs/proposals/piece-24-sdk-adapter-otel-typing.md`
+2. **OTel's `Tracer.startActiveSpan` has 3 concrete overloads, not variadic rest.** Flight's proposed variadic generic is an approximation with inferior type inference. The real OTel API:
+   ```typescript
+   startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>;
+   startActiveSpan<F extends (span: Span) => unknown>(name: string, options: SpanOptions, fn: F): ReturnType<F>;
+   startActiveSpan<F extends (span: Span) => unknown>(name: string, options: SpanOptions, context: Context, fn: F): ReturnType<F>;
+   ```
 
-## Deferred Items
+**Recommended Change (§2.2):**
 
-- **D-14** (span propagation): dedicated follow-up piece (24b or later); prerequisite is confirmed agent lifecycle span completeness.
-- **CONTROL N2** (source-grouping exhaustiveness, deferred from piece 22 revision): next CLI piece that opens `cli-entry.ts`.
-- **CONTROL Directive 2** (resolver env seam): piece 25 per decisions.md.
-- **D-18** (resolveSquad v1/v2 rename): piece 25.
+In `OTelTracerLike`, use 3 concrete overloads. Extract the noop as a standalone function with 4 signatures (3 overloads + 1 implementation). The `typeof callback !== 'function'` guard narrows `unknown` to `Function` via TypeScript type narrowing — no written `any`, no `as`, no `!`, no `@ts-*`. Compiles cleanly under `strict: true` + `noUncheckedIndexedAccess: true`.
+
+**LOC Delta:** ~+8 over baseline; well within 149 LOC headroom.
+
+**Confidence:** High. Verified against `node_modules/@opentelemetry/api/build/src/trace/tracer.d.ts` and TypeScript type narrowing semantics.
 
 ---
 

@@ -4,158 +4,84 @@
 
 📌 **Team update (2026-05-19 — Piece 18 Revision Complete):** Piece 18 doctor enhancements (EECOM implementation) revised by CONTROL per adversarial review (F1–F7, N1–N5). All 33 unit tests and 7 CLI-layer subprocess tests pass. CRLF normalization applied to cli-entry.ts. Branch `akubly/upstream-18-doctor-enhancements` force-pushed to `c515745b`.
 
-## Learnings
+## Current Session — Learnings & Archive
+
+### Piece 24 pre-implementation: `startActiveSpan` noop typing analysis (2026-05-27)
+
+**Question:** Can the single `eslint-disable-next-line @typescript-eslint/no-explicit-any` concession Flight permitted on `_noopTracer.startActiveSpan` be eliminated entirely?
+
+**Critical context finding:** The ESLint config (`eslint.config.mjs`) does NOT have `@typescript-eslint/no-explicit-any` as an active rule. The existing `/* eslint-disable */` block and all three `// eslint-disable-line` comments in `otel-api.ts` suppress a rule that does not fire. They are dead suppression comments. Piece-24's value is making `_noopTracer: OTelTracerLike` (typed, not `any`) so the compiler verifies shape conformance — the lint cleanup is aesthetic.
+
+**OTel interface structure:** `Tracer.startActiveSpan` in `@opentelemetry/api` is NOT a variadic rest-arg signature. It has exactly THREE distinct overloads:
+1. `startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>`
+2. `startActiveSpan<F extends (span: Span) => unknown>(name: string, options: SpanOptions, fn: F): ReturnType<F>`
+3. `startActiveSpan<F extends (span: Span) => unknown>(name: string, options: SpanOptions, context: Context, fn: F): ReturnType<F>`
+
+Flight's proposed `OTelTracerLike` interface uses a variadic generic (`<T>(...args: [string, ...unknown[], (span: OTelSpanLike) => T]): T | undefined`) which is a single-signature approximation. The real OTel API uses 3 concrete overloads — the approximation is inferior.
+
+**Alternatives evaluated:**
+
+- **Alt 1 — 3-overload interface + standalone function (RECOMMENDED):** Redesign `OTelTracerLike.startActiveSpan` from the proposed variadic generic to 3 concrete overloads (mirroring OTel exactly). Define a standalone `_noopStartActiveSpan` function with 4 signatures (3 overloads + 1 implementation). Implementation body uses `typeof callback !== 'function'` guard which narrows `unknown` to `Function` via standard TypeScript narrowing — `Function` is callable, producing implicit (not written) `any`. Zero written `any`, `as`, `!`, or `@ts-*`. Compiles cleanly under `strict: true` + `noUncheckedIndexedAccess: true`. LOC delta: ~+8 over baseline noop object. The redesigned interface is strictly more type-safe than Flight's variadic form: callers get proper `ReturnType<F>` inference, and new OTel overloads require adding an overload to both the interface and the standalone function (detectable at compile time via structural compatibility check).
+
+- **Alt 2 — Callsite narrowing:** Doesn't remove written `any` from the noop definition itself. Not viable for the stated goal (typing the noop object).
+
+- **Alt 3 — `Parameters<Tracer['startActiveSpan']>`:** TypeScript's `Parameters<>` on an overloaded function returns only the last overload's parameter tuple. Cannot union all 3 overloads. Not viable for a clean implementation.
+
+- **Alt 4 — `as OTelTracerLike` at construction site:** `const _noopTracer = { startActiveSpan(name, ...rest: unknown[]) { ... } } as OTelTracerLike`. Uses `unknown[]` (no written `any`) but introduces an `as` cast — a type assertion. Counts as a suppression mechanism even though it's not `eslint-disable`. TypeScript checks structural compatibility through `as` (more safety than `any`), but still a cast. Inferior to Alt 1 which uses none.
+
+- **Alt 5 — OTel's own `NOOP_TRACER`:** Not applicable. The noop exists precisely for when `@opentelemetry/api` is absent at runtime. Cannot depend on OTel's own noop when OTel might not be installed.
+
+**Recommendation:** Alt 1. Redesign `OTelTracerLike.startActiveSpan` from the variadic generic to 3 concrete overloads. This requires a spec revision in piece-24 §2.2 (update the interface definition + add the standalone function pattern). Net LOC impact: ~+8 LOC beyond baseline (well within the 149 LOC headroom). Zero suppression cost of any kind.
+
+**No-active-lint-rule insight:** Brady should know that `@typescript-eslint/no-explicit-any` is not in the ESLint config. Flight's concession in the spec is gesturing at a rule that would never fire. The motivation to avoid written `any` is purely about type-system discipline (which is still the right call), but the "acceptable suppression" framing is slightly misleading — the suppression is already dead code.
+
+---
+
+## Archive — Summary (see `history-archive.md` for full pre-2026-05-27 learnings)
 
 ### Piece 23 adversarial type review — shared CLI conventions (2026-05-27)
 
-- **`export default { generate }` in ambient `declare module` is non-idiomatic but compiles.** TypeScript accepts the object-literal form in `declare module` blocks; the idiomatic alternative is `const _default: { generate(...): void }; export default _default;`. Both satisfy the caller's `qrcode.default.generate(...)` access pattern. Reserve the nit for any future revision pass.
-- **`resolveSquadDir` hardcodes `process.env` — no injectable seam.** This is internally consistent with the spec (which mandates integration-style smoke tests for the resolver), but it directly conflicts with the D-13 options-bag convention being shipped in the same piece. Future test authors who need to isolate env-sensitive logic will have no injection point. Consider a `resolveSquadDir(cwd: string, env?: NodeJS.ProcessEnv): string | null` overload in piece 25 when the resolver gets its semver treatment.
-- **`string | null` return on a shared utility that drives all four CLI commands is correct here.** The pattern is widely understood, all four callsites guard with `if (!squadDir)`, and the `?.` chaining at the call site satisfies `noUncheckedIndexedAccess`. A `Result<string, Error>` shape would be over-engineering for a single-failure-mode utility.
-- **Barrel hygiene matters at the `cli/index.ts` level.** `squad-resolver.ts` is internal-only (not re-exported from `cli/index.ts`). If it ever gets added to the barrel it immediately becomes public API with semver implications. Watch for accidental `export *` additions during refactors.
-
-### Piece 18 adversarial revision — doctor enhancements (2026-05-19)
-
-- **`loadRegistryFromDisk` throws on corrupt JSON; don't assume null return.** When the registry file contains invalid JSON, the function throws a `SquadError` rather than returning `{ registry: null }`. Callers that need null-safe handling (like `noRegistry` guard) must wrap in try/catch.
-- **`git add --renormalize` is required to fix CRLF in mixed-line-ending files.** `core.autocrlf=true` alone does not normalize files that were already committed with CRLF. Use `git add --renormalize` to force LF normalization in the index; then fix any pre-existing trailing-whitespace lines exposed by the normalization.
-- **Async promptFn pattern prevents readline blocking in tests.** Replacing `readLine?: () => string` with `promptFn?: (question: string) => Promise<string>` lets test authors supply an async mock that doesn't block the event loop, and allows `_defaultPromptFn` to use `readline` properly with `Promise` resolution.
-- **CLI-layer subprocess tests must build first.** Tests that spawn `dist/cli-entry.js` require a current build of the binary. Ensure `npm run build` completes before running `test/cli/` subprocess tests or they'll exercise stale code.
-
-
-
-- **Error codes as message prefixes are a TypeScript anti-pattern.** All `ERR_ASSIGN_*` codes are embedded in the human-readable message string on `ConfigurationError`. No `.code` property, no exported `AssignErrorCode` type union. Programmatic callers must regex-parse the message. Future commands should declare a typed error code union and attach it as a discriminable property.
-- **`--key=value` arg parsing must be explicitly handled.** The `args.indexOf('--flag')` pattern silently ignores the `=`-delimited form (`--clone-to=./path`). This produces a misleading error for `squad assign url --clone-to=./path`. Shared arg-value helper needed in cli-entry.
-- **Discriminated unions need `never` guards in switches.** A switch on a `kind` field without a `default: { const _: never = result.kind; }` arm silently misses new variants at compile time. This should be a team-wide convention.
-- **`RegistryEntry [key: string]: unknown` is safer than feared.** Named properties take precedence for direct property access; the index signature only affects bracket-form reads. The concern is real but lower-priority than it appears.
-- **`noUncheckedIndexedAccess` compliance throughout.** All array index reads in piece 14 code use the `!` operator correctly. Zero tsc errors.
-
-### Piece 16 URL guard revision (2026-05-18)
-
-- **CLI URL guards must scan every candidate token, not just the first positional.** Skip only recognized option values; otherwise a URL can hide after `--registry-path`, `--target-dir`, or another value-taking flag.
-- **Init URL detection should normalize before matching.** Trim the token first, then match `http(s)`, `ssh`, `git`, `git+http(s|ssh)`, `file://`, protocol-relative `//`, and SCP-style `user@host:path` while leaving Windows, UNC, and local relative paths untouched.
-- **Tone & Record scrubs should preserve facts and counts while dropping named author lines, named verdict labels, and named assignment breadcrumbs.** Keep the behavior, evidence, and outcome; remove personnel-style attribution.
-
-## Current Session Learnings
-
-### Piece 10 revision — init validation path (2026-05-15T23:15:56Z)
-
-📌 **Team update — Piece 10 Revision Complete:** EECOM locked out per strict lockout protocol after adversarial review split verdict (Flight APPROVE-3-notes, FIDO REJECT-6-gaps, RETRO APPROVE-WITH-FIXES). CONTROL + Sims assigned joint revision. CONTROL unified init validation routing through `packages/squad-cli/src/commands/init.ts` so scaffold, callsign, clone path, and registry-source checks run before writes. Added `.squad` symbolic-link detection with `lstatSync` to prevent redirect escapes. Registry checks now apply to all registration paths (not just explicit --callsign), addressing RETRO's no-flag bypass gap. All 6 FIDO test gaps closed by Sims. Surgeon squashed both revision commits into `331894e8`. Build CLEAN. 28/28 tests GREEN. Decisions recorded: exit-code-2 scoping guidance for future error subclasses (register, clone). Ready for Phase C.
-
-### Piece 09 revision — watch and triage startup resolution (2026-05-15T22:14:43Z)
-
-**Scope:** Migrated read-only command paths to the structured squad resolver for registered clone checkouts.
-
-**Files changed:** `cli-entry.ts`, `cross-squad.ts`, `config.ts`, `legacy-resolver-migration.test.ts`, `migrate-readonly-commands.md` changeset.
-
-**Key decision:** Preserved pre-existing working-tree drift in local stash `pre-08a-stale-working-tree-drift` to avoid carrying unrelated changes into branch.
-
-**Validation:** 5/5 migration tests GREEN. Build clean. Scrub gate: no new violations introduced.
-
-## Learnings
-
-### Piece 10 revision — init validation path
-
-- Routed `squad init` through one validation module so scaffold, callsign, clone path, and registry-source checks run before writes.
-- Added `.squad` symbolic-link detection with `lstatSync` so scaffold writes stay inside the selected target directory.
-- Recorded test expectations for Sims covering plain init, environment-selected registries, default registries, and symbolic-link conflicts.
-
-### Piece 09 revision — watch and triage startup resolution
-
-- Moved the watch startup resolver to an internal source module so command declarations stay focused on supported watch APIs.
-- Command-surface parity tests should invoke `runWatch()` and `runTriage()` with platform, auth, monitor, capability, and PID seams stubbed, then shut down after the first-round boundary.
-- `SquadStateContext` checks in tests should narrow with explicit guards before reading required resolution fields.
-
-## Cross-Agent Updates
-
-### Piece 08a Revision Complete — CAPCOM (2026-05-14T21:38:40.349Z)
-
-📌 **Revision logged:** CAPCOM completed piece 08a revision (commit 0e4f301e) under strict lockout. CONTROL remains locked out for 08a unless re-rejection cycle restarts. See `.squad/orchestration-log/2026-05-14T21-38-40Z-capcom.md` for full revision scope (SDK barrel routing, dispatch unification, CLI start-dir parity tests, action-command boundary strengthened). Full suite 6,308/6,432 PASS; build clean; scrub gates 2/4/5/6 PASS.
-
-### Piece 08a Adversarial Review Outcome (2026-05-14T21:19:34Z)
-
-📌 **Rejection & Lockout Notice:** Piece 08a (read-only command resolver migration, commit fcb0cf1a) received four independent reviews:
-- **Flight (Lead):** APPROVE
-- **FIDO (Quality):** REQUEST CHANGES (blocking: `--team-root` / `SQUAD_TEAM_ROOT` parity not tested; boundary test weak; full-suite gate unmet)
-- **RETRO (Security):** APPROVE
-- **CAPCOM (SDK Expert):** REJECT (boundary violation: CLI imports `resolveSquad` from subpath instead of SDK root barrel; dispatch inconsistency between v2 resolver and legacy `detectSquadDir`)
-
-**Coordinator Verdict:** REJECTED — CAPCOM's REJECT + FIDO's blocking gaps → no approval.
-
-**Lockout:** CONTROL (author) locked out per strict Reviewer Rejection Protocol. CAPCOM self-nominated and accepted as revision owner.
-
-**Revision Scope (CAPCOM):**
-1. SDK barrel export fix: expose stable registry-aware resolver through `packages/squad-sdk/src/index.ts`
-2. CLI dispatch consolidation: all three paths (`cli-entry`, `config`, `cross-squad`, `delegateCommand`) consume single resolver surface
-3. Test coverage (FIDO): `--team-root` / `SQUAD_TEAM_ROOT` parity test + stronger boundary-crossing tests
-4. Full-suite gate: meet Piece 05 baseline agreement
-
-See `.squad/decisions.md` for full findings and `.squad/orchestration-log/` for per-reviewer details.
-
-### Piece 08a — Read-only command resolver migration (2026-05-14T13:16:21.972-07:00)
-
-**Scope:** Migrated read-only command paths to the structured squad resolver for registered clone checkouts.
-
-**Files changed:**
-- `packages/squad-cli/src/cli-entry.ts` — `status` now uses structured resolution and reports registry-backed reasons.
-- `packages/squad-cli/src/cli/commands/cross-squad.ts` — `discover` resolves the active squad through the structured resolver.
-- `packages/squad-cli/src/cli/commands/config.ts` — `config model` resolves the active squad through the structured resolver.
-- `test/cli/legacy-resolver-migration.test.ts` — added fixture coverage for clone-backed resolution and read-only command dispatch.
-- `.changeset/migrate-readonly-commands.md` — patch changeset for CLI behavior.
-
-**Working-tree decision:** Initial uncommitted version/template/generated-skill drift was preserved in a local stash named `pre-08a-stale-working-tree-drift` before branching. The drift was unrelated to piece 08a and was not carried into the branch.
-
-**Validation:**
-- RED check: new migration tests failed on `status` and `discover` before implementation.
-- GREEN check: `npm run build` passed; `npm test -- test/cli/legacy-resolver-migration.test.ts` passed 5/5.
-- Scrub gate: gates 2, 4, 5, and 6 passed. Gate 1 reported existing tracked strip-listed paths; gate 3 reported existing references requiring review. No new gate output was introduced by the piece 08a files.
-
-## Cross-Agent Updates
-
-### Piece 08a Adversarial Review Outcome (2026-05-14T21:19:34Z)
-
-📌 **Rejection & Lockout Notice:** Piece 08a (read-only command resolver migration, commit fcb0cf1a) received adversarial reviews from Flight (APPROVE), FIDO (REQUEST CHANGES), RETRO (APPROVE), and CAPCOM (REJECT). CAPCOM's boundary-discipline rejection (CLI subpath imports, dispatch inconsistency) combined with FIDO's blocking test gaps resulted in **REJECTED** final verdict. CONTROL (author) locked out per strict Reviewer Rejection Protocol. CAPCOM self-nominated and accepted as revision owner. Revision scope: SDK barrel export fix + test coverage for `SQUAD_TEAM_ROOT` parity + full-suite gate compliance. See `.squad/decisions.md` for full findings and orchestration-log for per-reviewer details.
-
-### Piece 14 Adversarial Review — TypeScript Findings Landed (2026-05-18)
-
-📌 **CONTROL TypeScript findings from piece 14 adversarial pass successfully addressed in revision.**
-
-Initial review identified three TypeScript pattern violations: (T1) error codes embedded in message string, no typed union or `.code` property (T2) `--flag=value` arg parsing silently ignored, producing false errors (T3) discriminated union switch on `result.kind` lacks `never` default guard. Revision commit 1a47e601 delivered: `AssignErrorCode` union exported and discriminable on error objects; `argValue` helper handles both `--flag value` and `--flag=value` forms; `never` guard added to result.kind switch. All 3 majors addressed. Additional deferred: T8 (index-signature refactor — acceptable architectural debt). Branch ready for Phase C. Decision merged: typed error codes, discriminated unions, and exhaustiveness guards now team-wide conventions.
-
----
-
-## 📌 Team Update — Piece 21 Ship Gate Cleared
-
-**Date:** 2026-05-22  
-**Event:** Post-stack-review gate clearance — all five required fixes shipped.
-
-Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
-
----
-
-## Learnings
+- **`export default { generate }` in ambient `declare module` is non-idiomatic but compiles.** Both object-literal and const forms satisfy caller's access pattern. Reserve nit for future revision.
+- **`resolveSquadDir` hardcodes `process.env` — no injectable seam.** Consistent with spec; conflicts with D-13 options-bag convention. Consider overload in piece 25.
+- **`string | null` return on shared utility is correct.** Widely understood pattern; all callsites guard; `?.` chaining satisfies `noUncheckedIndexedAccess`.
+- **Barrel hygiene matters at `cli/index.ts`.** `squad-resolver.ts` is internal-only. Accidental `export *` additions become public API with semver implications.
 
 ### Piece 22 adversarial type-design review — doctor unification (2026-05-22)
 
-- **Exit-code derivation must use a `never`-guarded helper, not inline `.filter()`.**  
-  The `_renderFinding` switch on `DoctorSeverity` has a correct `never` arm. But the exit-code block at `cli-entry.ts:1097–1102` uses `.filter(f => f.severity === 'error')` — an open string comparison with no exhaustiveness guard. If `DoctorSeverity` grows a new level (e.g., `'critical'`), the renderer will fail at compile time but exit-code logic will silently return 0. Fix: extract a typed `deriveExitCode(findings: DoctorFinding[]): number` helper with a severity switch and a `never` default.
+- **Exit-code derivation must use `never`-guarded helper, not inline `.filter()`.** Switch on `DoctorSeverity` has correct `never` arm; exit-code block uses open string comparison with no exhaustiveness guard.
+- **`DoctorSource` grouping in renderer has no exhaustiveness guard.** `.filter()` splits by source; third source value silently never renders.
+- **Public types on barrel are public API — semver implications.** `DoctorFinding`, `DoctorSeverity`, `DoctorSource`, `DoctorRepair` re-exported from barrel; any breaking change requires semver bump.
+- **Two canonical import paths for same types.** `cli-entry.ts` imports `DoctorFinding` directly, bypassing barrel. Convention is to import from barrel to avoid future move refactors.
+- **`DoctorFinding` fields should be `readonly`.** Represents value objects; immutability prevents mutation bugs.
 
-- **`DoctorSource` grouping in the renderer has no exhaustiveness guard.**  
-  `cli-entry.ts:1085–1086` uses two `.filter()` calls to split findings by source. A future third `DoctorSource` value would produce findings that are silently never rendered — they fall through both filter buckets and disappear. Either use a `Map<DoctorSource, DoctorFinding[]>` with a `never` guard, or add an assertion after grouping that the union is exhausted.
+### Piece 18 adversarial revision — doctor enhancements (2026-05-19)
 
-- **Public types on the barrel are public API — semver implications.**  
-  `DoctorFinding`, `DoctorSeverity`, `DoctorSource`, and `DoctorRepair` are all re-exported from `packages/squad-cli/src/cli/index.ts`. Any breaking shape change (adding a required field, removing a field, narrowing a type) requires a minor or major changeset bump, not just a patch.
+- **`loadRegistryFromDisk` throws on corrupt JSON; don't assume null return.** Throws `SquadError` on invalid JSON; callers need try/catch for null-safe handling.
+- **`git add --renormalize` is required for CRLF normalization.** `core.autocrlf=true` alone does not normalize pre-committed CRLF files; must use `--renormalize`.
+- **Async `promptFn` pattern prevents readline blocking in tests.** Replace `readLine?: () => string` with `promptFn?: (question: string) => Promise<string>` for non-blocking mocks.
+- **CLI-layer subprocess tests require current build.** Tests spawning `dist/cli-entry.js` must run after `npm run build` to avoid stale binary execution.
 
-- **Two canonical import paths for the same types.**  
-  `cli-entry.ts` imports `DoctorFinding` directly from `'./cli/commands/doctor-types.js'`, bypassing the barrel. The convention across the codebase is to import from the module barrel. Drift here makes future type moves (e.g., if `doctor-types.ts` is renamed) require updating multiple import sites.
+### Piece 14 revision — TypeScript patterns (2026-05-18)
 
-- **`DoctorFinding` fields should be `readonly`.**  
-  Interfaces representing value objects / diagnostic results should be immutable. Omitting `readonly` allows callers to mutate findings after construction, which could cause subtle bugs if findings are cached or passed between layers.
+- **Error codes as message prefixes are anti-pattern.** All `ERR_ASSIGN_*` codes embedded in message string; no `.code` property. Future commands should use typed error code union.
+- **`--key=value` arg parsing must be explicitly handled.** `args.indexOf('--flag')` silently ignores `=`-delimited form. Shared arg-value helper needed.
+- **Discriminated unions need `never` guards in switches.** Missing `default: { const _: never = x; }` silently misses new variants at compile time.
+- **`RegistryEntry [key: string]: unknown` is safer than feared.** Named properties take precedence; index signature only affects bracket-form reads.
+- **`noUncheckedIndexedAccess` compliance throughout.** All array index reads in piece 14 use `!` correctly. Zero tsc errors.
 
-### Piece 22 FIDO rejection revision — warn→stderr + exhaustive exit-code (2026-05-22)
+### Piece 16 URL guard revision (2026-05-18)
 
-**Revision shipped (commit 78297559) on branch `squad/piece-22-unify-doctors`.**
+- **CLI URL guards must scan every candidate token, not just first positional.** Skip only recognized option values; URL can hide after value-taking flags.
+- **Init URL detection should normalize before matching.** Trim token first, then match protocols; preserve Windows, UNC, local relative paths.
+- **Tone & Record scrubs preserve facts and counts while dropping attribution.** Remove author lines, verdict labels, breadcrumbs; keep behavior, evidence, outcome.
 
-- **Fixes shipped:**
-  1. **Blocker 1 (stderr routing):** `_renderFinding` routed all findings to `console.log`. Spec §2.3 says warn→stderr, and the comment above `process.exit(2)` explicitly claimed "Warnings go to stderr" — direct contradiction. Fixed by extracting `renderFinding()` to `doctor.ts` with `console.error` for warn+error, `console.log` for info only.
+### Piece 08a & 09 revisions — resolver migration (2026-05-15)
+
+- **Routed `squad init` through one validation module** for scaffold, callsign, clone path, registry-source checks before writes.
+- **Added `.squad` symbolic-link detection** with `lstatSync` to prevent redirect escapes.
+- **Moved watch startup resolver to internal module** so command declarations stay focused on supported APIs.
+- **Command-surface parity tests** should invoke `runWatch()` and `runTriage()` with platform, auth, monitor, capability seams stubbed.
+
   2. **Blocker 2 (cross-source escalation test):** Added `renderFinding + deriveExitCode` describe block with two tests — cross-source (system warn + registry error → exit 2, both on stderr) and info-on-stdout companion.
   3. **N1 (exhaustive exit-code helper):** `deriveExitCode(findings: readonly DoctorFinding[]): 0 | 2` exported from `doctor.ts` with exhaustive severity switch + `never` arm. `cli-entry.ts` now destructures it from the dynamic import and uses it instead of `if (errorCount > 0)`.
   4. **N3 (readonly fields):** All `DoctorFinding` fields marked `readonly`.

@@ -12,7 +12,9 @@ See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, p
 
 ## 📌 Team Updates — Recent
 
-**2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented, ~+30 LOC). All gates green. Flight authored piece 24 spec + handoff (SDK adapter + OTel typing, D-6/D-8/D-9/D-16 cluster, ~51 net LOC). Risk surfaced: `_noopTracer.startActiveSpan` variadic may require eslint-disable. Decisions merged, orchestration logs prepared.
+**2026-05-27 CONTROL Design Directive Filed — Piece 24 §2.2 Revision Required Before Implementation:** CONTROL investigated the eslint-disable concession on `_noopTracer.startActiveSpan` and filed a high-confidence directive: the rule being suppressed (`@typescript-eslint/no-explicit-any`) is NOT in the project's ESLint config — all suppressions are dead code. CONTROL recommends Alt 1 (3-overload interface + standalone function, ~+8 LOC, zero suppression). Flight's piece-24 spec must rev §2.2 before implementation kickoff. Brady's decision pending. See `.squad/decisions.md` → 2026-05-27 entries and `.squad/orchestration-log/2026-05-27T1315-control.md` for full directive.
+
+**2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented, ~+30 LOC). All gates green. Flight authored piece 24 spec + handoff (SDK adapter + OTel typing, D-6/D-8/D-9/D-16 cluster, ~51 net LOC). Decisions merged, orchestration logs prepared.
 
 ---
 
