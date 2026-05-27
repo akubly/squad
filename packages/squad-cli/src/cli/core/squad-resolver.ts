@@ -10,6 +10,6 @@ import { resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
  *
  * This is the canonical CLI resolver — do not write per-file resolveSquadDir wrappers.
  */
-export function resolveSquadDir(cwd: string): string | null {
-  return resolveSquadV2({ cwd, env: process.env })?.path ?? null;
+export function resolveSquadDir(cwd: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  return resolveSquadV2({ cwd, env })?.path ?? null;
 }

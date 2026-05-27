@@ -6,6 +6,6 @@ declare module 'qrcode-terminal' {
   interface QRCodeOptions {
     small?: boolean;
   }
-  function generate(text: string, options: QRCodeOptions, callback: (qrcode: string) => void): void;
-  export default { generate };
+  declare const _default: { generate(text: string, options: QRCodeOptions, callback: (qrcode: string) => void): void };
+  export default _default;
 }

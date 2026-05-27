@@ -316,7 +316,7 @@ async function runCheck(
   rules: ReturnType<typeof parseRoutingRules>,
   modules: ReturnType<typeof parseModuleOwnership>,
   roster: ReturnType<typeof parseRoster>,
-  hasCopilot: boolean,
+  agentEnabled: boolean,
   autoAssign: boolean,
   capabilities: MachineCapabilities | null,
   adapter: PlatformAdapter,
@@ -351,7 +351,7 @@ async function runCheck(
     });
 
     let unassignedCopilot: WatchWorkItem[] = [];
-    if (hasCopilot && autoAssign) {
+    if (agentEnabled && autoAssign) {
       try {
         const copilotIssues = await listWatchWorkItems(adapter, { label: 'squad:copilot', state: 'open', limit: 10 });
         unassignedCopilot = copilotIssues.filter(i => !i.assignees || i.assignees.length === 0);
@@ -763,7 +763,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     console.log(`${DIM}Labels: ensured ${roster.length + 1} squad labels exist${RESET}`);
   }
 
-  const hasCopilot = hasCodingAgent(content);
+  const agentEnabled = hasCodingAgent(content);
   const autoAssign = content.includes('<!-- copilot-auto-assign: true -->');
   const monitorSessionId = 'ralph-watch';
   const eventBus = new EventBus();
@@ -917,7 +917,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     }
 
     // Core: triage (always runs — not a capability)
-    const checkResult = await runCheck(rules, modules, roster, hasCopilot, autoAssign, capabilities, adapter, vlog);
+    const checkResult = await runCheck(rules, modules, roster, agentEnabled, autoAssign, capabilities, adapter, vlog);
     const roundState = checkResult.state;
 
     // Short-circuit remaining phases when the scan failed or was rate-limited

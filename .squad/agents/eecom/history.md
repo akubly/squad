@@ -75,7 +75,27 @@ If a command owns both an in-repo mirror and a user-scoped install of the same t
 
 `installCopilotPayload` takes `{ hostDir, callsign, copilotHome?, skillsFrom?, cwd? }` and returns counts for coordinator, skills, agents, instructions, and MCP servers. `runUpgrade` follows FIX-1's direct `UpgradeOptions` seam style with `copilotPayloadInstaller?: typeof installCopilotPayload`, defaulting to the SDK function so tests can inject a recording or throwing stub. Registry matching is by `normalisedPathKey(entry.path) === normalisedPathKey(squadDirInfo.path)` before using the matched entry's `callsign`; raw path equality is not safe across separators, relative segments, or OS casing rules.
 
-## Known Issues
+## Learnings
+
+### Piece 23 Rev — Nit follow-up (2026-05-27)
+
+**Addressed (F1, F4, N1, N2):**
+- **F1** — Added `.git`-absent failure-path test in `test/cli/squad-file-conventions.test.ts`: `"returns null when .squad/ exists but .git/ does not (no git root — documented SDK boundary)"`. Companion `.git`-with-no-.squad null test already existed; no duplicate needed.
+- **F4** — Renamed `hasCopilot` → `agentEnabled` throughout `watch/index.ts` (4 sites: function param declaration line ~319, `if` guard line ~354, `const` assignment line ~766, call-site line ~920). Handoff §5 step 5 mandate now satisfied.
+- **N1** — Replaced `export default { generate }` in `qrcode-terminal.d.ts` with idiomatic two-step `declare const _default: { generate(...) }; export default _default;`. Free `function generate` declaration removed; `QRCodeOptions` interface retained. Build + tsc --noEmit clean.
+- **N2** — Added `env: NodeJS.ProcessEnv = process.env` as defaulted second param to `resolveSquadDir`. Fully backward-compatible — all existing callers unchanged. Added test `"accepts an injectable env parameter (env seam — future-proofing; ...)"` in `squad-file-conventions.test.ts`. Note: SDK does not currently vary resolution behavior on env contents, so the seam is structural future-proofing per D-13.
+
+**Skipped (F2, F3):**
+- **F2** — FALSE POSITIVE. `flight-piece-23-options-bag-seam.md` follows the agent drop-box convention (`{agent}-{brief-slug}.md`), not the Coordinator-capture convention (`copilot-{brief-slug}.md`). No rename performed. See `.squad/decisions/inbox/eecom-piece-23-rev.md` for full rationale.
+- **F3** — Amending `fced6e99` would invalidate the literal hash both reviewers approved. Cosmetic gain not worth the audit-trail churn. Noted in rev commit message instead.
+
+**Final LOC delta for this rev:** ~+30 LOC (production: ~6 LOC across 3 files; tests: ~24 LOC in 2 new test cases).
+
+**New test names (for grep):**
+- `"returns null when .squad/ exists but .git/ does not (no git root — documented SDK boundary)"`
+- `"accepts an injectable env parameter (env seam — future-proofing; SDK does not currently vary behavior on env)"`
+
+
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.
 

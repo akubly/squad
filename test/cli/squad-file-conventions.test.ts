@@ -79,4 +79,32 @@ describe('resolveSquadDir (shared utility)', () => {
       rmSync(isolated, { recursive: true, force: true });
     }
   });
+
+  it('returns null when .squad/ exists but .git/ does not (no git root — documented SDK boundary)', () => {
+    // F1: pins the .git-absent failure path as tested behavior, not a runtime assumption.
+    // The SDK resolver requires a git root; .squad/ alone is insufficient.
+    const isolated = join(tmpdir(), `.test-resolver-no-git-${randomBytes(4).toString('hex')}`);
+    mkdirSync(join(isolated, '.squad'), { recursive: true });
+    try {
+      expect(resolveSquadDir(isolated)).toBeNull();
+    } finally {
+      rmSync(isolated, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts an injectable env parameter (env seam — future-proofing; SDK does not currently vary behavior on env)', () => {
+    // N2: verifies the env seam passes through without breaking resolution.
+    const isolated = join(tmpdir(), `.test-resolver-env-seam-${randomBytes(4).toString('hex')}`);
+    mkdirSync(join(isolated, '.git'), { recursive: true });
+    mkdirSync(join(isolated, '.squad'), { recursive: true });
+    try {
+      const withDefault = resolveSquadDir(isolated);
+      const withEmpty = resolveSquadDir(isolated, {});
+      expect(withDefault).not.toBeNull();
+      expect(withEmpty).not.toBeNull();
+      expect(withDefault).toBe(withEmpty);
+    } finally {
+      rmSync(isolated, { recursive: true, force: true });
+    }
+  });
 });
