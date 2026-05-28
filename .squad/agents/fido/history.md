@@ -305,3 +305,15 @@ Test at `doctor.test.ts:545` constructs a system `warn` + registry `error` findi
 - **Not scope creep** — all extra LOC traces to real API surface requirements. This is the kind of drift that reveals underestimation in the spec, not author overreach.
 
 **Process lesson for future LOC estimates:** OTel's `Diag*` surface bifurcates into instance (`DiagLogger`, 5 methods) and singleton (`DiagAPI`, adds `setLogger`/`disable`). When estimating piece-sized OTel typing work, budget for both interfaces explicitly in the LOC envelope.
+
+### Piece 25 Adversarial Review — Resolver Rename and CLI Hardening (2026-05-28)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS
+
+**Commit reviewed:** `e67e0959` on `squad/piece-25-resolver-rename-and-cli-hardening`
+
+**Summary:** Option A is implemented: `resolveSquadDir` is canonical, `resolveSquad` remains as a deprecated alias, the SDK barrel exports both names, the changeset is SDK minor/CLI patch, and the alias contract test proves equivalent results. Build/lint/package tsc gates pass for both parent and e67 when using the local workspace SDK; full `vitest` is red on both parent and e67 with no new failure class (e67 reduces failures from 42 files to 15). Non-blocking nits: no `// @ts-expect-error` regression proof for a future `DoctorSource` variant, internal `resolution.ts` alias is not `typeof`-annotated, and clean-install dependency hygiene remains pre-existing (`npm ci` lock skew / nested stale SDK).
+
+**Pattern learned — push-policy comparison needs dependency-mode control:** In this repo, clean `npm install` can create `packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9.4`, causing CLI tsc to resolve stale published declarations instead of the local workspace SDK. For commit-to-parent gate comparison, record both the raw clean-install failure class and the workspace-linked result; count blockers only when e67 introduces a new failure after controlling for the pre-existing dependency skew.
+
+- 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.

@@ -6,6 +6,28 @@
 
 ## Current Session — Learnings & Archive
 
+### Piece 25 type-fidelity audit (2026-05-28)
+
+**Verdict: ✅ APPROVE-WITH-NITS** — Commit `e67e0959`.
+
+**N2 (DoctorSource exhaustiveness in `renderFinding`):**
+Implemented exactly as directed. Prior code used a ternary (`f.source === 'system' ? ... : ...`) — no exhaustiveness guard. Piece-25 replaced it with an explicit switch: `case 'system':`, `case 'registry':`, `default: { const _exhaustive: never = f.source; throw ... }`. Hypothetical addition of `'workflow'` to `DoctorSource` would cause `Type '"workflow"' is not assignable to type 'never'` at the default arm — compile-time catch confirmed. ✅
+
+**Directive 2 (env seam on CLI `resolveSquadDir`):**
+The env seam `(cwd: string, env: NodeJS.ProcessEnv = process.env): string | null` was already present before piece-25 (implemented earlier). Piece-25's only change was updating the import alias from `resolveSquad as resolveSquadV2` → `resolveSquadDir as sdkResolveSquadDir` per D-18 rename. Body uses `sdkResolveSquadDir({ cwd, env })?.path ?? null` — `env` parameter flows through, zero direct `process.env` in body. SDK's `ResolveOpts.env?: Record<string, string|undefined>` accepts `NodeJS.ProcessEnv`. 1-arg callers unaffected. ✅
+
+**Option A alias — two tiers:**
+1. `index.ts` (public API): `export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;` — typed const with `typeof`, captures both overloads (`(opts: ResolveOpts): ResolvedSquad | null` and `(startDir?: string): string | null`). Correct form. ✅
+2. `resolution.ts` (internal module): `export const resolveSquad = resolveSquadDir;` — bare const, no `typeof`. Single-sig function today so inferred type is correct. **Brittle form** — future overloads on `resolution.ts`'s `resolveSquadDir` would collapse to the impl signature. This module-level alias is NOT re-exported via the barrel, so it does not affect the public API. Non-blocking nit.
+
+**Build gate:** Both `tsc --noEmit -p packages/squad-sdk/tsconfig.json` and `tsc --noEmit -p packages/squad-cli/tsconfig.json` exit 0. ✅
+
+**Suppression sweep (piece-25 delta only):** Zero new `any`, `as`, `!`, `@ts-*`, `eslint-disable` in any piece-25-introduced lines. Pre-existing `eslint-disable-next-line no-constant-condition` in `resolution.ts` (for `while(true)` loops) and `as` casts in `doctor.ts` (JSON parsing) are unrelated to piece-25. ✅
+
+**Meta-learning:** When a directive was already implemented in a prior piece (Directive 2 env seam), the subsequent piece correctly "inherits" that state and only touches the affected import alias — no re-implementation. This is clean. The commit message was transparent about it: "resolveSquadDir in squad-resolver.ts already has the env seam." Future audits should check the prior commit trail if the directive predates the audited piece.
+
+---
+
 ### Piece 24 post-implementation: directive fidelity audit (2026-05-27)
 
 **Question:** Did Flight implement CONTROL's 3-overload `_noopStartActiveSpan` directive faithfully?
@@ -188,3 +210,5 @@ Directive-to-implementation fidelity is much higher when the spec is revised to 
 This workflow produced high-fidelity implementation in one pass. Compare to workflows where directives become decisions entries without spec integration: implementer must interpret directive intent, spec may contain now-obsolete fallback language, leads to ambiguity and revision cycles.
 
 Future CONTROL directives should follow this model: get into the spec before implementation kickoff.
+
+- 2026-05-28: Piece-25 type-fidelity audit (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 1 directive + 1 informational.
