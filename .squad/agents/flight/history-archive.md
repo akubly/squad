@@ -134,6 +134,72 @@ Branch `akubly/upstream-21-post-stack-review` is ~30+ commits ahead of `origin/d
 
 **Ship implication:** Local T1/T2 gaps (registry schema migration, per-repo payload repair) are the real blockers for piece 21 quality. Origin/dev T3 polish gaps (dry-run, instrumentation, diagnostics) are long-standing debt that can defer.
 
+---
+
+## Pieces 22–24 Wave (2026-05-22 to 2026-05-27)
+
+Archived from main history.md as part of summarization gate (≥15360 bytes). See history.md for current piece 25 scope decision.
+
+### Piece 22 — Dual-Doctor Unification (2026-05-22)
+
+**Branch:** `squad/piece-22-unify-doctors` | **LOC:** 165 diff lines. Net production delta: ~87 LOC.
+
+**Key decisions:**
+- Architecture: `runUnifiedDoctor` lives in `cli/commands/doctor.ts` to keep import surface minimal.
+- Exit-code: `error → 2` (per piece 14 convention: "operation blocked by state").
+- Test seam: `copilotHome` option inherited from registry doctor opts.
+- Registry finding severity: batch severity (global `RunDoctorResult.severity`) applied uniformly.
+
+**Spec contradictions:** None. Test migration guidance was accurate; kept `runDoctor` as deprecated export.
+
+**Adversarial review findings (REJECTED initially, then CONTROL revised):**
+- Blocker 1: warn→stderr routing fixed in `renderFinding()`
+- Blocker 2: Cross-source escalation test added
+- Pattern learned: Warn-to-stderr contracts require verifying BOTH exit code AND stream routing.
+
+**Revision approved:** Commit 78297559. All gates green: build CLEAN, lint CLEAN, 53/53 doctor tests.
+
+### Piece 23 — Shared CLI Conventions (2026-05-23)
+
+**Branch:** `squad/piece-23-shared-cli-conventions` | **Commit:** `fced6e99` | **Net LOC:** ~17 production.
+
+**Items selected:** D-3 (emoji-string heuristic), D-5 (resolveSquadDir duplication), D-11 (qrcode types), D-13 (seam convention documentation).
+
+**Learnings:**
+- Economy.ts divergence: Manual 10-level walk vs. SDK resolver (both semantically correct; SDK is better for git worktrees).
+- Spec vs. code: `checkGlobalAgent` vs. actual `checkCopilotInstructions` — always locate by grep, not by spec-stated function names.
+- Stacking on piece 22 was clean — piece 23's doctor.ts change was orthogonal to piece 22's renderer changes.
+
+**Tension:** Piece 23 stacked on piece-22 pending Brady's local review. Pre-existing test failures (15 total) confirmed by stash/test/restore.
+
+### Piece 24 — SDK Adapter and OTel Typing Hardening (2026-05-27)
+
+**Branch:** `squad/piece-24-sdk-adapter-otel-typing` | **Commit:** `b1a710fd` | **Net LOC:** ~114 (target ~59, ceiling 200 ✅).
+
+**Gates:** tsc CLEAN · build CLEAN · lint CLEAN · 88/88 tests PASS
+
+**Items selected:** D-6, D-8, D-9, D-16 (pure typing/naming cleanup). **Deferred:** D-14 (span propagation, prerequisite unmet).
+
+**CONTROL finding:** Variadic `startActiveSpan` was both unnecessary AND weaker than 3 concrete overloads.
+- The eslint rule being suppressed (`@typescript-eslint/no-explicit-any`) was NOT in the project's ESLint config.
+- Real OTel interface is 3 concrete overloads, not variadic. Matching it exactly preserves `ReturnType<F>` inference.
+- Lesson: Check actual interface before approximating. Verify lint rules are in config before granting suppression concessions.
+
+**Variance from LOC estimate:**
+- `OTelDiagLoggerLike` interface (+6 LOC): `DiagConsoleLogger` implements only `DiagLogger`, not `DiagAPI`.
+- `NoopDiagLogger` (+5 LOC): 5-method interface requires 5-method implementation.
+- `_noopStartActiveSpan` in `otel-api.ts` (not `otel-types.ts`) to avoid circular dependency.
+
+**Return type strategy:** `getTracer()`/`getMeter()` return types inferred (not explicit), letting TypeScript unify structurally compatible shapes.
+
+**Chain handoff:** Written to `~/.copilot/session-state/41b7998d.../files/stack-chain-piece-21-thru-24-handoff.md`
+
+### Key Heuristic: Feature vs. Cleanup Split Within Audit Clusters
+
+Audit-suggested groupings are not always coherent in work type. D-14 (span propagation, feature work with conditional "when complete" prerequisite) was grouped with typing debt (D-6, D-8, D-9, D-16) but should be split before authoring the spec. Updated `ship-debt-selection/SKILL.md` with this heuristic.
+
+---
+
 ## Archive
 
-See `history-archive.md` for learnings prior to 2026-05-13 (crash recovery, triage sessions, release crisis, Wave 1 personal squad, adoption tracking, issue triage patterns, PR review pipeline, personal squad architecture, community PR batches, etc.).
+See earlier entries in this file for learnings prior to piece 21 (2026-05-13: crash recovery, triage sessions, release crisis, Wave 1 personal squad, adoption tracking, issue triage patterns, PR review pipeline, personal squad architecture, community PR batches, etc.).

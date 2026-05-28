@@ -6,13 +6,13 @@
 
 ## Archive
 
-See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, pieces 02-21, Q1-Q2 2026).
+See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots, crash recovery, dual-doctor unification, shared CLI conventions, OTel typing hardening).
 
 ---
 
 ## Summary (Recent)
 
-**Pieces 22–24 Wave (2026-05-22 to 2026-05-27):** Led three interconnected specs across doctor unification (piece 22, 165 LOC diff), shared CLI conventions (piece 23, 17 net LOC), and OTel typing hardening (piece 24, 59 net LOC). Key learnings: (1) mechanical vs. enriched scope split prevents compounding; (2) ship-debt sniff methodology systematically identifies 18 high-priority items; (3) parallel modules at integration boundaries concentrate debt; (4) variadic approximations lose type inference compared to real interfaces; (5) lint rule presence must be verified before granting suppression concessions. Developed patterns for adversarial review feedback (warn-to-stderr routing, cross-source severity escalation), resolver chain testing, and feature/cleanup split heuristics. Piece 24 spec ready for implementation kickoff post-CONTROL revision (3-overload noop typing closes Medium risk).
+**Pieces 22–24 Wave (2026-05-22 to 2026-05-27):** Led three interconnected specs across doctor unification (piece 22, 165 LOC diff), shared CLI conventions (piece 23, 17 net LOC), and OTel typing hardening (piece 24, 114 net LOC). Key learnings: (1) mechanical vs. enriched scope split prevents compounding; (2) ship-debt sniff methodology systematically identifies high-priority items; (3) parallel modules at integration boundaries concentrate debt; (4) variadic approximations lose type inference compared to real interfaces; (5) lint rule presence must be verified before granting suppression concessions; (6) feature vs. cleanup split heuristic refines audit cluster decomposition. Developed patterns for adversarial review feedback routing, resolver chain testing, and deprecation-strategy gating. Piece 25 spec ready for implementation kickoff pending Brady's Option A/B decision on deprecation approach.
 
 ---
 
@@ -28,254 +28,39 @@ See history-archive.md for learnings prior to Piece 22 (wave 1-phase B pilots, p
 
 ---
 
-## Learnings
+## Piece 25 Scope Decision (2026-05-27)
 
-### Piece 22 Scope Decision (2026-05-22)
+**Spec:** `docs/proposals/piece-25-resolver-rename-and-cli-hardening.md`  
+**Handoff:** session-state `41b7998d.../files/piece-25-resolver-rename-and-cli-hardening-handoff.md`  
+**Expected net LOC:** ~9–14 production LOC. Smallest piece in the 22-25 wave.
 
-**Mechanical vs. enriched unification:** Chose mechanical-only scope for piece 22. The `DoctorFinding` type includes an optional `repair` field but piece 22 will NOT populate it — that's semantic enrichment for a later piece. Rationale: the dual-doctor debt has existed since piece 18 (4 pieces of compounding); the minimum viable fix is type unification + single renderer. Adding repair commands or correlated findings would triple the PR size and require new test infrastructure.
+### Chosen cluster: D-18 + CONTROL N2 + CONTROL Directive 2
 
-**Scope expansion decision:** Included D-4, D-7, D-12, D-15 in piece 22 because they are ≤5 LOC each, touch files already being modified, and avoid four separate PRs. Set a 200 LOC production-code ceiling as the expansion gate.
+**D-18** (M-severity) — SDK `resolveSquad` renamed to `resolveSquadDir` (canonical semantic); old `resolveSquad` kept as `@deprecated` alias (no removal). Minor SDK bump, not major. Compounding value: every future SDK caller will use the semantically clear name; no new resolver drift.
 
-### Ship-Debt Sniff Methodology (2026-05-22)
+**CONTROL N2** — `DoctorSource` exhaustiveness guard in `renderFinding`/source-grouping (`cli-entry.ts`). 3–5 LOC. Near-free because D-18 already opens `cli-entry.ts`. Prevents silent finding loss when a third `DoctorSource` is added.
 
-Developed a systematic methodology for identifying technical debt across a multi-piece project:
-1. Decision ledger walk (look for "deferred", "follow-up", conditional approvals)
-2. Orchestration log scan (deferral keywords)
-3. Literal markers (TODO/FIXME grep)
-4. Escape hatches (eslint-disable, @ts-expect-error, @ts-ignore)
-5. @internal audit (forced exposure vs legitimate encapsulation)
-6. Duplication detection (same constant/function in 2+ files)
-7. Resolver sprawl (same SDK function wrapped differently per file)
-8. Silent returns (functions that return early without caller signal)
+**CONTROL Directive 2** — `env?: NodeJS.ProcessEnv` optional seam on CLI `resolveSquadDir` (`squad-resolver.ts`). Near-free because D-18 already opens that file. Follows the D-13 options-bag convention documented in piece 23.
 
-**Key finding:** 18 debt items across pieces 1–21. Severity breakdown: 8S, 7M, 3L (but 2 of the L's are "won't fix"). The dual-doctor (D-1) was the only L-severity item requiring its own proposal. Most debt is M-severity single-file refactors that cluster into "typing hygiene" (piece 23) and "OTel hardening" (piece 24) themes.
+### Items considered and rejected
 
-### Pattern: Ship-speed debt concentrates at integration boundaries
+- **D-14** (span propagation, M-severity): Prerequisite "agent lifecycle spans complete" still unmet after piece 24. Feature/implementation work with conditional language — 50–100+ LOC estimated. Deferred until Brady formally declares lifecycle spans locked.
+- All piece 22-24 items: shipped or in-flight.
 
-The highest-severity debt items (D-1, D-5, D-18) all occur where a new piece added a module that interfaces with existing code through a seam rather than by extending the existing module. This is the "parallel module" anti-pattern — it's the fastest way to ship without breaking existing tests, but compounds into resolver confusion and type fragmentation. Future pieces should flag this pattern in adversarial review.
+### Deprecation-strategy reasoning
 
----
+D-18 touches the public SDK export surface. Analysis: introducing `resolveSquadDir` as a new canonical name while keeping `resolveSquad` as a `@deprecated` const alias is additive — no consumer breaks, no major bump needed. This is the recommended path (minor bump). The removal of `resolveSquad` v1 (the actual breaking change) is deferred to a future major-version cleanup piece. Open question filed for Brady to confirm minor vs. major before implementation kicks off.
 
-## Piece 22 — Dual-Doctor Unification (2026-05-22)
+**Avoided breaking change:** Yes. Deprecation approach chosen specifically to avoid a major version bump. If Brady wants major-bump-now, the spec supports it — only the alias line and changeset classification change; implementation work is identical.
 
-**Branch:** `squad/piece-22-unify-doctors` | **LOC:** 165 diff lines (126 added + 39 removed in production src, +35 for new `doctor-types.ts`). Net production delta: ~87 LOC. Well under 200 LOC ceiling.
+### Conflict with carried-forward CONTROL directives
 
-### Key decisions
+None. CONTROL N2 and Directive 2 are the two carried-forward items; both are the primary motivation for pieces in this cluster. No tension.
 
-**Architecture:** `runUnifiedDoctor` lives in `cli/commands/doctor.ts` (the legacy layer) rather than a new file. This keeps the cli-entry.ts import surface minimal — one import, one function. The registry `runDoctor` (in `commands/doctor.ts`) stays unchanged as an internal helper; its tests pass with zero modifications.
+### Brady's Pending Decision
 
-**Exit-code change:** `error → 2` (was `error → 1`). Rationale: piece 14 established `process.exit(2)` as the convention for "operation blocked by state" errors. Using 1 only for unexpected/catch-block failures. The old exit-1 on registry doctor error was inconsistent with this convention. Noted in PR description and changeset.
+**Option A (Recommended):** Minor-bump approach — keep `resolveSquad` as `@deprecated` alias in SDK, minor version bump for SDK package.
 
-**Test seam:** `runUnifiedDoctor` inherits the `copilotHome` option from the registry doctor opts so tests can pass a fake home directory and avoid reading the user's real `.copilot` directory. This seam is essential — the real `.copilot` directory may contain invalid callsigns (e.g., "gethelp.app") that cause `diagnoseCopilotPayload` to throw.
+**Option B:** Major-bump approach — remove `resolveSquad` entirely, force major version bump for SDK package.
 
-**Registry finding severity:** Used batch severity (the global `RunDoctorResult.severity`) applied uniformly to all registry findings. This is "existing behavior preserved" per spec §2.2. Per-finding severities in the registry doctor would require a deeper refactor deferred to a later piece.
-
-### Spec contradictions found
-
-**None.** The spec migration table was accurate for all 5 TODO-marked checks. The test migration guidance in spec §5 assumed `runDoctor` would be removed; instead it's kept as a deprecated export so existing tests work without assertion changes. This is a valid deviation — removing the export would have required a large test migration with zero behavior change.
-
-### Acceptance checklist
-
-- [x] `DoctorFinding` type in `cli/commands/doctor-types.ts`
-- [x] All 5 `TODO(piece-22)` markers removed (grep confirms zero)
-- [x] `cli-entry.ts` dual-banner block replaced with single unified pass
-- [x] Exit code: error → 2, else 0
-- [x] `passCount` in summary line
-- [x] All existing doctor tests pass
-- [x] New tests: source grouping, passCount, empty-findings, error finding shape
-- [x] `DoctorCheck` marked `@deprecated`
-- [x] `npm run build` passes
-- [x] `npm run lint` passes
-- [x] No new `eslint-disable` or `@ts-expect-error`
-- [x] `.changeset/piece-22-unify-doctors.md` present (patch bump)
-
----
-
-## 🔴 Piece 22 Adversarial Review — Doctor Unification (2026-05-22)
-
-**Status:** 🛑 REJECTED (2 blockers)
-
-**Commit:** `ef09d3d3` on `squad/piece-22-unify-doctors`  
-**Verdict:** REJECTED — Flight locked out per strict protocol  
-**Revision candidate:** CONTROL (recommended)
-
-**Blockers:** 
-1. **cli-entry.ts warn-to-stdout bug:** Spec §2.3 requires "warn → 0 (warnings to stderr)". Implementation uses `console.log` for all severities. Comment contradicts code. Fix: route `f.severity === 'warn'` to `console.error()` or `process.stderr.write()`.
-2. **Missing cross-source severity escalation test:** Spec §5 mandates: "A test where system doctor produces `warn` and registry doctor produces `error` → overall exit code is 2." Core behavioral claim of unification. All 5 new tests run against a healthy scaffold (zero errors). Fix: add a test scenario mixing `warn` and `error` findings from both sources.
-
-**Non-blocking:** list-doctor tests, native registry migration, per-finding granularity, weak pre-existing gate.
-
-**Pattern learned:** Warn-to-stderr contracts require verifying BOTH exit code AND stream routing in the renderer. Comment intentions ≠ code. Always grep for `console.log` in severity-keyed render helpers.
-
-**Learnings for CONTROL revision:**
-- Directive 1: Exit-code derivation needs a `never`-guarded helper, not inline `.filter()`.
-- Directive 2: `DoctorSource` grouping needs exhaustiveness assertion or Map-based dispatch.
-- Directive 3: `DoctorFinding` fields should be `readonly` to enforce immutability of value objects.
-
----
-
-## 📌 Piece 22 Revision Approved — Flight Lockout Lapsed
-
-**Date:** 2026-05-22  
-**Revision commit:** `78297559`  
-**Revision author:** CONTROL  
-
-The artifact `squad/piece-22-unify-doctors` (commit ef09d3d3) that was locked out from Flight following rejection has now been approved on CONTROL's revision (commit 78297559). Both blockers resolved:
-1. warn→stderr routing fixed in `renderFinding()`
-2. Cross-source escalation test added with full gate coverage
-
-All gates green: build CLEAN, lint CLEAN, 53/53 doctor tests, 159/200 LOC budget, no .squad/ leaks. FIDO re-verdict: ✅ APPROVE. Lockout for this artifact has lapsed.
-
----
-
-## Piece 23 — Shared CLI Conventions Spec + Handoff (2026-05-22)
-
-### Item selected: D-3, D-5, D-11, D-13 (the full "typing hygiene + convention decisions" cluster)
-
-**Spec:** `docs/proposals/piece-23-shared-cli-conventions.md`  
-**Handoff:** session-state `41b7998d.../files/piece-23-shared-cli-conventions-handoff.md`  
-**Expected LOC:** ~22 net production LOC (~90 gross). Well under 200 LOC ceiling.
-
-### Why this cluster
-
-D-3 was the clear primary pick: fragile emoji-string heuristic across 4 call sites, divergent variant in `watch/index.ts`, and a named home (`squad-file-conventions.ts`) already established by FIX-3. It compounds by making every future agent-detection feature use a tested, named function rather than an inline string check.
-
-D-5 pairs naturally: the `resolveSquadDir` duplication is mechanically identical to the `hasCodingAgent` problem (copy-paste per-file, no shared utility). Extracting it to `cli/core/squad-resolver.ts` applies the same pattern at the resolver layer.
-
-D-11 (qrcode types) is a 2-line removal plus a 12-line addition — trivially small, fits the "typing hygiene" theme, and removes two lint suppression comments.
-
-D-13 (seam convention) generates a decision document with zero production LOC — it belongs in this piece because piece 24 (OTel hardening) will add injectable seams and needs the convention documented first.
-
-### Items rejected for piece 23
-
-- D-6, D-8, D-9, D-14, D-16 (OTel hardening + SDK adapter): SDK-internal, piece 24's scope.
-- D-7, D-12: Absorbed into piece 22.
-- D-10, D-17: Won't fix (intentional, documented).
-- D-18 (resolveSquad v1/v2 rename): Breaking change, piece 25's scope.
-
-### Tensions with piece 22 in-flight diff
-
-`cli/commands/doctor.ts` is modified by both pieces: piece 22 changes check function return types; piece 23 updates one inline string check inside `checkGlobalAgent`. These are sequential edits on the same file — no conflict since piece 23 stacks on piece 22's branch. Spec §1.1 explicitly calls this out and instructs the implementer to locate `checkGlobalAgent` by function name.
-
-`cli-entry.ts` has a local `resolveSquadDir` function (piece 23's target) AND was heavily modified by piece 22 for the unified renderer. Piece 23 only removes the local resolver function — completely orthogonal to piece 22's renderer changes.
-
-### Discovery: economy.ts resolver is a manual walk
-
-The audit stated economy.ts wrapped `resolveSquadV2` — it does not. It has a hand-written 10-level `FSStorageProvider` walk. Both approaches return the `.squad/` directory path (semantically equivalent), but the implementation difference is real. Spec §6 documents this as a Low-likelihood risk with a mitigation (test `runEconomy` happy path before committing).
-
----
-
-## Piece 23 — Implementation (2026-05-23)
-
-**Branch:** `squad/piece-23-shared-cli-conventions` | **Commit:** `fced6e99`
-
-## Learnings
-
-### Net Production LOC (Piece 23)
-
-**~17 net production LOC.** Modified files: +26 added, -37 removed = -11. New files (squad-resolver.ts +16, qrcode-terminal.d.ts +12) = +28. Total net: +17. Well within the 200 LOC ceiling and close to the spec's ~22 estimate. 
-
-### Economy.ts Smoke-Test Result: SEMANTIC DIVERGENCE DOCUMENTED — SAFE IN PRACTICE
-
-The SDK resolver (`resolveSquadV2`) requires a `.git` marker to exist somewhere in the path tree. It calls `findGitRoot(cwd)` first, then checks for `.squad/` at that git root. The manual 10-level walk in `economy.ts` had no such requirement — it checked every directory for `.squad/` regardless of git presence.
-
-**In practice: semantics matched.** All squad projects have `.git/`. The divergence only manifests in non-git temp directories (not a real usage scenario). The economy command test, which creates `.git/` + `.squad/` in a temp dir to mirror real usage, passed cleanly. The migration is safe.
-
-**Documented divergence:** The SDK resolver is actually BETTER in two ways: (1) it handles git worktrees correctly, and (2) it won't accidentally "find" a `.squad/` directory in a parent non-squad project if the current project has a git boundary between them.
-
-### Spec vs. Code Discrepancy: `checkGlobalAgent` vs. `checkCopilotInstructions`
-
-The spec and problem statement said the inline `🤖 Coding Agent` check was in `checkGlobalAgent`. The actual code had it in `checkCopilotInstructions`. The handoff's instruction to "locate code by function name, not line number" was essential — the grep found the actual location. Always locate by grep, not by spec-stated function names.
-
-### Decisions Deferred to Future Pieces
-
-- D-18 (`resolveSquad` v1/v2 rename): Still deferred to piece 25. The SDK still exports both `resolveSquad` (v1, positional arg) and `resolveSquad as resolveSquadV2` (v2, opts object). Piece 23 added `squad-resolver.ts` which wraps v2, which is the right approach.
-- OTel hardening (D-6, D-8, D-9, D-14, D-16): Deferred to piece 24.
-
-### Tension with Piece 22 Pending Merge
-
-Piece 23 stacks on `squad/piece-22-unify-doctors` which is pending Brady's local review. The stacking was clean — piece 23's diff on `doctor.ts` was a single line change in `checkCopilotInstructions`, orthogonal to piece 22's renderer and type unification changes. The 15 pre-existing test failures in the full suite (dispatch-help.test.ts, consult.test.ts, etc.) are all pre-existing on piece-22's branch — confirmed by stash/test/restore cycle.
-
----
-
-## Piece 24 — SDK Adapter and OTel Typing Hardening (2026-05-27)
-
-**Spec:** `docs/proposals/piece-24-sdk-adapter-otel-typing.md`  
-**Handoff:** session-state `41b7998d.../files/piece-24-sdk-adapter-otel-typing-handoff.md`  
-**Expected LOC:** ~59 net production LOC (~138 gross, revised from ~51 per CONTROL's 3-overload directive). Well under 200 LOC ceiling.
-
-### Learnings
-
-#### Item Selected: D-6, D-8, D-9, D-16 (SDK adapter + OTel typing cluster)
-
-The audit grouped D-6, D-8, D-9, D-14, D-16 as "piece 24: OTel hardening + SDK adapter typing." Selected D-6, D-8, D-9, D-16 only. All four are pure typing / naming cleanup — predictable LOC, no runtime behavior change. D-8 and D-9 share the same new `otel-types.ts` file, making them nearly free to bundle after D-8 is done. D-16 is a 3-line rename that eliminates a misleading `@internal` annotation on a non-exported class.
-
-#### Items Considered and Rejected for Piece 24
-
-- **D-14** (span propagation, `tools/index.ts` TODO): Feature/implementation work — "implement span parenting when agent lifecycle spans are complete." Contains conditional language ("when complete") signaling an unmet prerequisite. Would require designing context propagation across the agent/tool boundary, adding new context API calls, and new test infrastructure. Potentially 100+ LOC on its own. Deferred to dedicated follow-up (24b or 25+).
-- **D-18** (resolveSquad v1/v2 rename): Breaking SDK change; piece 25.
-- **CONTROL N2** (source-grouping exhaustiveness): CLI-layer doctor fix, 3–5 LOC, not SDK scope. Deferred to the next CLI piece that opens `cli-entry.ts`.
-- **D-10, D-17**: Won't fix — intentional, documented in the audit.
-
-#### Key Heuristic: Feature vs. Cleanup Split Within an Audit Cluster
-
-The audit's suggested piece groupings are not always coherent in work type. D-14 was grouped with typing debt (D-6, D-8, D-9, D-16) but is actually feature work with a conditional prerequisite. The Lead should split mixed-type clusters before authoring the spec: (a) all cleanup items go into this piece; (b) all feature/implementation items defer with explicit `prerequisite unmet` notation. Updated `ship-debt-selection/SKILL.md` with this heuristic.
-
-#### CONTROL's N2 and Directive 2 — Not Binding for Piece 24
-
-- **N2** (source-grouping exhaustiveness, deferred from piece 22 revision): Not piece-24-binding — no specific piece number assigned; CLI-layer concern orthogonal to SDK typing. Will be picked up in the next CLI piece that touches `cli-entry.ts`.
-- **Directive 2** (resolver env seam): Explicitly filed for piece 25 in decisions.md. No conflict with piece 24's scope.
-
-#### Tension with Piece 23 In-Flight Diff
-
-Piece 23 (in `squad/piece-23-shared-cli-conventions`, EECOM rev pending) touches only CLI files. Piece 24 touches only SDK files (`packages/squad-sdk/src/`). Zero structural overlap. The stacking is clean; piece 24's branch should form from piece 23's tip regardless of whether EECOM's rev has landed. No spec design-around was required.
-
----
-
-## Learnings
-
-### CONTROL Catch: Variadic `startActiveSpan` Was Both Unnecessary AND Weaker (2026-05-27)
-
-**What happened:** When authoring piece 24's spec, I approximated `OTel.Tracer.startActiveSpan` as a variadic generic (`<T>(...args: [string, ...unknown[], (span: OTelSpanLike) => T]): T | undefined`) because I assumed a variadic rest-arg was the cleanest way to capture OTel's multi-arity signature. I added a concession allowing a single `eslint-disable-next-line` on that method if TypeScript narrowing proved difficult.
-
-**CONTROL's findings:**
-1. **The eslint rule being suppressed (`@typescript-eslint/no-explicit-any`) is not in the project's ESLint config.** The `eslint.config.mjs` has only 3 rules — `no-explicit-any` is not one of them. The "acceptable single suppression" would have suppressed dead code, misleading any future reader who assumes the rule is active.
-2. **OTel's actual interface is 3 concrete overloads, not variadic.** The real `Tracer.startActiveSpan` in `@opentelemetry/api` is defined as `(name, fn)`, `(name, opts, fn)`, and `(name, opts, ctx, fn)`. Matching the real interface exactly — as a standalone function so overload signatures attach cleanly — gives TypeScript the full overload information and preserves `ReturnType<F>` inference at call sites. The variadic approximation loses this.
-
-**Lesson: Check the actual interface before approximating it.** When a third-party API's types are available in `node_modules`, look at the `.d.ts` before reaching for a variadic approximation. The real signature is almost always cleaner than an approximation, and approximations can silently lose type inference that callers depend on (like `ReturnType<F>`). This applies doubly to OTel, whose API surface is stable and well-typed.
-
-**Lesson: Verify that a lint rule is in the config before treating a suppression as a concession.** Granting a "one targeted suppression is acceptable" exception is meaningless if the rule does not fire. Future spec concessions should confirm rule presence in `eslint.config.mjs` before describing them as acceptable fallbacks.
-
----
-
-## Piece 24 — Implementation Learnings (2026-07)
-
-**Branch:** `squad/piece-24-sdk-adapter-otel-typing` | **Commit:** `b1a710fd`  
-**Net production LOC:** ~114 (target ~59; ceiling 200 ✅)  
-**Gates:** tsc CLEAN · build CLEAN · lint CLEAN · 88/88 tests PASS
-
-### Variance from LOC Estimate
-
-Spec estimated ~59 net; implementation landed at ~114 net. Variance is justified:
-1. **`OTelDiagLoggerLike` interface** (+6 LOC, not in spec): `DiagConsoleLogger` implements only `DiagLogger` (5 log methods), NOT `DiagAPI` (setLogger/disable). Two separate interfaces were required — `OTelDiagLoggerLike` for logger instances, `OTelDiagLike` for the `diag` singleton. The spec did not anticipate this split.
-2. **`NoopDiagLogger` inline class** (+5 extra LOC): The 5-method interface requires a 5-method implementation. The spec estimated a simpler 1-method shape.
-3. **`_noopStartActiveSpan` lives in `otel-api.ts`** (not `otel-types.ts` as spec placed it): The function references `_noopSpan`, which is defined in `otel-api.ts`. Cross-file reference would have required an export from `otel-api.ts` to `otel-types.ts` creating a circular dependency. Moving the function to its dependency site was the correct decision.
-
-### `getTracer`/`getMeter` Return Type Strategy
-
-`Tracer` (real OTel) is NOT structurally assignable to `OTelTracerLike` (local) because `Span.addEvent` takes `TimeInput | Attributes` but `OTelSpanLike.addEvent` takes `Record<string, unknown>`. Similarly `Meter`/`OTelMeterLike` incompatible because `Counter` lacks `record()`/`addCallback()`/`removeCallback()`. Solution: remove explicit return type annotations from `getTracer()`/`getMeter()` and let TypeScript infer `Tracer | OTelTracerLike`. All call sites use only methods present in both shapes — no inference gap.
-
-### `_noopStartActiveSpan` Shape (3-overload)
-
-```typescript
-function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, fn: F): ReturnType<F>;
-function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, opts: object, fn: F): ReturnType<F>;
-function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, opts: object, ctx: object, fn: F): ReturnType<F>;
-function _noopStartActiveSpan(name: string, ...args: unknown[]): unknown { ... }
-```
-
-The implementation uses `typeof fn === 'function'` narrowing + `typeof callback !== 'function'` guard. After the guard, TypeScript narrows `callback` to `Function`. Returns `unknown` — safe because TypeScript uses overload signatures for call-site checking, never the implementation signature.
-
-### Chain Handoff
-
-Written to: `~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/stack-chain-piece-21-thru-24-handoff.md`
+Implementation kickoff is gated on Brady's confirmation of A or B.

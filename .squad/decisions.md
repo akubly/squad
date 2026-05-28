@@ -56,6 +56,61 @@
 
 ---
 
+### 2026-05-27: Piece 25 Scope — Resolver Rename and CLI Hardening
+
+**Status:** Proposed — awaiting Brady confirmation on deprecation-strategy (Open Question 1)
+
+---
+
+## Chosen Audit Items + Deferrals Merged
+
+| Item | Source | Severity | Description |
+|---|---|---|---|
+| D-18 | Ship-debt audit | M | `resolveSquad` v1 renamed to `resolveSquadDir` in SDK; old name kept as `@deprecated` alias |
+| CONTROL N2 | Piece-22 adversarial review deferral | S | `DoctorSource` exhaustiveness guard in `renderFinding` (`cli-entry.ts`) |
+| CONTROL Directive 2 | Piece-23 review deferral | S | `env?: NodeJS.ProcessEnv` seam on CLI `resolveSquadDir` (`squad-resolver.ts`) |
+
+**D-14 explicitly deferred:** Span propagation prerequisite unmet. Deferred until Brady declares agent lifecycle spans locked.
+
+---
+
+## LOC Budget
+
+**Hard ceiling:** 200 production LOC  
+**Estimated net:** ~9–14 LOC (+14 added, −5 removed)  
+**Ceiling headroom:** ~186 LOC
+
+---
+
+## Owner
+
+**Flight (Lead)** for spec and handoff. Implementation assignable to EECOM or Flight directly.
+
+---
+
+## Expected Start Branch
+
+`squad/piece-25-resolver-rename-and-cli-hardening` — branch from `squad/piece-24-sdk-adapter-otel-typing` (or from `dev` if pieces 22–24 have merged by implementation time).
+
+---
+
+## Deprecation-Strategy Verdict
+
+**Patch-bump-safe for CLI. Minor-bump-safe for SDK** — under the chosen deprecation approach (keep `resolveSquad` as deprecated alias, no removal). No major version bump required.
+
+**Requires Brady sign-off** to confirm:
+1. Minor-bump approach (Option A, recommended) vs. major-bump-now with `resolveSquad` removal (Option B).
+2. Implementation kickoff is gated on this answer — do not start coding until Brady confirms.
+
+---
+
+## Spec + Handoff Locations
+
+- **Spec:** `docs/proposals/piece-25-resolver-rename-and-cli-hardening.md`
+- **Handoff:** `~/.copilot/session-state/41b7998d-8288-47fe-b3d3-eee538d89231/files/piece-25-resolver-rename-and-cli-hardening-handoff.md`
+
+---
+
 ## Applies To
 
 All squad agents working on pieces 22–25. Coordinators should use this priority when routing work.
