@@ -49,6 +49,20 @@ async function scaffold(root: string): Promise<void> {
 }
 
 describe('squad doctor', () => {
+  it('rejects unhandled DoctorSource variants at compile time', () => {
+    const fakeFinding = {
+      severity: 'info',
+      label: 'workflow',
+      message: 'workflow finding',
+      source: 'workflow',
+    } as const;
+
+    if (false) {
+      // @ts-expect-error - adding a new DoctorSource variant must break renderFinding exhaustiveness
+      renderFinding(fakeFinding, true);
+    }
+  });
+
   beforeEach(async () => {
     if (existsSync(TEST_ROOT)) {
       await rm(TEST_ROOT, { recursive: true, force: true });

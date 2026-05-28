@@ -1,5 +1,5 @@
 /**
- * Shared Squad directory resolver — wraps the SDK's resolveSquad for CLI use.
+ * Shared Squad directory resolver — wraps the SDK's resolveSquadDir for CLI use.
  */
 
 import { resolveSquadDir as sdkResolveSquadDir } from '@bradygaster/squad-sdk';

@@ -103,7 +103,7 @@ export function clonesMatch(cwd: string, clone: string): boolean {
  *   2. Fallback           → `<homeDir>/.squad/registry.json`
  *
  * Both the CLI writer (squad init / squad assign) and the SDK reader
- * (resolveSquad) MUST route through this helper so they always agree on
+ * (resolveSquadDir) MUST route through this helper so they always agree on
  * the default registry location.
  *
  * @param homeDir - Override for os.homedir() — primarily for testing.

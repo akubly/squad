@@ -1,7 +1,7 @@
 /**
  * Squad directory resolution — walk-up and global path algorithms.
  *
- * resolveSquad()            — find .squad/ by walking up from startDir to .git boundary
+ * resolveSquadDir()         — find .squad/ by walking up from startDir to .git boundary
  * resolveSquadPaths()       — dual-root resolution (projectDir / teamDir) for remote squad mode
  * resolveGlobalSquadPath()  — platform-specific global config directory
  *
@@ -156,7 +156,7 @@ export function resolveSquadDir(startDir?: string): string | null {
  * @deprecated Use {@link resolveSquadDir} instead.
  * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
  */
-export const resolveSquad = resolveSquadDir;
+export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 
 // ============================================================================
 // Dual-root resolution (Issue #311)
@@ -392,7 +392,7 @@ export function ensurePersonalSquadDir(): string {
  * never clutters the repo root or arbitrary filesystem locations.
  *
  * @param filePath  - Absolute path to validate.
- * @param squadRoot - Absolute path to the `.squad/` directory (e.g. from `resolveSquad()`).
+ * @param squadRoot - Absolute path to the `.squad/` directory (e.g. from `resolveSquadDir()`).
  * @returns The resolved absolute `filePath` if it is safe.
  * @throws If `filePath` is outside `.squad/` and not in the system temp directory.
  */
