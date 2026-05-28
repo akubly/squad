@@ -90,7 +90,7 @@ function _handleTopLevelSignal(signal: 'SIGINT' | 'SIGTERM'): void {
 process.on('SIGINT', () => _handleTopLevelSignal('SIGINT'));
 process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 
-import { FSStorageProvider, resolveSquadState, resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, resolveSquadState, resolveSquadDir as sdkResolveSquadDir } from '@bradygaster/squad-sdk';
 import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
 import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import path from 'node:path';
@@ -816,7 +816,7 @@ async function main(): Promise<void> {
   if (cmd === 'status') {
     const sdk = await lazySquadSdk();
     const startDir = getSquadStartDir();
-    const resolvedSquad = resolveSquadV2({ cwd: startDir, env: process.env });
+    const resolvedSquad = sdkResolveSquadDir({ cwd: startDir, env: process.env });
     const repoSquad = resolvedSquad?.path ?? null;
     const globalPath = sdk.resolveGlobalSquadPath();
     const globalSquadDir = path.join(globalPath, '.squad');
@@ -903,7 +903,7 @@ async function main(): Promise<void> {
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
     let resolvedForStart: ResolvedSquad | null = null;
     try {
-      resolvedForStart = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+      resolvedForStart = sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env });
     } catch (err) {
       fatal(err instanceof Error ? err.message : String(err));
     }
@@ -1080,7 +1080,7 @@ async function main(): Promise<void> {
     const showStatus = args.includes('--status');
     if (!showStatus) {
       // Resolution is the precondition for setup and dry-run modes.
-      if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
+      if (!sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env })) {
         fatal(
           'No squad found.\n' +
             '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
@@ -1109,7 +1109,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'link') {
-    if (!resolveSquadV2({ cwd: getSquadStartDir(), env: process.env })) {
+    if (!sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env })) {
       fatal(
         'No squad found.\n' +
           '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
@@ -1150,7 +1150,7 @@ async function main(): Promise<void> {
     const rcStartDir = rcPath || getSquadStartDir();
     let resolvedForRc: ResolvedSquad | null = null;
     try {
-      resolvedForRc = resolveSquadV2({ cwd: rcStartDir, env: process.env });
+      resolvedForRc = sdkResolveSquadDir({ cwd: rcStartDir, env: process.env });
     } catch (err) {
       fatal(err instanceof Error ? err.message : String(err));
     }
@@ -1314,7 +1314,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign-to-copilot') {
     // Dispatch-level guard: consistent pattern with consult and link.
-    const guardResult = resolveSquadV2({ cwd: getSquadStartDir(), env: process.env });
+    const guardResult = sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env });
     if (!guardResult) {
       fatal(
         'No squad found.\n' +

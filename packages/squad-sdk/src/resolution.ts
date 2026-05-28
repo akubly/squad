@@ -112,7 +112,7 @@ function getMainWorktreePath(worktreeDir: string, gitFilePath: string): string |
  * @param startDir - Directory to start searching from. Defaults to `process.cwd()`.
  * @returns Absolute path to `.squad/` or `null`.
  */
-export function resolveSquad(startDir?: string): string | null {
+export function resolveSquadDir(startDir?: string): string | null {
   let current = path.resolve(startDir ?? process.cwd());
 
   // eslint-disable-next-line no-constant-condition
@@ -151,6 +151,12 @@ export function resolveSquad(startDir?: string): string | null {
     current = parent;
   }
 }
+
+/**
+ * @deprecated Use {@link resolveSquadDir} instead.
+ * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
+ */
+export const resolveSquad = resolveSquadDir;
 
 // ============================================================================
 // Dual-root resolution (Issue #311)

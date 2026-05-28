@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { spawn, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { resolveSquad } from '@bradygaster/squad-sdk';
+import { resolveSquad, resolveSquadDir } from '@bradygaster/squad-sdk';
 
 const CLI_ENTRY = resolve(process.cwd(), 'packages/squad-cli/dist/cli-entry.js');
 const TEST_ROOT = join(
@@ -125,6 +125,22 @@ describe('read-only CLI command resolver migration', { timeout: 60_000 }, () => 
       source: 'clones',
       callsign: 'host',
     });
+  });
+
+  it('D-18: resolveSquadDir (canonical) and resolveSquad (deprecated alias) return equivalent results', async () => {
+    const fixture = await createFixture();
+    const opts = { cwd: fixture.consumerRepo, env: { SQUAD_REGISTRY_PATH: fixture.registryPath } };
+
+    const fromCanonical = resolveSquadDir(opts);
+    const fromAlias = resolveSquad(opts);
+
+    // Both must resolve and return equivalent objects (deprecated alias wraps canonical).
+    expect(fromCanonical).not.toBeNull();
+    expect(fromAlias).not.toBeNull();
+    expect(fromCanonical).toMatchObject({ path: fixture.hostSquad });
+    expect(fromAlias).toMatchObject({ path: fixture.hostSquad });
+    // Deprecated alias must still be callable as a function (backward-compat smoke check).
+    expect(typeof resolveSquad).toBe('function');
   });
 
   it('status resolves a registered consumer checkout', async () => {

@@ -5,7 +5,7 @@
  */
 
 import { createRequire } from 'module';
-import { resolveSquad as resolveLegacySquad } from './resolution.js';
+import { resolveSquadDir as resolveLegacySquadDir } from './resolution.js';
 import { resolveSquad as resolveRegistrySquad } from './resolution-v2.js';
 import type { ResolvedSquad, ResolveOpts } from './resolution-v2.js';
 
@@ -13,14 +13,20 @@ const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
 export const VERSION: string = pkg.version;
 
-export function resolveSquad(opts: ResolveOpts): ResolvedSquad | null;
-export function resolveSquad(startDir?: string): string | null;
-export function resolveSquad(startDirOrOpts?: string | ResolveOpts): string | ResolvedSquad | null {
+export function resolveSquadDir(opts: ResolveOpts): ResolvedSquad | null;
+export function resolveSquadDir(startDir?: string): string | null;
+export function resolveSquadDir(startDirOrOpts?: string | ResolveOpts): string | ResolvedSquad | null {
   if (typeof startDirOrOpts === 'object' && startDirOrOpts !== null) {
     return resolveRegistrySquad(startDirOrOpts);
   }
-  return resolveLegacySquad(startDirOrOpts);
+  return resolveLegacySquadDir(startDirOrOpts);
 }
+
+/**
+ * @deprecated Use {@link resolveSquadDir} instead.
+ * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
+ */
+export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 
 // Export public API
 export { resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePersonalSquadDir, ensureSquadPath, ensureSquadPathTriple, loadDirConfig, isConsultMode, scratchDir, scratchFile, deriveProjectKey, resolveExternalStateDir, resolveSquadHome, ensureSquadHome, resolvePresetsDir, resolveSquadState } from './resolution.js';

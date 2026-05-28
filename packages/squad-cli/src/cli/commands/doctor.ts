@@ -792,8 +792,19 @@ export function renderFinding(f: DoctorFinding, noColor: boolean): void {
       throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
     }
   }
-  const line =
-    f.source === 'system' ? `${prefix} ${f.label} — ${f.message}` : `${prefix} ${f.message}`;
+  let line: string;
+  switch (f.source) {
+    case 'system':
+      line = `${prefix} ${f.label} — ${f.message}`;
+      break;
+    case 'registry':
+      line = `${prefix} ${f.message}`;
+      break;
+    default: {
+      const _exhaustive: never = f.source;
+      throw new Error(`Unhandled DoctorSource: ${_exhaustive}`);
+    }
+  }
   if (f.severity === 'info') {
     console.log(line);
   } else {
