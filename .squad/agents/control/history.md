@@ -212,3 +212,4 @@ This workflow produced high-fidelity implementation in one pass. Compare to work
 Future CONTROL directives should follow this model: get into the spec before implementation kickoff.
 
 - 2026-05-28: Piece-25 type-fidelity audit (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 1 directive + 1 informational.
+- 2026-05-28: Piece-25 revision (commit 185617e) — EECOM applied directive N1 (`resolution.ts` alias typed as `typeof`); gates clean.

@@ -317,3 +317,4 @@ Test at `doctor.test.ts:545` constructs a system `warn` + registry `error` findi
 **Pattern learned — push-policy comparison needs dependency-mode control:** In this repo, clean `npm install` can create `packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9.4`, causing CLI tsc to resolve stale published declarations instead of the local workspace SDK. For commit-to-parent gate comparison, record both the raw clean-install failure class and the workspace-linked result; count blockers only when e67 introduces a new failure after controlling for the pre-existing dependency skew.
 
 - 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.
+- 2026-05-28: Piece-25 revision (commit 185617e) — EECOM folded all approved nits (N1+N2+N3); gates clean.

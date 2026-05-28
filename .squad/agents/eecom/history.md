@@ -41,6 +41,10 @@ Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routi
 
 ## Learnings
 
+### Piece 25 Rev — FIDO + CONTROL nits (2026-05-28)
+
+Commit `185617e51e215dfbf59415a688ff9e1b9fd9a9af` folded the approved nits: CONTROL N1 typed the internal `resolveSquad` alias as `typeof resolveSquadDir`; FIDO N2 added the `@ts-expect-error` renderFinding exhaustiveness regression; FIDO N3 refreshed stale `resolveSquad` comments to `resolveSquadDir`. Gates: build/lint/SDK tsc/CLI tsc passed after controlling the known nested SDK dependency skew; `test/cli/doctor.test.ts` passed; full `npx vitest run` remained red with pre-existing failures (15 failed files / 225 passed / 1 skipped), matching the piece-25 review baseline. Revision complete; EECOM locked out by Flight.
+
 ### Writer/reader path divergence: always route both through a single helper
 
 When a CLI writer and SDK reader compute the same "default" path independently, they will eventually drift (e.g., platform-specific APPDATA logic on one side vs `~/.squad` on the other). The fix pattern: extract a `defaultRegistryFilePath(homeDir?, env?)` helper in the SDK, export it, and have both call it. Never let writer and reader compute their own independent defaults.

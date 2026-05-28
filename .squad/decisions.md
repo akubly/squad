@@ -74,6 +74,27 @@ Not rejected. If these nits become blocking later, recommend EECOM because Fligh
 
 ---
 
+### 2026-05-28: EECOM Piece 25 Revision
+
+**Date:** 2026-05-28  
+**Owner:** EECOM (Core Dev)  
+**Branch:** `squad/piece-25-resolver-rename-and-cli-hardening`  
+**Commit:** `185617e51e215dfbf59415a688ff9e1b9fd9a9af`
+
+**Nits folded:**
+- N1 (CONTROL): `packages/squad-sdk/src/resolution.ts` now types the internal compatibility alias as `typeof resolveSquadDir`.
+- N2 (FIDO): `test/cli/doctor.test.ts` adds a `@ts-expect-error` regression proving an unhandled `DoctorSource` variant is rejected at compile time through `renderFinding`.
+- N3 (FIDO): stale non-deprecated comments/JSDoc now reference `resolveSquadDir` in the SDK resolver docs, path-utils reader note, and CLI wrapper header.
+
+**Gate results:**
+- `npm run build`: PASS (after dependency setup).
+- `npm run lint`: PASS.
+- All tsc checks: PASS.
+- `npx vitest run test/cli/doctor.test.ts`: PASS (47/47).
+- `npx vitest run`: FAIL, inherited baseline only (15 failed files / 225 passed / 1 skipped — no new failures).
+
+---
+
 ### 2026-05-28: CONTROL Directive — Piece 25 Type-Fidelity Findings
 
 # CONTROL Directive — Piece 25 Type-Fidelity Findings
