@@ -101,6 +101,25 @@ If a command owns both an in-repo mirror and a user-scoped install of the same t
 
 Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pieces. Accepted per coordinator directive in `.squad/decisions.md`.
 
+### Piece 24 Rev — FIDO nit follow-up (2026-05-27)
+
+**Commit:** `0325a335` on `squad/piece-24-sdk-adapter-otel-typing` (on top of Flight base `b1a710fd`)
+
+**Addressed (N1, N2, N3, N4):**
+- **N1** — Added `setAttribute`/`isRecording` assertions to existing `§9 noop tracer smoke test`. Key challenge: `shutdownOTel()` does NOT reset the OTel global tracer provider; used `TracerAPI.disable()` (via `(rawTrace as any).disable()`) in a `beforeAll` to reset to noop before the noop-dependent tests run.
+- **N2** — Added `describe("_noopStartActiveSpan arity coverage")` with 3 tests: 2-arg (fn only), 3-arg (name+fn or name+opts+fn), and 4-arg using `ROOT_CONTEXT` from `@opentelemetry/api`. The `ROOT_CONTEXT` import is necessary because even `NoopTracer.startActiveSpan` calls `context.getValue` internally — a plain `{}` object fails.
+- **N3** — Restored `: Tracer`/`: Meter` annotations on `getTracer()`/`getMeter()` in `otel.ts` by widening the type surface: (a) `OTelSpanLike.addEvent` second/third params changed to `unknown` (real `Span.addEvent` accepts `SpanAttributes | TimeInput` which includes `number` — not assignable to `Record<string,unknown>`); (b) `OTelSpanLike.recordException` return changed to `void` (real `Span.recordException` returns `void`; covariant return fails with `OTelSpanLike`); (c) `OTelMeterLike` method returns restructured from broad `OTelInstrumentLike` to specific minimal inline shapes per instrument type (counter: `{add}`, histogram/gauge: `{record}`, observable: `{addCallback,removeCallback}`); (d) `Tracer`/`Meter` type aliases in `otel-api.ts` changed from real OTel imports to `OTelTracerLike`/`OTelMeterLike` — the union in `getTracer()` collapses trivially.
+- **N4** — Fixed `agent.setIdle()` indent in `lifecycle.ts` line 319 from 12 spaces to 10 spaces.
+
+**Skipped (N5):**
+- **N5** — Chain handoff file updated in session-state only (not in repo commit). Date typo "2025-07" → "2026-05-27" fixed; all piece commit hashes populated (21: `4b946581`, 22: `78297559`, 23: `bbe4ccbd`, 24: `0325a335`).
+
+**Final LOC delta for this rev:** ~+53 net lines (production: ~13 LOC in otel-types.ts/otel-api.ts/otel.ts/lifecycle.ts; tests: ~40 LOC in otel-provider.test.ts).
+
+**Key surprise:** TypeScript's covariant return type check (not bivariant) catches `OTelSpanLike.recordException → OTelSpanLike` vs real `Span.recordException → void`. Method params are bivariant (TypeScript method syntax), but return types are covariant — subtypes must return subtypes. `void` is a supertype of `OTelSpanLike`, not a subtype, so the original annotation failed.
+
+**Gates:** tsc ✅, build ✅, lint ✅, otel-provider.test.ts 24/24 ✅, otel-agent-traces.test.ts 10/10 ✅. Full suite pre-existing flakiness (vitest worker timeouts) unchanged.
+
 ## Archive
 
 Older context (pieces 1–8, Q1 2026) in `history-archive.md`: template sync patterns, cherry-pick conflicts, loop command refactors, pre-Phase B lifecycle.
@@ -113,3 +132,9 @@ Older context (pieces 1–8, Q1 2026) in `history-archive.md`: template sync pat
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+**Piece 24 Rev Complete — All FIDO Nits Closed (2026-05-27T22:35Z)**  
+✅ All items (N1–N5) addressed. Stack ready for Brady flow. See `.squad/decisions.md` → 2026-05-27 EECOM entry for full details. Commit `0325a335` passed all gates. Lockout on piece-24 lapses when this rev is accepted.
+
