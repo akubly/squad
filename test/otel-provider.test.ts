@@ -12,7 +12,7 @@
  * - shutdownOTel() — graceful shutdown of providers
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import {
   initializeOTel,
   initializeTracing,
@@ -21,6 +21,17 @@ import {
   getMeter,
   shutdownOTel,
 } from '@bradygaster/squad-sdk/runtime/otel';
+import { trace as rawTrace } from '@bradygaster/squad-sdk/runtime/otel-api';
+import { ROOT_CONTEXT } from '@opentelemetry/api';
+
+// Resets the global OTel tracer provider to the built-in noop so that tests
+// measuring noop behavior are not contaminated by a provider registered by a
+// previous initializeOTel() call in this file.
+function disableGlobalTracer(): void {
+  if (typeof (rawTrace as Record<string, unknown>)['disable'] === 'function') {
+    (rawTrace as { disable(): void }).disable();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers: save/restore env
@@ -144,6 +155,7 @@ describe('OTel Provider — initializeMetrics()', () => {
 // =============================================================================
 
 describe('OTel Provider — getTracer()', () => {
+  beforeAll(disableGlobalTracer);
   it('returns a valid Tracer with startSpan method', () => {
     const t = getTracer();
     expect(t).toBeDefined();
@@ -160,6 +172,15 @@ describe('OTel Provider — getTracer()', () => {
     span.end();
   });
 
+  // §9 smoke test: setAttribute + isRecording must not throw; isRecording() must be false
+  it('no-op span: setAttribute/isRecording do not throw; isRecording() is false', () => {
+    const span = getTracer().startSpan('smoke');
+    expect(() => span.setAttribute('key', 'value')).not.toThrow();
+    expect(() => span.setAttribute('num', 42)).not.toThrow();
+    expect(span.isRecording()).toBe(false);
+    span.end();
+  });
+
   it('accepts a custom tracer name', () => {
     const t = getTracer('custom-component');
     expect(t).toBeDefined();
@@ -168,6 +189,28 @@ describe('OTel Provider — getTracer()', () => {
 
   it('default name is squad-sdk', () => {
     expect(() => getTracer()).not.toThrow();
+  });
+});
+
+// =============================================================================
+// _noopStartActiveSpan — arity coverage (N2)
+// =============================================================================
+
+describe('OTel Provider — noop startActiveSpan arity coverage', () => {
+  beforeAll(disableGlobalTracer);
+  it('(name, fn) — 2-arg form returns callback return value', () => {
+    const result = getTracer().startActiveSpan('op', (_span) => 42 as number);
+    expect(result).toBe(42);
+  });
+
+  it('(name, opts, fn) — 3-arg form returns callback return value', () => {
+    const result = getTracer().startActiveSpan('op', {}, (_span) => 'hello' as string);
+    expect(result).toBe('hello');
+  });
+
+  it('(name, opts, ctx, fn) — 4-arg form returns callback return value', () => {
+    const result = getTracer().startActiveSpan('op', {}, ROOT_CONTEXT, (_span) => true as boolean);
+    expect(result).toBe(true);
   });
 });
 

@@ -183,7 +183,7 @@ export async function shutdownOTel(): Promise<void> {
  * Return a Tracer instance. Falls back to the no-op tracer when
  * tracing has not been initialized.
  */
-export function getTracer(name = 'squad-sdk') {
+export function getTracer(name = 'squad-sdk'): Tracer {
   return trace.getTracer(name);
 }
 
@@ -191,6 +191,6 @@ export function getTracer(name = 'squad-sdk') {
  * Return a Meter instance. Falls back to the no-op meter when
  * metrics have not been initialized.
  */
-export function getMeter(name = 'squad-sdk') {
+export function getMeter(name = 'squad-sdk'): Meter {
   return metrics.getMeter(name);
 }

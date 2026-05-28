@@ -15,8 +15,8 @@ export interface OTelSpanLike {
   setStatus(status: { code: number; message?: string }): OTelSpanLike;
   setAttribute(key: string, value: unknown): OTelSpanLike;
   setAttributes(attrs: Record<string, unknown>): OTelSpanLike;
-  addEvent(name: string, attrs?: Record<string, unknown>): OTelSpanLike;
-  recordException(exception: unknown): OTelSpanLike;
+  addEvent(name: string, attributesOrStartTime?: unknown, startTime?: unknown): OTelSpanLike;
+  recordException(exception: unknown): void;
   isRecording(): boolean;
   updateName(name: string): OTelSpanLike;
   spanContext(): { traceId: string; spanId: string; traceFlags: number };
@@ -40,13 +40,13 @@ export interface OTelInstrumentLike {
 
 /** Minimal OTel Meter-compatible interface. */
 export interface OTelMeterLike {
-  createCounter(name: string, options?: unknown): OTelInstrumentLike;
-  createUpDownCounter(name: string, options?: unknown): OTelInstrumentLike;
-  createHistogram(name: string, options?: unknown): OTelInstrumentLike;
-  createObservableCounter(name: string, options?: unknown): OTelInstrumentLike;
-  createObservableUpDownCounter(name: string, options?: unknown): OTelInstrumentLike;
-  createObservableGauge(name: string, options?: unknown): OTelInstrumentLike;
-  createGauge(name: string, options?: unknown): OTelInstrumentLike;
+  createCounter(name: string, options?: unknown): { add(value: number, attrs?: unknown): void };
+  createUpDownCounter(name: string, options?: unknown): { add(value: number, attrs?: unknown): void };
+  createHistogram(name: string, options?: unknown): { record(value: number, attrs?: unknown): void };
+  createObservableCounter(name: string, options?: unknown): { addCallback(cb: unknown): void; removeCallback(cb: unknown): void };
+  createObservableUpDownCounter(name: string, options?: unknown): { addCallback(cb: unknown): void; removeCallback(cb: unknown): void };
+  createObservableGauge(name: string, options?: unknown): { addCallback(cb: unknown): void; removeCallback(cb: unknown): void };
+  createGauge(name: string, options?: unknown): { record(value: number, attrs?: unknown): void };
 }
 
 /** Minimal OTel DiagAPI-compatible interface (the `diag` singleton). */

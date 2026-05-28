@@ -316,7 +316,7 @@ export class AgentLifecycleManager {
         const idleTimeMs = now - agent.lastActivityAt.getTime();
         
         if (idleTimeMs > this.defaultIdleTimeout && agent.status === 'active') {
-            agent.setIdle();
+          agent.setIdle();
         }
       }
     }, 30_000); // Check every 30 seconds

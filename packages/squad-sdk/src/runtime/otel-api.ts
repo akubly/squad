@@ -117,6 +117,7 @@ export const DiagLogLevel: OTelDiagLogLevelMap = _api?.DiagLogLevel ?? {
 /** Whether @opentelemetry/api was successfully loaded. */
 export const otelApiAvailable: boolean = _api !== undefined;
 
-// Type re-exports — compile-time only, erased at runtime
-export type Tracer = import('@opentelemetry/api').Tracer;
-export type Meter = import('@opentelemetry/api').Meter;
+// Type aliases — resolves to the local structural interfaces; no compile-time
+// dependency on @opentelemetry/api, while remaining structurally compatible.
+export type Tracer = OTelTracerLike;
+export type Meter = OTelMeterLike;
