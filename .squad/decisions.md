@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-05-29: Cross-Repo Artifact Distribution Handoff
+
+**By:** Flight (implementation handoff)
+**Date:** 2026-05-29
+**Status:** COMPLETED
+
+Flight completed analysis and architectural proposal for cross-repo artifact distribution. Handoff document produced: `.squad/decisions/cross-repo-handoff.md`. 
+
+**Key recommendation:** Implement as shared-team-root + inbox-branch transport in squad-replay, reusing existing remote-mode resolver and sync primitives. Canonical writable Squad home in docs/specs repo; enterprise mono-repo gets ignored local projections only.
+
+**Next phase:** Implementation. Scribe to route to Flight or implementation crew per routing rules.
+
+---
+
 ## 2026-05-20: Multi-Squad Proposal Landing
 
 **By:** Aaron (with Flight, full team)
