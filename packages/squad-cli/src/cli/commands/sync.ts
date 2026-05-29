@@ -19,11 +19,52 @@ import fs from 'node:fs';
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';
 const STATE_BRANCH_PREFIX = 'squad-state';
 
+/**
+ * Injection seam for git operations — allows tests to stub without spawning git.
+ */
+export interface SyncGitOps {
+  listRemotes(cwd: string): string[];
+  getRefspecs(cwd: string, remoteName: string): string[];
+  addFetchRefspec(cwd: string, remoteName: string, refspec: string): void;
+}
+
+/** Production implementation using real git subprocesses. */
+export const DEFAULT_SYNC_GIT_OPS: SyncGitOps = {
+  listRemotes(cwd: string): string[] {
+    try {
+      return execFileSync('git', ['remote'], {
+        cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim().split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  },
+  getRefspecs(cwd: string, remoteName: string): string[] {
+    try {
+      const raw = execFileSync('git', ['config', '--get-all', `remote.${remoteName}.fetch`], {
+        cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      return raw ? raw.split('\n').filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  },
+  addFetchRefspec(cwd: string, remoteName: string, refspec: string): void {
+    execFileSync('git', ['config', '--add', `remote.${remoteName}.fetch`, refspec], {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  },
+};
+
 export interface SyncOptions {
-  direction: 'push' | 'pull' | 'both';
+  direction: 'push' | 'pull' | 'both' | 'hydrate-only' | 'publish-only';
   remote?: string;
   cwd?: string;
   quiet?: boolean;
+  developer?: string;
+  gitOps?: SyncGitOps;
+  /** Repo root override — skips git rev-parse when provided (used in tests). */
+  workRoot?: string;
 }
 
 /**
@@ -228,8 +269,67 @@ function syncPush(cwd: string, remote: string, backend: string | null, quiet: bo
 }
 
 /**
- * Main sync entrypoint.
+ * Read stateRemote from .squad/config.json, returns undefined if absent.
  */
+function readStateRemoteFromConfig(repoRoot: string): string | undefined {
+  try {
+    const configPath = path.join(repoRoot, '.squad', 'config.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+    return config.stateRemote || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read developerAlias from .squad/config.json, returns undefined if absent.
+ */
+function readDeveloperAliasFromConfig(repoRoot: string): string | undefined {
+  try {
+    const configPath = path.join(repoRoot, '.squad', 'config.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+    return config.developerAlias || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const REQUIRED_REFSPECS = (remote: string) => [
+  `+refs/heads/squad-state:refs/remotes/${remote}/squad-state`,
+  `+refs/heads/squad/inbox/*:refs/remotes/${remote}/squad/inbox/*`,
+];
+
+/**
+ * Ensure the given remote exists and has required fetch refspecs configured.
+ * Exits 1 with bind-guidance message if the remote is absent.
+ * Idempotently adds only missing refspecs.
+ */
+export async function ensureStateRemote(
+  repoRoot: string,
+  remoteName: string,
+  gitOps: SyncGitOps = DEFAULT_SYNC_GIT_OPS,
+): Promise<void> {
+  const remotes = gitOps.listRemotes(repoRoot);
+  if (!remotes.includes(remoteName)) {
+    console.error(
+      `squad sync: remote '${remoteName}' not found.\n` +
+      `  Run 'squad bind <team-repo-url>' to configure the docs remote and refspecs.\n` +
+      `  Or add the remote manually: git remote add ${remoteName} <url>`,
+    );
+    process.exit(1);
+  }
+
+  const existing = gitOps.getRefspecs(repoRoot, remoteName);
+  for (const refspec of REQUIRED_REFSPECS(remoteName)) {
+    if (!existing.includes(refspec)) {
+      gitOps.addFetchRefspec(repoRoot, remoteName, refspec);
+    }
+  }
+}
+
+
 export async function runSync(options: SyncOptions): Promise<void> {
   // Recursion guard — prevent re-entry when our push triggers pre-push
   if (process.env[SQUAD_SYNC_ENV]) {
@@ -239,10 +339,39 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
   try {
     const cwd = options.cwd || process.cwd();
-    const repoRoot = getRepoRoot(cwd);
-    const remote = options.remote || resolveRemote(repoRoot);
+    const repoRoot = options.workRoot ?? getRepoRoot(cwd);
+
+    // Remote resolution: CLI flag → config → default
+    const remote =
+      options.remote ??
+      readStateRemoteFromConfig(repoRoot) ??
+      'squad-docs';
+
+    const gitOps = options.gitOps ?? DEFAULT_SYNC_GIT_OPS;
     const backend = detectBackend(repoRoot);
     const quiet = options.quiet ?? false;
+
+    // --developer guard: push paths require a known alias BEFORE any git ops
+    const isPushDirection =
+      options.direction === 'push' ||
+      options.direction === 'both' ||
+      options.direction === 'publish-only';
+
+    if (isPushDirection) {
+      const alias =
+        options.developer !== undefined
+          ? options.developer
+          : readDeveloperAliasFromConfig(repoRoot);
+
+      if (!alias) {
+        console.error(
+          `squad sync: --developer <alias> is required for push operations.\n` +
+          `  Provide it via: squad sync --push --developer <alias>\n` +
+          `  Or set developerAlias in .squad/config.json`,
+        );
+        process.exit(1);
+      }
+    }
 
     // Skip sync for backends that don't need it
     if (backend === 'local' || backend === 'external' || backend === null) {
@@ -252,10 +381,21 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend || 'orphan'})`);
 
-    if (options.direction === 'pull' || options.direction === 'both') {
+    const isPull =
+      options.direction === 'pull' ||
+      options.direction === 'both' ||
+      options.direction === 'hydrate-only';
+    const isPush =
+      options.direction === 'push' ||
+      options.direction === 'both' ||
+      options.direction === 'publish-only';
+
+    await ensureStateRemote(repoRoot, remote, gitOps);
+
+    if (isPull) {
       syncPull(repoRoot, remote, backend, quiet);
     }
-    if (options.direction === 'push' || options.direction === 'both') {
+    if (isPush) {
       syncPush(repoRoot, remote, backend, quiet);
     }
   } finally {

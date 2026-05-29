@@ -52,7 +52,10 @@ ${SQUAD_HOOK_MARKER}
 # Installed by: squad init / squad upgrade --state-backend
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
   export SQUAD_SYNC_ACTIVE=1
-  REMOTE=$(git config "branch.$(git symbolic-ref --short HEAD 2>/dev/null).remote" 2>/dev/null || echo origin)
+  REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+  STATE_REMOTE=$(grep -o '"stateRemote"[[:space:]]*:[[:space:]]*"[^"]*"' "$REPO_ROOT/.squad/config.json" 2>/dev/null | grep -o '"[^"]*"$' | tr -d '"')
+  [ -z "$STATE_REMOTE" ] && { unset SQUAD_SYNC_ACTIVE; exit 0; }
+  REMOTE="$STATE_REMOTE"
   # Fetch squad-state branches
   git fetch "$REMOTE" '+refs/heads/squad-state:refs/remotes/'"$REMOTE"'/squad-state' '+refs/heads/squad-state/*:refs/remotes/'"$REMOTE"'/squad-state/*' 2>/dev/null || true
   # Fast-forward local squad-state from remote
@@ -74,7 +77,10 @@ ${SQUAD_HOOK_MARKER}
 # Installed by: squad init / squad upgrade --state-backend
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
   export SQUAD_SYNC_ACTIVE=1
-  REMOTE=$(git config "branch.$(git symbolic-ref --short HEAD 2>/dev/null).remote" 2>/dev/null || echo origin)
+  REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+  STATE_REMOTE=$(grep -o '"stateRemote"[[:space:]]*:[[:space:]]*"[^"]*"' "$REPO_ROOT/.squad/config.json" 2>/dev/null | grep -o '"[^"]*"$' | tr -d '"')
+  [ -z "$STATE_REMOTE" ] && { unset SQUAD_SYNC_ACTIVE; exit 0; }
+  REMOTE="$STATE_REMOTE"
   git fetch "$REMOTE" '+refs/heads/squad-state:refs/remotes/'"$REMOTE"'/squad-state' '+refs/heads/squad-state/*:refs/remotes/'"$REMOTE"'/squad-state/*' 2>/dev/null || true
   for remote_ref in $(git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE/squad-state" "refs/remotes/$REMOTE/squad-state/*" 2>/dev/null); do
     local_name=\${remote_ref#"$REMOTE/"}
@@ -94,7 +100,10 @@ ${SQUAD_HOOK_MARKER}
 # Only run on branch checkout (3rd arg = 1), not file checkout.
 if [ "\$3" = "1" ] && [ -z "$SQUAD_SYNC_ACTIVE" ]; then
   export SQUAD_SYNC_ACTIVE=1
-  REMOTE=$(git config "branch.$(git symbolic-ref --short HEAD 2>/dev/null).remote" 2>/dev/null || echo origin)
+  REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+  STATE_REMOTE=$(grep -o '"stateRemote"[[:space:]]*:[[:space:]]*"[^"]*"' "$REPO_ROOT/.squad/config.json" 2>/dev/null | grep -o '"[^"]*"$' | tr -d '"')
+  [ -z "$STATE_REMOTE" ] && { unset SQUAD_SYNC_ACTIVE; exit 0; }
+  REMOTE="$STATE_REMOTE"
   git fetch "$REMOTE" '+refs/heads/squad-state:refs/remotes/'"$REMOTE"'/squad-state' '+refs/heads/squad-state/*:refs/remotes/'"$REMOTE"'/squad-state/*' 2>/dev/null || true
   for remote_ref in $(git for-each-ref --format='%(refname:short)' "refs/remotes/$REMOTE/squad-state" "refs/remotes/$REMOTE/squad-state/*" 2>/dev/null); do
     local_name=\${remote_ref#"$REMOTE/"}
@@ -111,6 +120,8 @@ fi
 
 export interface InstallHooksOptions {
   force?: boolean;
+  /** Injected hooks directory — skips git subprocess (used in tests). */
+  hooksDir?: string;
 }
 
 /**
@@ -176,16 +187,6 @@ function installHook(hooksDir: string, hookName: string, content: string, force:
 export function installGitHooks(cwd: string, options: InstallHooksOptions = {}): void {
   const { force = false } = options;
 
-  // Verify we're in a git repo
-  try {
-    execFileSync('git', ['rev-parse', '--git-dir'], {
-      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch {
-    console.log(`${YELLOW}⚠${RESET} Not a git repository. Cannot install hooks.`);
-    return;
-  }
-
   // Check if backend needs hooks (only orphan/two-layer)
   let backend: string | null = null;
   try {
@@ -201,7 +202,22 @@ export function installGitHooks(cwd: string, options: InstallHooksOptions = {}):
     return;
   }
 
-  const hooksDir = getHooksDir(cwd);
+  // Resolve hooks directory: injected (tests) or from git
+  let hooksDir: string;
+  if (options.hooksDir) {
+    hooksDir = options.hooksDir;
+  } else {
+    // Verify we're in a git repo
+    try {
+      execFileSync('git', ['rev-parse', '--git-dir'], {
+        cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      console.log(`${YELLOW}⚠${RESET} Not a git repository. Cannot install hooks.`);
+      return;
+    }
+    hooksDir = getHooksDir(cwd);
+  }
   console.log(`\n${BOLD}Installing squad sync hooks${RESET}`);
   console.log(`${DIM}  hooks dir: ${hooksDir}${RESET}\n`);
 

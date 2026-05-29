@@ -239,6 +239,7 @@ async function main(): Promise<void> {
     console.log(`  ${b}subsquads${r}  Manage SubSquads`);
     console.log(`  ${b}link${r}       Link to a remote team root`);
       console.log(`  ${b}bind${r}       Bind cross-repo docs sidecar to this repo`);
+      console.log(`  ${b}sync${r}       Sync squad-state branches with remote`);
     console.log(`  ${b}build${r}      Compile squad.config.ts to markdown`);
     console.log(`  ${b}aspire${r}     Launch .NET Aspire dashboard`);
     console.log(`  ${b}schedule${r}   Manage scheduled tasks`);
@@ -1123,6 +1124,24 @@ async function main(): Promise<void> {
       fatal('Usage: squad link <team-repo-path>');
     }
     runLink(getSquadStartDir(), teamPath);
+    return;
+  }
+
+  if (cmd === 'sync') {
+    const remoteIdx = args.indexOf('--remote');
+    const developerIdx = args.indexOf('--developer');
+    let direction: 'push' | 'pull' | 'both' | 'hydrate-only' | 'publish-only' = 'both';
+    if (args.includes('--pull')) direction = 'pull';
+    if (args.includes('--push')) direction = 'push';
+    if (args.includes('--both')) direction = 'both';
+    if (args.includes('--hydrate-only')) direction = 'hydrate-only';
+    if (args.includes('--publish-only')) direction = 'publish-only';
+    const { runSync } = await import('./cli/commands/sync.js');
+    await runSync({
+      direction,
+      ...(remoteIdx !== -1 && args[remoteIdx + 1] ? { remote: args[remoteIdx + 1] } : {}),
+      ...(developerIdx !== -1 ? { developer: args[developerIdx + 1] ?? '' } : {}),
+    });
     return;
   }
 
