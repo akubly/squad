@@ -112,6 +112,46 @@ Write after cross-repo `publishTeamRootToInbox` resolve and after single-repo `s
 
 Use bundled Git shell via `which.sync('git')` path resolution, not PATH lookup.
 
+### Scope-rename audit heuristic (2026-05-28) — @bradygaster → @wifi-aware scrub
+
+When auditing for package scope drift after a rename, classify every hit into one of four buckets before touching anything:
+
+1. **Real bug** — import/require paths, dedupe keys in vitest/webpack config, CLI error messages referencing the old package name, JSDoc `@deprecated` notices naming the old package. Fix all of these.
+2. **Intentional alias** — deprecated re-export symbols kept for backward compat. The symbol stays; only update the JSDoc text that names the package.
+3. **Docs-historical** — changelogs, orchestration logs, prior session histories, old proposals. Leave untouched; they are an accurate record.
+4. **Template / GitHub handle** — `@username` in reviewer strings is a GitHub handle not a package scope. Leave untouched.
+
+Special cases:
+- **Root umbrella workspace name** (`"name": "@bradygaster/squad"` in root `package.json`) — intentionally kept if the root package is private/unpublished. Verify against the rescope commit message.
+- **Bundle test assertions for root name** — tests that assert `name: '@bradygaster/squad'` on the root workspace package are correct; bulk-replace tools must target the sub-package suffixes (`/squad-sdk`, `/squad-cli`), not the bare root name.
+
+PowerShell bulk replace: always use a specific suffix pattern (e.g. `@bradygaster/squad-sdk`) not the bare `@bradygaster` prefix, to avoid clobbering root package name or GitHub handle occurrences. After bulk replace, grep for the old pattern again to confirm zero hits in source.
+
+### version.ts `applyVersionStamp` regex bug pattern (2026-05-28)
+
+Narrow version regexes like `[0-9.]+(?:-[a-z]+(?:\.\d+)?)?` only handle single-segment prerelease tags (e.g. `-preview.10`). Multi-segment tags like `-mc.preview.11` are only partially matched; the leftover tail (`.preview.11`) stays in the string. Each `stampVersion` call then appends the suffix again, producing runaway duplicates.
+
+**Fix pattern:** Use `\S+` (any non-whitespace) in place of the narrow version character class. Same fix applies to both `applyVersionStamp` and `readInstalledVersion` HTML-comment regexes in the same file.
+
+**Detection signal:** If `.github/agents/squad.agent.md` grows a repeated `.preview.11.preview.11...` string after running `npm run build`, this is the root cause.
+
+### npm rescope auth failure workaround — junction symlinks (2026-05-28)
+
+After a scope rename, `npm install` will fail E401 if the new scope is hosted on an authenticated registry (e.g. Azure DevOps package feed) and credentials are not configured locally. To unblock builds and test runs:
+
+```powershell
+New-Item -ItemType Junction -Path "node_modules/@wifi-aware/squad-sdk" -Target "packages/squad-sdk"
+New-Item -ItemType Junction -Path "node_modules/@wifi-aware/squad-cli" -Target "packages/squad-cli"
+```
+
+This mirrors what `npm install --workspaces` would create. The old scope junctions (if present) can remain; both resolve to the same workspace packages.
+
+**Important:** Do NOT commit these junction entries. They are local build-environment workarounds only.
+
+### Stale old-scope junctions survive rescope until `npm install` runs (2026-05-28)
+
+When workspace package names are renamed, `node_modules/@old-scope/*` junction symlinks from the previous `npm install` remain on disk. Tests importing the old package name continue to pass via these stale junctions, masking the import-path bugs. The correct fix is to update all import paths to the new scope — not to rely on stale junctions.
+
 ## Archive
 
 Older context (pieces 9–31) documented in `history-archive.md`.
