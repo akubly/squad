@@ -276,6 +276,7 @@ describe('CLI packaging smoke test', { timeout: 120_000 }, () => {
     'extract',
     'aspire',
     'link',
+    'bind',
     'rc',
     'copilot-bridge',
     'init-remote',

@@ -26,12 +26,12 @@ export async function runCast(cwd: string): Promise<void> {
   
   // Discover project agents.
   // LocalAgentSource appends .squad/agents to its base path, so we must supply:
-  //   - local mode: parent of paths.projectDir (the repo root)
-  //   - remote mode: paths.teamDir (the team repo root, which itself contains .squad/agents)
+  //   - local mode: workRoot (the repo root)
+  //   - remote mode: teamRoot (the team repo root, which itself contains .squad/agents)
   const agentBase =
     paths.mode === 'remote'
-      ? paths.teamDir
-      : path.resolve(paths.projectDir, '..');
+      ? paths.teamRoot
+      : paths.workRoot;
   const projectSource = new LocalAgentSource(agentBase);
   const projectAgents = await projectSource.listAgents();
   

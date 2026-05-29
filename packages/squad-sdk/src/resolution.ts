@@ -43,20 +43,65 @@ export interface SquadDirConfig {
   stateLocation?: string;
   /** State storage backend: local | external | git-notes | orphan */
   stateBackend?: string;
+  /**
+   * Remote name used for the docs/specs sidecar.
+   * @default 'squad-docs'
+   */
+  stateRemote?: string;
+  /**
+   * Branch name used to track persistent squad state on the docs remote.
+   * @default 'squad-state'
+   */
+  stateBranch?: string;
+  /**
+   * Prefix for per-developer inbox branches on the docs remote.
+   * @default 'squad/inbox'
+   */
+  inboxBranchPrefix?: string;
+  /**
+   * Short alias identifying the developer in cross-repo workflows.
+   * When absent, workflows that require a developer identity will prompt.
+   */
+  developerAlias?: string;
+  /**
+   * Absolute path to the docs/specs sidecar clone when it differs from `teamRoot`.
+   * Required when the sidecar lives on a different drive from WORK_ROOT.
+   */
+  teamCachePath?: string;
+  /**
+   * When true, the cross-repo sync command also hydrates the ignored WORK_ROOT
+   * projection directory in addition to TEAM_ROOT.
+   */
+  hydrateWorkRoot?: boolean;
 }
 
 /**
  * Resolved paths for dual-root squad mode.
  *
- * In **local** mode, projectDir and teamDir point to the same `.squad/` directory.
+ * In **local** mode, workRoot and teamRoot point to the same repository root.
  * In **remote** mode, config.json specifies a `teamRoot` that resolves to a
  * separate directory for team identity (agents, casting, skills).
+ *
+ * `projectDir` and `teamDir` are deprecated aliases retained for one release.
+ * Access them via the getter-based compat layer below.
  */
 export interface ResolvedSquadPaths {
   mode: 'local' | 'remote';
-  /** Project-local .squad/ (decisions, logs) */
+  /** Absolute path to the product repo root (WORK_ROOT). */
+  workRoot: string;
+  /** `{workRoot}/.squad` — projection only; not a canonical state root in remote mode. */
+  workSquadDir: string;
+  /** Absolute path to the docs/specs sidecar clone (TEAM_ROOT). Equals workRoot in local mode. */
+  teamRoot: string;
+  /** `{teamRoot}/.squad` — canonical writable state root. */
+  teamSquadDir: string;
+  /**
+   * @deprecated Use {@link workSquadDir} instead. Removed in next minor after this arc ships.
+   */
   projectDir: string;
-  /** Team identity root (agents, casting, skills) */
+  /**
+   * @deprecated Use {@link teamRoot} instead. Removed in next minor after this arc ships.
+   */
   teamDir: string;
   /** User's personal squad dir, null if not found or disabled */
   personalDir: string | null;
@@ -165,6 +210,49 @@ export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 /** Known squad directory names, in priority order. */
 const SQUAD_DIR_NAMES = ['.squad', '.ai-team'] as const;
 
+// Deprecation guard flags — fire console.warn at most once per process per alias.
+// Exported so test suites can reset between cases.
+export const _deprecationFired = { projectDir: false, teamDir: false };
+
+/**
+ * Build the deprecated-alias compat layer on a resolved shape.
+ * Each alias fires `console.warn` once per process on first access.
+ */
+function attachDeprecatedAliases(
+  shape: Omit<ResolvedSquadPaths, 'projectDir' | 'teamDir'>,
+): ResolvedSquadPaths {
+  return Object.defineProperties(shape as ResolvedSquadPaths, {
+    projectDir: {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (!_deprecationFired.projectDir) {
+          _deprecationFired.projectDir = true;
+          console.warn(
+            '[squad] ResolvedSquadPaths.projectDir is deprecated — use workSquadDir instead. ' +
+            'projectDir will be removed in the next minor release after the cross-repo arc ships.',
+          );
+        }
+        return this.workSquadDir as string;
+      },
+    },
+    teamDir: {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (!_deprecationFired.teamDir) {
+          _deprecationFired.teamDir = true;
+          console.warn(
+            '[squad] ResolvedSquadPaths.teamDir is deprecated — use teamRoot instead. ' +
+            'teamDir will be removed in the next minor release after the cross-repo arc ships.',
+          );
+        }
+        return this.teamRoot as string;
+      },
+    },
+  });
+}
+
 /**
  * Find the squad directory by walking up from `startDir`, checking both
  * `.squad/` and `.ai-team/` (legacy fallback).
@@ -239,6 +327,12 @@ export function loadDirConfig(squadDir: string): SquadDirConfig | null {
         extractionDisabled: parsed.extractionDisabled === true ? true : undefined,
         stateLocation: typeof parsed.stateLocation === 'string' ? parsed.stateLocation : undefined,
         stateBackend: typeof parsed.stateBackend === 'string' ? parsed.stateBackend : undefined,
+        stateRemote: typeof parsed.stateRemote === 'string' ? parsed.stateRemote : undefined,
+        stateBranch: typeof parsed.stateBranch === 'string' ? parsed.stateBranch : undefined,
+        inboxBranchPrefix: typeof parsed.inboxBranchPrefix === 'string' ? parsed.inboxBranchPrefix : undefined,
+        developerAlias: typeof parsed.developerAlias === 'string' ? parsed.developerAlias : undefined,
+        teamCachePath: typeof parsed.teamCachePath === 'string' ? parsed.teamCachePath : undefined,
+        hydrateWorkRoot: parsed.hydrateWorkRoot === true ? true : undefined,
       };
     }
     return null;
@@ -255,12 +349,16 @@ export function isConsultMode(config: SquadDirConfig | null): boolean {
 }
 
 /**
- * Resolve dual-root squad paths (projectDir / teamDir).
+ * Resolve dual-root squad paths.
  *
  * - Walks up from `startDir` looking for `.squad/` (or `.ai-team/` for legacy repos).
  * - If `.squad/config.json` exists with a valid `teamRoot` → **remote** mode:
- *   teamDir is resolved relative to the **project root** (parent of .squad/).
- * - Otherwise → **local** mode: projectDir === teamDir.
+ *   teamRoot is resolved relative to the **work root** (parent of .squad/).
+ * - Otherwise → **local** mode: workRoot === teamRoot.
+ *
+ * The returned shape provides `workRoot`, `workSquadDir`, `teamRoot`, and `teamSquadDir`
+ * as the stable resolved-path contract. `projectDir` and `teamDir` are retained as
+ * deprecated aliases for one release.
  *
  * @param startDir - Directory to start searching from. Defaults to `process.cwd()`.
  * @returns Resolved paths, or `null` if no squad directory is found.
@@ -271,35 +369,40 @@ export function resolveSquadPaths(startDir?: string): ResolvedSquadPaths | null 
     return null;
   }
 
-  const { dir: projectDir, name } = resolved;
+  const { dir: workSquadDir, name } = resolved;
   const isLegacy = name === '.ai-team';
-  const config = loadDirConfig(projectDir);
+  const config = loadDirConfig(workSquadDir);
+  const workRoot = path.resolve(workSquadDir, '..');
 
   if (config && config.teamRoot) {
-    // Remote mode: teamDir resolved relative to the project root (parent of .squad/)
-    const projectRoot = path.resolve(projectDir, '..');
-    const teamDir = path.resolve(projectRoot, config.teamRoot);
-    return {
+    // Remote mode: teamRoot resolved relative to the work root (parent of .squad/)
+    const teamRoot = path.resolve(workRoot, config.teamRoot);
+    const teamSquadDir = path.join(teamRoot, name);
+    return attachDeprecatedAliases({
       mode: 'remote',
-      projectDir,
-      teamDir,
+      workRoot,
+      workSquadDir,
+      teamRoot,
+      teamSquadDir,
       personalDir: resolvePersonalSquadDir(),
       config,
       name,
       isLegacy,
-    };
+    });
   }
 
-  // Local mode: projectDir === teamDir
-  return {
+  // Local mode: workRoot === teamRoot
+  return attachDeprecatedAliases({
     mode: 'local',
-    projectDir,
-    teamDir: projectDir,
+    workRoot,
+    workSquadDir,
+    teamRoot: workRoot,
+    teamSquadDir: workSquadDir,
     personalDir: resolvePersonalSquadDir(),
     config,
     name,
     isLegacy,
-  };
+  });
 }
 
 /**

@@ -238,6 +238,7 @@ async function main(): Promise<void> {
     console.log(`  ${b}extract${r}    Extract learnings from consult mode session`);
     console.log(`  ${b}subsquads${r}  Manage SubSquads`);
     console.log(`  ${b}link${r}       Link to a remote team root`);
+      console.log(`  ${b}bind${r}       Bind cross-repo docs sidecar to this repo`);
     console.log(`  ${b}build${r}      Compile squad.config.ts to markdown`);
     console.log(`  ${b}aspire${r}     Launch .NET Aspire dashboard`);
     console.log(`  ${b}schedule${r}   Manage scheduled tasks`);
@@ -1122,6 +1123,35 @@ async function main(): Promise<void> {
       fatal('Usage: squad link <team-repo-path>');
     }
     runLink(getSquadStartDir(), teamPath);
+    return;
+  }
+
+  if (cmd === 'bind') {
+    const teamRepoUrl = args[1];
+    if (!teamRepoUrl) {
+      console.log(`Usage: squad bind <team-repo-url> [--team-cache-path <path>] [--state-remote <name>]`);
+      console.log(`       [--state-branch <branch>] [--inbox-branch-prefix <prefix>]`);
+      console.log(`       [--developer-alias <alias>] [--hydrate-work-root]`);
+      console.log();
+      console.log(`Bind this repo to a cross-repo docs sidecar and configure all remote/hook wiring.`);
+      process.exit(1);
+    }
+    const teamCachePathIdx = args.indexOf('--team-cache-path');
+    const stateRemoteIdx = args.indexOf('--state-remote');
+    const stateBranchIdx = args.indexOf('--state-branch');
+    const inboxPrefixIdx = args.indexOf('--inbox-branch-prefix');
+    const devAliasIdx = args.indexOf('--developer-alias');
+    const { runBind } = await import('./cli/commands/bind.js');
+    await runBind({
+      workRoot: getSquadStartDir(),
+      teamRepoUrl,
+      ...(teamCachePathIdx !== -1 && args[teamCachePathIdx + 1] ? { teamCachePath: args[teamCachePathIdx + 1] } : {}),
+      ...(stateRemoteIdx !== -1 && args[stateRemoteIdx + 1] ? { stateRemote: args[stateRemoteIdx + 1] } : {}),
+      ...(stateBranchIdx !== -1 && args[stateBranchIdx + 1] ? { stateBranch: args[stateBranchIdx + 1] } : {}),
+      ...(inboxPrefixIdx !== -1 && args[inboxPrefixIdx + 1] ? { inboxBranchPrefix: args[inboxPrefixIdx + 1] } : {}),
+      ...(devAliasIdx !== -1 && args[devAliasIdx + 1] ? { developerAlias: args[devAliasIdx + 1] } : {}),
+      ...(args.includes('--hydrate-work-root') ? { hydrateWorkRoot: true } : {}),
+    });
     return;
   }
 

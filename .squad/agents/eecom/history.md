@@ -41,6 +41,25 @@ Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routi
 
 ## Learnings
 
+### Piece 26 — Cross-repo bind config (2026-05-29)
+
+**Resolved-shape contract (for pieces 27+):**
+- `workRoot` — product repo root, parent of `.squad/`
+- `workSquadDir` — `{workRoot}/.squad` (the .squad/ dir in the product repo)
+- `teamRoot` — team/sidecar repo root; equals `workRoot` in local (non-remote) mode
+- `teamSquadDir` — `{teamRoot}/.squad` (the .squad/ dir in the team repo)
+- In local mode: `workRoot === teamRoot`, `workSquadDir === teamSquadDir`
+- In remote mode: `teamRoot` is resolved from `config.teamRoot` relative to `workRoot`
+- Deprecated aliases: `projectDir` → `workSquadDir`, `teamDir` → `teamRoot` (NOT teamSquadDir)
+
+**BindGitOps seam pattern:**
+`bind.ts` accepts `gitOps?: BindGitOps` with four methods: `cloneOrFetch`, `addRemote`, `addRefspec`, `syncPull`. Default implementations use `execFileSync('git', ...)`. Tests inject stub implementations that record calls and return controlled output. This is the injectable-git-ops pattern for isolating commands that shell out to git. Reuse for any future command that wraps git operations.
+
+**Deprecation warning mechanism (for pieces 27+):**
+Module-level `_deprecationFired = { projectDir: false, teamDir: false }` (exported) ensures `console.warn` fires at most once per process per alias. `attachDeprecatedAliases()` uses `Object.defineProperties` with getter functions. Tests must reset `_deprecationFired.projectDir = false; _deprecationFired.teamDir = false` in `beforeEach`/`afterEach` for console.warn spies to work reliably. The export name `_deprecationFired` is the stable contract — use it for test resets in pieces 27+.
+
+**New SquadDirConfig fields added:** `stateRemote`, `stateBranch`, `inboxBranchPrefix`, `developerAlias`, `teamCachePath`, `hydrateWorkRoot` — all optional, all parsed in `loadDirConfig()`.
+
 ### Piece 25 Rev — FIDO + CONTROL nits (2026-05-28)
 
 Commit `185617e51e215dfbf59415a688ff9e1b9fd9a9af` folded the approved nits: CONTROL N1 typed the internal `resolveSquad` alias as `typeof resolveSquadDir`; FIDO N2 added the `@ts-expect-error` renderFinding exhaustiveness regression; FIDO N3 refreshed stale `resolveSquad` comments to `resolveSquadDir`. Gates: build/lint/SDK tsc/CLI tsc passed after controlling the known nested SDK dependency skew; `test/cli/doctor.test.ts` passed; full `npx vitest run` remained red with pre-existing failures (15 failed files / 225 passed / 1 skipped), matching the piece-25 review baseline. Revision complete; EECOM locked out by Flight.
