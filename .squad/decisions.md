@@ -249,3 +249,70 @@ The cross-repo handoff defines five implementation pieces mapped to local piece 
 **Scope:** Binding for all future scrub-gate work in this replay arc and any successor arcs.
 
 ---
+
+### 2026-05-29: Procedures spec decision — Foundation pieces 26–28
+
+**Date:** 2026-05-29  
+**Author:** Procedures  
+**Scope:** Spec authoring for cross-repo arc pieces 26, 27, 28
+
+**Decision: Six structural choices made while authoring that were not pre-locked**
+
+The following items were resolved during spec authoring. None override any locked decision (Q1–Q5). All are additive refinements.
+
+#### 1. `runBind()` idempotency contract is at entry-level, not step-level
+
+The piece 26 spec requires that `runBind()` be fully idempotent end-to-end (re-running on an already-configured WORK_ROOT is a no-op). The handoff specified individual step idempotency but did not state that the function as a whole must also be re-runnable without error. The spec locks this as a test assertion.
+
+#### 2. Windows cross-drive path normalization rule for `.git/info/exclude`
+
+The handoff identified `.git/info/exclude` as a new write surface but did not specify how to handle absolute Windows paths when WORK_ROOT and TEAM_ROOT are on different drives. The spec locks: entries must be written as forward-slash relative patterns, never as absolute paths, regardless of host OS. This is consistent with git's own exclude format contract.
+
+#### 3. `ensureStateRemote()` placement in piece 27
+
+The handoff described `ensureStateRemote()` as a helper inside `sync.ts` but did not specify whether it should be called at dispatch time or at the pull/push call site. The spec locks: called at the start of every `--pull` and every `--push` execution path. This ensures the guard fires for hook-triggered syncs as well as direct CLI invocations.
+
+#### 4. `publishedAt` serialization format locked to ISO 8601 UTC with `Z` suffix
+
+The handoff specified ISO 8601 UTC but did not address local-time serialization risk. The spec adds: must use `Z` suffix, not a UTC offset, to eliminate fold-ordering ambiguity across time zones.
+
+#### 5. Piece 28 test assertion count expanded from 2 to 6
+
+The handoff listed two bare-repo fixture assertions. Decision Q2 added three more (object shape, no raw paths, pathHash stability). The spec adds one more (alias-empty guard prevents branch creation). Total: six numbered assertions as the acceptance gate.
+
+#### 6. `hydrateWorkRootProjection()` file deletion semantics
+
+The handoff did not specify what happens to files in the WORK_ROOT projection that no longer exist in TEAM_ROOT. The spec locks: remove stale files from the projection. This prevents ghost files from accumulating across hydration cycles and is necessary for the projection to remain a faithful read-only mirror.
+
+---
+
+### 2026-05-29: Spec Protocol Decisions — Procedures
+
+**Date:** 2026-05-29  
+**Author:** Procedures
+
+#### Gate 8: positive-assertion pattern for allowlist coverage
+
+When adding a gate rule that must permit a known class of expressions in a specific file surface, implement it as a positive assertion (every expression in the target surface must match an allowlist pattern) rather than a pure exclusion (do not match X). The positive-assertion approach:
+
+- Explicitly allows all known-good expressions (e.g., ADO variable names matching `[A-Za-z][A-Za-z0-9._]*`).
+- Fails on novel patterns that were never explicitly reviewed, including future injection attempts.
+- Does not require modifying existing gate rules — the new gate covers the new surface independently.
+
+This is the correct pattern when (a) the existing gate that would otherwise cover the surface (e.g., Gate 4's internal-reference check) cannot be modified, and (b) the new surface has a well-defined allowlist (e.g., ADO runtime variable names are well-specified).
+
+Generalizable rule: any gate rule that adds allowlist coverage for a new file surface should use positive assertion, not exclusion. Document this in the spec's proposed-change section alongside the rule body.
+
+#### Gate numbering convention for additive audit pieces
+
+When adding gate rules to a fixed-count scrub gate (where existing rules display `[1/6]` through `[6/6]`), new rules use `[7]`, `[8]`, `[9]` headers without a total count. Do not update the existing `[N/6]` labels — that would violate the preserve-existing constraint.
+
+This creates a header inconsistency that is intentional and acknowledged. A future cleanup piece can normalize all headers simultaneously. The additive piece's spec notes section should call this out explicitly so reviewers do not flag it as a defect.
+
+#### Spec section: Session restart requirement
+
+Protocol-change specs (any piece that alters an agent-observable behavior or modifies a template read at session start) require a dedicated `## Session restart requirement` section. This section must contain the exact verbatim restart banner string that will appear in the commit body and PR description — not a paraphrase. The spec is the contract; the commit body is derived from it.
+
+This pattern was invented for piece 29 (TEAM_ROOT/WORK_ROOT protocol change). It is reusable for any future piece that changes coordinator templates or agent charter files that are read at session initialization.
+
+---
