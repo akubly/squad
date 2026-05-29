@@ -6,8 +6,6 @@
 ---
 
 ### 2026-05-28: User directive — push policy
-
-### 2026-05-28: User directive — push policy
 **By:** akubly (via Copilot)
 **What:** Pushing to github.com/akubly/squad is acceptable if there are no leaked gate violations that weren't pre-existing. Reverses the strict "commit-only no-push" stance applied across pieces 21–25 for any future stack work. The condition: a push must not introduce NEW build/lint/test/tsc failures beyond what the parent branch already had — pre-existing failures inherited from upstream are not a blocker.
 **Why:** User request — clarifies that the no-push rule was situational, not absolute. Aligns with normal git workflow on a personal fork while preserving the gate-cleanliness contract.
@@ -133,6 +131,56 @@ The Directive 2 env seam (`env: NodeJS.ProcessEnv = process.env`) was implemente
 ---
 
 ## Overall: ✅ APPROVE-WITH-NITS
+
+
+---
+
+### 2026-05-28: EECOM Decision — Version drift from manual incomplete package.json edit
+
+**Date:** 2026-05-28  
+**Author:** EECOM (Core Dev)  
+**Branch:** `akubly/upstream-npm-release`  
+
+**Root Cause:** `scripts/bump-build.mjs` was NOT involved. Brady had `SKIP_BUILD_BUMP=1` set when `npm run build` ran — the script was skipped entirely. Commit `0f5ac1d2` manually edited only `packages/squad-cli/package.json` — bumping its version and `@wifi-aware/squad-sdk` dep pin from `.10` to `.11` — without touching `package.json` (root) or `packages/squad-sdk/package.json`. This left: root=`.10`, sdk=`.10`, cli=`.11`, cli sdk-pin=`.11`. The pin referenced an SDK version that does not exist on disk.
+
+**Decision:** Direct edits to any individual `package.json` version field are prohibited. When manual version alignment is necessary, ALL THREE files must be updated in a single atomic commit (root, squad-sdk, squad-cli), and `packages/squad-cli`'s `dependencies["@wifi-aware/squad-sdk"]` pin must equal the new version. **Canonical version resolution rule: Highest on disk wins.** Bring lower-versioned files up; never down.
+
+**Repair:** Brought root and `packages/squad-sdk` to `0.9.6-mc.preview.11` in commit `a3a3a9f0`. bump-build.mjs unchanged (was not the cause).
+
+
+---
+
+### 2026-05-29: Flight Decision — Cross-Repo Arc Staging
+
+**Author:** Flight  
+**Date:** 2026-05-29  
+**Status:** Merged from inbox
+
+**Decision: Linear chain 26 → 27 → 28 → 29 → 30; spec authoring is a hard pre-flight blocker**
+
+The cross-repo handoff defines five implementation pieces mapped to local piece numbers 26–30. Execution order: strict linear chain (26 → 27 → 28 → 29 → 30). Piece 26 subdivision option is available but not mandated. **Spec authoring is a hard pre-flight blocker for the entire arc** — no replay session can proceed until the relevant spec file is present on `akubly/upstream-specs`. The scrub gate must be verified before piece 26 replay. Session restart required after piece 29 merges (coordinator protocol update is breaking).
+
+**Hard invariants:** No Squad files in product PR diffs, single canonical writable state root, least-privilege automation, aliases (not emails) in published metadata.
+
+
+---
+
+### 2026-05-29: Procedures Decision — Cross-Repo Prompt Pack
+
+**Date:** 2026-05-29  
+**Author:** Procedures  
+**Scope:** Pieces 26–30 prompt artifacts
+
+**Decision:** Shipped five Phase-B session prompts for pieces 26–30. No implementation sub-division required — all five pieces are coherent, self-contained units. 
+
+**Guard-rails identified (team-relevant, not blocking):**
+1. Per-piece spec file existence check added to all prompts — recommend standardizing in baseline template.
+2. Acceptance gate naming — recommend adding optional `## Acceptance gate` section to baseline.
+3. YAML/JSON static asset validation — scrub gate does not validate YAML parse. Recommend adding YAML validation to gate 7.
+4. Coordinator restart guidance in commit body — piece 29 changes `squad.agent.md` and requires session restart. Recommend standardizing for any piece modifying coordinator templates.
+5. PII guard in publish metadata (piece 28: `.squad/publish-metadata.json` must never contain email — alias only).
+
+**Flight-plan alignment:** Cross-check branching order before execution. If Flight's plan specifies non-linear order, "Currently on branch" lines in affected prompts must be updated.
 
 
 ---
