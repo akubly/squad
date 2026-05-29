@@ -136,6 +136,87 @@ if ($null -eq $changedFiles) {
     }
 }
 
+# [upstream-bound]
+# --- Gate 7: No user-path segments in config/metadata strings ---
+Write-Host "[7] User-path segments in config/metadata..." -NoNewline
+$configFiles = git ls-files -- '.squad/config.json' '.squad/publish-metadata.json' 2>$null
+if (-not $configFiles) {
+    Write-Host " SKIP (no tracked config files)" -ForegroundColor Yellow
+} else {
+    $userPathHits = @()
+    foreach ($cf in $configFiles) {
+        $hits = git grep -E '(Users|home)[/\\]' -- $cf 2>$null
+        if ($hits) {
+            $userPathHits += $hits | ForEach-Object { "${cf}: $_" }
+        }
+    }
+    if ($userPathHits) {
+        foreach ($h in $userPathHits) {
+            $hitFile = ($h -split ':')[0]
+            $failures += "Gate 7 FAIL: raw user-path segment detected in ${hitFile}; use {repo, pathHash} structure (see piece 28 spec §9 NFR annotation)"
+        }
+        Write-Host " FAIL" -ForegroundColor Red
+    } else {
+        Write-Host " PASS" -ForegroundColor Green
+    }
+}
+
+# [upstream-bound]
+# --- Gate 8: ADO variable syntax allowed in .squad-templates/ado/** ---
+Write-Host "[8] ADO variable syntax in .squad-templates/ado/..." -NoNewline
+$adoTemplateFiles = git ls-files -- '.squad-templates/ado/' 2>$null
+if (-not $adoTemplateFiles) {
+    Write-Host " SKIP (no ADO template files tracked)" -ForegroundColor Yellow
+} else {
+    $gate8Failures = @()
+    foreach ($tf in $adoTemplateFiles) {
+        $content = git show "HEAD:$tf" 2>$null
+        if ($null -eq $content) { continue }
+        $dollarExpressions = [regex]::Matches(($content -join "`n"), '\$\(([^)]+)\)')
+        foreach ($m in $dollarExpressions) {
+            $inner = $m.Groups[1].Value
+            if ($inner -notmatch '^[A-Za-z][A-Za-z0-9._]*$') {
+                $gate8Failures += "Gate 8 FAIL: non-ADO `$() expression in ${tf}: $($m.Value) — use `$(VariableName) ADO runtime syntax only"
+            }
+        }
+    }
+    if ($gate8Failures) {
+        $failures += $gate8Failures
+        Write-Host " FAIL" -ForegroundColor Red
+    } else {
+        Write-Host " PASS" -ForegroundColor Green
+    }
+}
+
+# [upstream-bound]
+# --- Gate 9: developerAlias format validation ---
+Write-Host "[9] developerAlias format validation..." -NoNewline
+$metaFiles = git ls-files -- '.squad/config.json' '.squad/publish-metadata.json' 2>$null
+if (-not $metaFiles) {
+    Write-Host " SKIP (no tracked config files)" -ForegroundColor Yellow
+} else {
+    $gate9Failures = @()
+    $aliasPattern = '^[a-z][a-z0-9-]{0,38}$'
+    foreach ($mf in $metaFiles) {
+        $filePath = Join-Path (git rev-parse --show-toplevel) $mf
+        if (-not (Test-Path $filePath)) { continue }
+        $fileContent = Get-Content -Raw $filePath
+        $aliasMatches = [regex]::Matches($fileContent, '"developerAlias"\s*:\s*"([^"]*)"')
+        foreach ($am in $aliasMatches) {
+            $aliasValue = $am.Groups[1].Value
+            if ($aliasValue -notmatch $aliasPattern) {
+                $gate9Failures += "Gate 9 FAIL: developerAlias must match [a-z][a-z0-9-]{0,38} (lowercase letters, digits, hyphens; starts with letter; max 39 chars) in ${mf}: '${aliasValue}'"
+            }
+        }
+    }
+    if ($gate9Failures) {
+        $failures += $gate9Failures
+        Write-Host " FAIL" -ForegroundColor Red
+    } else {
+        Write-Host " PASS" -ForegroundColor Green
+    }
+}
+
 # --- Summary ---
 Write-Host ""
 Write-Host "=== Results ===" -ForegroundColor Cyan
