@@ -20,8 +20,8 @@ import {
   getTracer,
   getMeter,
   shutdownOTel,
-} from '@bradygaster/squad-sdk/runtime/otel';
-import { trace as rawTrace } from '@bradygaster/squad-sdk/runtime/otel-api';
+} from '@wifi-aware/squad-sdk/runtime/otel';
+import { trace as rawTrace } from '@wifi-aware/squad-sdk/runtime/otel-api';
 import { ROOT_CONTEXT } from '@opentelemetry/api';
 
 // Resets the global OTel tracer provider to the built-in noop so that tests

@@ -14,8 +14,8 @@ import {
   CastingEngine,
   CastingHistory,
   onboardAgent,
-} from '@bradygaster/squad-sdk';
-import type { CastMember, AgentRole } from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
+import type { CastMember, AgentRole } from '@wifi-aware/squad-sdk';
 
 const TEST_ROOT = join(tmpdir(), 'hello-squad-test-' + Date.now());
 const SQUAD_DIR = join(TEST_ROOT, '.squad');

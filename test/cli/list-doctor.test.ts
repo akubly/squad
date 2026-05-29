@@ -8,9 +8,9 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
-import { runList } from '@bradygaster/squad-cli/commands/list';
-import { runDoctor } from '@bradygaster/squad-cli/commands/doctor';
-import type { RunDoctorResult } from '@bradygaster/squad-cli/commands/doctor';
+import { runList } from '@wifi-aware/squad-cli/commands/list';
+import { runDoctor } from '@wifi-aware/squad-cli/commands/doctor';
+import type { RunDoctorResult } from '@wifi-aware/squad-cli/commands/doctor';
 
 const TEST_ROOT = join(process.cwd(), `.test-list-doctor-${randomBytes(4).toString('hex')}`);
 

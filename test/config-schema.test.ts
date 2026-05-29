@@ -12,7 +12,7 @@ import {
   GitHubAgentSource,
   MarketplaceAgentSource,
   AgentRegistry,
-} from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/config';
 
 describe('Configuration Schema', () => {
   describe('DEFAULT_CONFIG', () => {

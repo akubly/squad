@@ -154,7 +154,7 @@ export function resolveSquadDir(startDir?: string): string | null {
 
 /**
  * @deprecated Use {@link resolveSquadDir} instead.
- * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
+ * `resolveSquad` will be removed in a future major release of `@wifi-aware/squad-sdk`.
  */
 export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 

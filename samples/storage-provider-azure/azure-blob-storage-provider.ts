@@ -1,5 +1,5 @@
 import { ContainerClient } from '@azure/storage-blob';
-import type { StorageProvider, StorageStats } from '@bradygaster/squad-sdk';
+import type { StorageProvider, StorageStats } from '@wifi-aware/squad-sdk';
 
 /**
  * Azure Blob Storage implementation of StorageProvider.

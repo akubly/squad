@@ -9,8 +9,8 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
-import { runInit } from '@bradygaster/squad-cli/core/init';
-import { getPackageVersion } from '@bradygaster/squad-cli/core/version';
+import { runInit } from '@wifi-aware/squad-cli/core/init';
+import { getPackageVersion } from '@wifi-aware/squad-cli/core/version';
 
 const TEST_ROOT = join(tmpdir(), `.test-cli-init-${randomBytes(4).toString('hex')}`);
 

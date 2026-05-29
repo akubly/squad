@@ -9,8 +9,8 @@ import {
   type ResponseTier,
   type TierName,
   type TierContext,
-} from '@bradygaster/squad-sdk/coordinator';
-import { DEFAULT_CONFIG, defineConfig, type SquadConfig } from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/coordinator';
+import { DEFAULT_CONFIG, defineConfig, type SquadConfig } from '@wifi-aware/squad-sdk/config';
 
 // --- getTier ---
 

@@ -8,8 +8,8 @@ import {
   compileRoutingRules,
   matchRoute,
   matchIssueLabels
-} from '@bradygaster/squad-sdk/config';
-import type { RoutingConfig, IssueRoutingRule } from '@bradygaster/squad-sdk/runtime';
+} from '@wifi-aware/squad-sdk/config';
+import type { RoutingConfig, IssueRoutingRule } from '@wifi-aware/squad-sdk/runtime';
 
 describe('parseRoutingMarkdown', () => {
   it('parses basic routing table', () => {

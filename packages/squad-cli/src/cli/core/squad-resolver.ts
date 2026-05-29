@@ -2,7 +2,7 @@
  * Shared Squad directory resolver — wraps the SDK's resolveSquadDir for CLI use.
  */
 
-import { resolveSquadDir as sdkResolveSquadDir } from '@bradygaster/squad-sdk';
+import { resolveSquadDir as sdkResolveSquadDir } from '@wifi-aware/squad-sdk';
 
 /**
  * Locate the .squad/ directory by walking up from cwd.

@@ -13,8 +13,8 @@ import {
   defineTeam,
   defineAgent,
   defineRouting,
-} from '@bradygaster/squad-sdk/builders';
-import type { SquadSDKConfig } from '@bradygaster/squad-sdk/builders';
+} from '@wifi-aware/squad-sdk/builders';
+import type { SquadSDKConfig } from '@wifi-aware/squad-sdk/builders';
 
 // ── Agent Definitions ────────────────────────────────────────────────
 

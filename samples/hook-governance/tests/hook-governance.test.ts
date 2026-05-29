@@ -8,11 +8,11 @@ import { describe, it, expect } from 'vitest';
 import {
   HookPipeline,
   ReviewerLockoutHook,
-} from '@bradygaster/squad-sdk/hooks';
+} from '@wifi-aware/squad-sdk/hooks';
 import type {
   PreToolUseContext,
   PostToolUseContext,
-} from '@bradygaster/squad-sdk/hooks';
+} from '@wifi-aware/squad-sdk/hooks';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

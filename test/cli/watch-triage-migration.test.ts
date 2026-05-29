@@ -59,7 +59,7 @@ const {
   };
 });
 
-vi.mock('@bradygaster/squad-sdk/platform', () => ({
+vi.mock('@wifi-aware/squad-sdk/platform', () => ({
   createPlatformAdapter: mockCreatePlatformAdapter,
 }));
 
@@ -70,12 +70,12 @@ vi.mock('../../packages/squad-cli/src/cli/core/gh-cli.js', () => ({
   isRateLimitError: vi.fn(() => false),
 }));
 
-vi.mock('@bradygaster/squad-sdk/ralph/capabilities', () => ({
+vi.mock('@wifi-aware/squad-sdk/ralph/capabilities', () => ({
   loadCapabilities: mockLoadCapabilities,
   filterByCapabilities: mockFilterByCapabilities,
 }));
 
-vi.mock('@bradygaster/squad-sdk/ralph', () => ({
+vi.mock('@wifi-aware/squad-sdk/ralph', () => ({
   RalphMonitor: vi.fn(() => ({
     start: mockMonitorStart,
     stop: mockMonitorStop,
@@ -83,7 +83,7 @@ vi.mock('@bradygaster/squad-sdk/ralph', () => ({
   })),
 }));
 
-vi.mock('@bradygaster/squad-sdk/runtime/event-bus', () => ({
+vi.mock('@wifi-aware/squad-sdk/runtime/event-bus', () => ({
   EventBus: vi.fn(() => ({ emit: mockEventBusEmit })),
 }));
 
@@ -283,7 +283,7 @@ describe('watch and triage registry resolution', { timeout: 30_000 }, () => {
       runCommandThroughFirstRound(() => runTriage(fixture.consumerRepo, { interval: 1, execute: false, capabilities: {} })),
     );
 
-    const triageModule = await import('@bradygaster/squad-cli/commands/triage');
+    const triageModule = await import('@wifi-aware/squad-cli/commands/triage');
     expect(runTriage).toBe(runWatch);
     expect(typeof triageModule.runTriage).toBe('function');
     expect(mockCreatePlatformAdapter).toHaveBeenCalledWith(fixture.hostRepo);

@@ -13,7 +13,7 @@ import {
   parseFrontmatter,
   parseSkillFile,
   loadSkillsFromDirectory,
-} from '@bradygaster/squad-sdk/skills';
+} from '@wifi-aware/squad-sdk/skills';
 
 // --- Helpers ---
 

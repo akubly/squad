@@ -11,8 +11,8 @@ import { mkdirSync, rmSync, existsSync, symlinkSync, writeFileSync } from 'node:
 import { join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-import { clonesMatch, normalisedPathKey, pathsRefSameLocation } from '@bradygaster/squad-sdk/path-utils';
-import { SquadError } from '@bradygaster/squad-sdk/adapter/errors';
+import { clonesMatch, normalisedPathKey, pathsRefSameLocation } from '@wifi-aware/squad-sdk/path-utils';
+import { SquadError } from '@wifi-aware/squad-sdk/adapter/errors';
 
 const TMP = join(process.cwd(), `.test-path-utils-${randomBytes(4).toString('hex')}`);
 

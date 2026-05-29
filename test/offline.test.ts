@@ -8,7 +8,7 @@ import {
   detectConnectivity,
   OfflineManager,
   type PendingOperation,
-} from '@bradygaster/squad-sdk/runtime/offline';
+} from '@wifi-aware/squad-sdk/runtime/offline';
 
 // --- Helpers ---
 

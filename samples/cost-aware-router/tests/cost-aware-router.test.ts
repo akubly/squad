@@ -11,9 +11,9 @@ import {
   selectResponseTier,
   getTier,
   MODELS,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 
-import type { SquadConfig, TierName } from '@bradygaster/squad-sdk';
+import type { SquadConfig, TierName } from '@wifi-aware/squad-sdk';
 
 // ── Shared config (mirrors index.ts) ──
 

@@ -18,13 +18,13 @@ import {
   SkillRegistry,
   selectResponseTier,
   StreamingPipeline,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 import type {
   CastMember,
   AgentRole,
   ResponseTier,
   SquadConfig,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 
 // ============================================================================
 // Core types (contract — the extracted module must export these)

@@ -19,24 +19,24 @@ import {
   setVersionFetcher,
   setPackageJsonReader,
   setPackageJsonWriter,
-} from '@bradygaster/squad-cli/upgrade';
+} from '@wifi-aware/squad-cli/upgrade';
 import type {
   UpdateInfo,
   UpgradeOptions,
   SDKUpgradeOptions,
   ReleaseChannel,
-} from '@bradygaster/squad-cli/upgrade';
-import { MigrationRegistry } from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-cli/upgrade';
+import { MigrationRegistry } from '@wifi-aware/squad-sdk/config';
 import {
   detectCopilotEnvironment,
   getInstallInstructions,
   installFromCopilot,
-} from '@bradygaster/squad-cli/copilot-install';
+} from '@wifi-aware/squad-cli/copilot-install';
 import type {
   CopilotEnvironment,
   InstallConfig,
   EnvironmentIndicators,
-} from '@bradygaster/squad-cli/copilot-install';
+} from '@wifi-aware/squad-cli/copilot-install';
 
 // ============================================================================
 // Upgrade — version parsing & comparison

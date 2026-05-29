@@ -8,7 +8,7 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
-import { runInit, isUrlLikeArg } from '@bradygaster/squad-cli/commands/init';
+import { runInit, isUrlLikeArg } from '@wifi-aware/squad-cli/commands/init';
 
 const TEST_ROOT = join(process.cwd(), `.test-init-v2-${randomBytes(4).toString('hex')}`);
 

@@ -9,10 +9,10 @@ import { dirname, join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'fs';
 import * as os from 'os';
 import { randomBytes } from 'crypto';
-import { runInit } from '@bradygaster/squad-cli/core/init';
-import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli, type UpgradeOptions } from '@bradygaster/squad-cli/core/upgrade';
-import { getPackageVersion } from '@bradygaster/squad-cli/core/version';
-import { defaultRegistryFilePath } from '@bradygaster/squad-sdk';
+import { runInit } from '@wifi-aware/squad-cli/core/init';
+import { runUpgrade, ensureGitattributes, ensureGitignore, ensureDirectories, ensureCastingDefaults, selfUpgradeCli, type UpgradeOptions } from '@wifi-aware/squad-cli/core/upgrade';
+import { getPackageVersion } from '@wifi-aware/squad-cli/core/version';
+import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk';
 
 const TEST_ROOT = join(os.tmpdir(), `.test-cli-upgrade-${randomBytes(4).toString('hex')}`);
 type PayloadInstaller = NonNullable<UpgradeOptions['copilotPayloadInstaller']>;
@@ -124,8 +124,8 @@ describe('CLI: upgrade command', () => {
 
   it('warns and completes when the SDK registry path smoke-test throws', async () => {
     vi.resetModules();
-    vi.doMock('@bradygaster/squad-sdk', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@bradygaster/squad-sdk')>();
+    vi.doMock('@wifi-aware/squad-sdk', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@wifi-aware/squad-sdk')>();
       return {
         ...actual,
         defaultRegistryFilePath: vi.fn(() => {
@@ -136,7 +136,7 @@ describe('CLI: upgrade command', () => {
 
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const { runUpgrade: runUpgradeWithThrowingSdkSmoke } = await import('@bradygaster/squad-cli/core/upgrade');
+      const { runUpgrade: runUpgradeWithThrowingSdkSmoke } = await import('@wifi-aware/squad-cli/core/upgrade');
 
       await expect(runUpgradeWithThrowingSdkSmoke(TEST_ROOT)).resolves.toMatchObject({
         toVersion: getPackageVersion(),
@@ -147,7 +147,7 @@ describe('CLI: upgrade command', () => {
       expect(calls.some(c => c.includes('simulated SDK export failure'))).toBe(true);
     } finally {
       spy.mockRestore();
-      vi.doUnmock('@bradygaster/squad-sdk');
+      vi.doUnmock('@wifi-aware/squad-sdk');
       vi.resetModules();
     }
   });

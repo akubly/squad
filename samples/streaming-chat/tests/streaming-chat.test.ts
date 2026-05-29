@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CastingEngine, StreamingPipeline } from '@bradygaster/squad-sdk';
-import type { StreamDelta } from '@bradygaster/squad-sdk';
-import { EventBus } from '@bradygaster/squad-sdk/client';
+import { CastingEngine, StreamingPipeline } from '@wifi-aware/squad-sdk';
+import type { StreamDelta } from '@wifi-aware/squad-sdk';
+import { EventBus } from '@wifi-aware/squad-sdk/client';
 
 // ── Inline the lightweight helpers from index.ts for unit-testing ──
 

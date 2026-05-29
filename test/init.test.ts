@@ -8,10 +8,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { initSquad } from '@bradygaster/squad-sdk/config';
-import { onboardAgent, addAgentToConfig } from '@bradygaster/squad-sdk/agents';
-import type { InitOptions, InitAgentSpec } from '@bradygaster/squad-sdk/config';
-import type { OnboardOptions } from '@bradygaster/squad-sdk/agents';
+import { initSquad } from '@wifi-aware/squad-sdk/config';
+import { onboardAgent, addAgentToConfig } from '@wifi-aware/squad-sdk/agents';
+import type { InitOptions, InitAgentSpec } from '@wifi-aware/squad-sdk/config';
+import type { OnboardOptions } from '@wifi-aware/squad-sdk/agents';
 
 const TEST_ROOT = join(process.cwd(), 'test-fixtures', 'init-test');
 

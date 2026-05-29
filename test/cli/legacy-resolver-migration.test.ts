@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { spawn, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { resolveSquad, resolveSquadDir } from '@bradygaster/squad-sdk';
+import { resolveSquad, resolveSquadDir } from '@wifi-aware/squad-sdk';
 
 const CLI_ENTRY = resolve(process.cwd(), 'packages/squad-cli/dist/cli-entry.js');
 const TEST_ROOT = join(
@@ -497,7 +497,7 @@ describe('lifecycle CLI command resolver migration', { timeout: 60_000 }, () => 
       resize: vi.fn(),
     });
 
-    vi.doMock('@bradygaster/squad-sdk', () => {
+    vi.doMock('@wifi-aware/squad-sdk', () => {
       class FSStorageProvider {
         existsSync(_p: string): boolean { return false; }
         statSync(): undefined { return undefined; }
@@ -560,7 +560,7 @@ describe('lifecycle CLI command resolver migration', { timeout: 60_000 }, () => 
     });
     const mockCreateRL = vi.fn().mockReturnValue({ on: vi.fn() });
 
-    vi.doMock('@bradygaster/squad-sdk', () => {
+    vi.doMock('@wifi-aware/squad-sdk', () => {
       class FSStorageProvider {
         existsSync(_p: string): boolean { return false; }
         statSync(): undefined { return undefined; }
@@ -778,7 +778,7 @@ describe('cli-entry lifecycle', { timeout: 30_000 }, () => {
       return { onData: vi.fn(), onExit: vi.fn(), write: vi.fn(), kill: vi.fn(), resize: vi.fn() };
     });
 
-    vi.doMock('@bradygaster/squad-sdk', () => {
+    vi.doMock('@wifi-aware/squad-sdk', () => {
       class FSStorageProvider {
         existsSync(_p: string): boolean { return false; }
         statSync(): undefined { return undefined; }

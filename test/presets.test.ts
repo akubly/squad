@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { resolveSquadHome, ensureSquadHome, resolvePresetsDir } from '@bradygaster/squad-sdk/resolution';
-import { listPresets, loadPreset, applyPreset, savePreset, seedBuiltinPresets } from '@bradygaster/squad-sdk/presets';
+import { resolveSquadHome, ensureSquadHome, resolvePresetsDir } from '@wifi-aware/squad-sdk/resolution';
+import { listPresets, loadPreset, applyPreset, savePreset, seedBuiltinPresets } from '@wifi-aware/squad-sdk/presets';
 
 const TMP = join(process.cwd(), `.test-presets-${randomBytes(4).toString('hex')}`);
 
