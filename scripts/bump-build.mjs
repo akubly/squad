@@ -22,6 +22,16 @@ if (process.env.SKIP_BUILD_BUMP === '1' || process.env.CI === 'true') {
   process.exit(0);
 }
 
+// Idempotency guard: bump runs exactly once per full build, at the root.
+// If invoked from a workspace package's prebuild (npm_package_name starts with the
+// workspace scope), skip — the root prebuild already bumped all three package.json
+// files in lockstep during the same build invocation.
+const callerPkg = process.env.npm_package_name ?? '';
+if (callerPkg.startsWith('@wifi-aware/squad-')) {
+  console.log(`⏭️  Skipping build bump (workspace-level call from ${callerPkg} — bump runs at root only)`);
+  process.exit(0);
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 

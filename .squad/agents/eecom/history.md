@@ -89,6 +89,16 @@ vi.mock('@bradygaster/squad-sdk/registry', async (importActual) => {
 To assert on `runInit` registry writes, check `vi.mocked(writeRegistry).mock.calls` — don't read from disk (mock makes writes a no-op).
 
 
+### Recursion-Guard Test Standard (Piece 34 FIDO Directive)
+### Bump-build must fire exactly once per build root (2026-05-28)
+
+**Pattern:** In an npm workspaces monorepo, version bumping must happen at the root `prebuild` ONLY — never inside a workspace's `prebuild`. The bump script must update ALL three package.json files (root + each workspace) atomically AND rewrite any cross-workspace pins in the same pass. A workspace-scoped hotfix that edits only one package.json (even with good intentions) will always drift the tree.
+
+**Idempotency guard:** Use `process.env.npm_package_name` — npm injects this as the current package's name for every script invocation. If the caller is a workspace package (name starts with the workspace scope prefix), exit without bumping. This prevents double-bump if a workspace `prebuild` is ever added, with zero file I/O.
+
+**Diagnostic technique:** The `npm run build` banner line (`> @scope/pkg@version build`) captures the version from `package.json` at the moment the workspace script is about to run. If two workspaces print different version numbers within a single root build, a drift commit touched fewer than all three package.json files. Fix: "highest on disk wins" — bring lower-versioned files up to the highest; never down.
+
+### Piece 25 Rev — FIDO + CONTROL nits (2026-05-28)
 
 Sentinel-function + marker-file approach: prepend `squad()` function shadowing PATH; assert marker absence when guard fires, presence when guard absent. Three-case structure required (including guard-stripped case) to prove test load-bearing. Exit-code-only assertions insufficient.
 
