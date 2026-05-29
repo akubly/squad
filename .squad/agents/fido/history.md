@@ -8,313 +8,48 @@ Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPE
 
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils module). All 137 targeted tests GREEN. 11 new tests added per spec. No test assertion changes. Scrub gate 1 (legacy coverage) pre-existing baseline carryover approved by Brady; gates 2–6 pass. Decision merged to decisions.md: path-utils canonical home policy. Branch ready for Phase C (PR review). Next session: piece 05.
 
-## Learnings
+## Learnings — Summary (see history-archive.md for full pre-2026-05-28 details)
 
-### Piece 19 Quality Review — Copilot Payload (2026-05-19T22:30:35Z)
-
-**Verdict:** REJECT (Round 1) → APPROVED (Round 2)
-
-**Round 1 Blocking Gaps:**
-1. **Cold-start payload ordering:** No test coverage for multi-payload load sequence. Does `loadPayloads([p1, p2, ...])` preserve registration order in frontmatter?
-2. **Hyphenated callsign extraction:** `_extractCandidateCallsign` not tested against `callsign-with-hyphens`. Does it extract correctly?
-3. **`runDoctor` integration:** `runDoctor` not exercised as part of payload assignment flow. End-to-end wiring uncovered.
-
-**Round 2 Resolution (CAPCOM):**
-- Added test for cold-start ordering validation (multi-payload sequence)
-- Added test for `_extractCandidateCallsign` with hyphens
-- Added integration test for `runDoctor` → payload assignment wiring
-
-**Final verdict:** ✅ APPROVED. 143/143 tests GREEN (96 spec + 26 security + 3 coverage + 18 integration). Build CLEAN.
-
-### Piece 14 Quality Review — squad assign (2026-05-18T12:19:14Z)
-
-**Verdict:** APPROVED
-
-**Build:** CLEAN. **Tests:** 21/21 GREEN. All 21 spec scenarios covered (A1–A21). Each test asserts structured behavior: registry state on disk, `result.kind`, error code/text. No test is a bare exit-code check.
-
-**Commit hygiene:** 7 files only (`.changeset`, `packages/squad-cli/package.json`, `cli-entry.ts`, `assign.ts`, `assign.test.ts`, `registry.ts`, `vitest.config.ts`). No `.squad/` state files in the code commit. PASS.
-
-**Scrub gate:** Gate 1 (strip-listed paths) and Gate 2 (wifi-aware mention in `.squad/reviews/piece-13-adversarial-review.md`) FAIL — both confirmed pre-existing at HEAD~1. No new strip-listed paths or wifi-aware content introduced by piece 14 diff. Not attributable to piece 14.
-
-**Two non-blocking observations recorded for future replay improvement:**
-
-1. **Containment guard ordering test gap (A15).** The test uses `getGitRoot: (dir) => dir` (returns subdir as-is). This proves the containment guard fires for a subdir, but does NOT demonstrate the most dangerous ordering failure: if `getGitRoot` were called first and returned the parent clone root (as real git would), Guard 6 idempotency would match the clone root and return a spurious `alreadyAssigned`. A companion variant using `getGitRoot: () => cloneDir` would prove the guard runs before git-root resolution and prevents that false positive. For future pieces with ordered guards, the test for guard N ordering should use a mock that simulates what guard N+1 would incorrectly normalize.
-
-2. **A5 (inactive reactivation) doesn't assert `clones[]` update.** A5 only verifies `status` flips to `active`. Clone binding on reactivation is cross-covered by A1 but not asserted in A5. Suggest asserting both `status === 'active'` AND `clones` contains the new path in the same test for completeness.
-
-**Pattern learned — Injectable-seam guard-order tests:** Ordered guards where guard N uses raw `cwd` and guard N+1 normalizes via git/FS require the guard N test mock to simulate the normalized output guard N+1 would produce. Using identity mocks proves the guard fires but leaves ordering question unanswered when normalization changes the path.
-
-### Piece 10 Adversarial Test Review — init fail-fast (2026-05-15T23:15:56Z)
-
-📌 **Team update — Piece 10 Revision Complete:** Piece 10 init fail-fast received split verdict (Flight APPROVE-3-notes, FIDO REJECT-6-gaps, RETRO APPROVE-WITH-FIXES). Per strict lockout protocol, EECOM locked out for this cycle. CONTROL + Sims assigned joint revision and delivered fix: CONTROL unified init validation routing and added lstat-based symlink sentinel; Sims addressed all 6 FIDO test gaps. Guard-order E2E proven via dispatch path with derived callsign conflict; clone-collision tests added for default+explicit registry scenarios; `.squad` symlink collision proven with lstat rejection; registry byte stability: snapshots after all conflict paths; typed error assertions for `SquadError` and `ConfigurationError` instances; test label/assertion alignment corrected. Scaffold-file assertions (no dir/file creation on conflict), CLI stderr contract assertions (specific conflict identification), exit code 2 verification all added. Surgeon squashed revision into `331894e8`. Build CLEAN. 28/28 tests GREEN. Pattern learned: For fail-fast guards, every negative test must assert three things in the same scenario—exact error contract, no filesystem mutation, and registry byte-for-byte unchanged. Separate tests for each axis leave order and side-effect regressions invisible.
-
-### Piece 08c Adversarial Review — GNC Revision (2026-05-15T00:54:18Z)
-
-**Verdict:** APPROVE_WITH_FOLLOWUPS
-
-All 6 spec-mandated tests exist and pass GREEN (23/23, 21.9s). Resolver integration is structurally sound — `resolveSquadV2` runs before long-lived state for both `start` and `rc`. Mock seams prevent real tunnels/spawns. `SQUAD_CALLSIGN` destructure-omit pattern correctly applied in new `runCliShort` helper.
-
-Two majors found (not blocking):
-1. `rc does not start bridge when resolution throws` only asserts `timedOut === false` — does not verify error message surfaced. Weak gate.
-2. `start preserves Copilot passthrough args` exercises runner layer via vi.doMock, not the dispatch-layer's copilotArgs filter. A bug in cli-entry's squadFlags array would pass this test.
-
-Minors: no symmetric `start` resolver-throw test; no deprecation-notice regression gate; 150ms fixed timeouts in mock assertions (flake risk under load). Snapshot drift is pre-existing CRLF noise only.
-
-Pattern learned: Dispatch-level tests that use vi.doMock + direct import of the runner module do NOT exercise the dispatch glue code. Always verify which layer the test actually hits vs. which describe block it lives in.
-
-### Piece 08a Delta Triage — Failure-Set Diff (2026-05-14T14:38:40.349-07:00)
-
-Compared full-suite Vitest JSON failure sets from `fcb0cf1a` and `0e4f301e` by exact `{file} :: {test name}` IDs, then reran each newly failing revision test individually 3×. Clean rerun observed 3 new failed-test IDs and 2 fixed IDs; all 3 new IDs passed individually 3/3, so the delta is flake/noise rather than a deterministic SDK barrel export regression. This failure-set comparison is the right tool for revision delta triage because aggregate pass/fail counts hide churn between fixed baseline failures and newly exposed flakes.
-
-### Piece 06 Quality Gate — Regex + Symlink Patterns (2026-05-14)
-
-Loose regex and missing symlink-boundary sentinels can evade code review; require explicit boundary guards (path.sep sentinel) and strict regex anchoring in file-write operations.
-
-### Phase B Piece 03 Adversarial Review (2026-05-13)
-
-Reviewed clones/origins resolver + init-mode guard (94/94 green). Found one MAJOR gap: CM.7 case-sensitivity test asserts only 	ypeof result === 'boolean' on both branches — passes regardless of return value. Cannot detect regression where case-insensitive matching silently returns alse on win32/darwin. Found MINOR gaps: chain precedence tests cover steps 1>2, 2>4, 4>6 but miss 3>4 (SQUAD_CALLSIGN vs clones), 5>6 (origins vs platform), 6>7 (platform vs worktree). Trailing slash normalization and clones:[] empty array untested (code handles both, path.resolve and length guard). Piece-02 regression confirmed clean: matchedOrigin: null on source='local' still asserted via toMatchObject. VERDICT: APPROVE.
-
-Pattern: Tests follow existing 	est/cli/init.test.ts and 	est/cli/doctor.test.ts conventions — vitest, andomBytes temp dirs in cwd, imports from compiled dist via package exports (@bradygaster/squad-cli/core/init, @bradygaster/squad-cli/commands/doctor, @bradygaster/squad-sdk).
-
-Commit: 7660a27 on branch squad/579-init-scaffolding-hardening.
-
-### Piece 02 adversarial review (2026-05-12T23:06:58-07:00)
-
-**Verdict:** CONDITIONAL (2 blocking findings, 5 should-fix items all addressed in remediation commit  5bd332f)
-
-**Blocking issues identified:**
-1. **Test isolation failure** — Tests 2.4 and 2.5 inherit process.env.SQUAD_CALLSIGN when opts.env not set. Env not pinned, exposing test state leakage.
-2. **Empty callsign gap** — opts.callsign = '' path entirely untested.
-
-**Should-fix items (all resolved in remediation):**
-- Tautological priority test (test input identical to expectation)
-- Three-way priority case unexercised in test suite
-- Registry path priority partially tested (missing platform-default + env-var coverage)
-- Error categorization opaque (CONFIGURATION category doesn't discriminate four distinct failure modes)
-- Conditional priority logic clarity (test naming and assertions could be stronger)
-
-**Test remediation summary:** Commit  5bd332f added 11 new tests (17 → 28 total), pinned opts.env across all test cases, closed both blocking gaps, and implemented typed error codes (ResolveErrorCode union) for downstream CLI discriminability. All tests green. FIDO approval conditional on acceptance of architectural decisions (error model, -v2 naming).
-
-### Piece 08b Adversarial Review (2026-05-14T16:12:01.302-07:00)
-
-**Verdict:** REJECT — reassign to Sims.
-
-All 30 tests pass (16 migration + 14 consult). Parity is structurally present but has four blocking gaps:
-
-1. **Consult setup-mode success path absent.** The spec requires every user-action command's success path to be covered. The only consult success test exercises `--status`, which bypasses the resolver guard by design (`showStatus` check). The guarded setup-mode path is untested in the green direction.
-
-2. **`.gitignore` non-mutation unverified.** Both the consult and link failure-path tests only check `config.json`. The spec explicitly requires asserting that `.gitignore` / ignore entries are not written. A regression that writes an ignore entry before the guard exits would pass the existing tests.
-
-3. **Three assign-to-copilot failure modes absent.** The spec test surface lists URL-without-clone-destination, clone failure, and host verification failure as required. The implementation does not include these features, and the tests can't cover what isn't there. Scope gap: requires a product decision before tests are written.
-
-4. **Dead `resolved` variable in consult and link dispatch.** `cli-entry.ts` computes the guard resolution but never passes it to `runConsult` / `runLink`. The runner may re-resolve from different context. No test surfaces a divergence.
-
-**Pattern learned:** Guard-only tests (prove failure-path exit) are not sufficient when the spec also requires success-path verification and side-effect non-mutation assertions on ignore entries. Always check: (a) is the success path exercised for every guarded command? (b) are ALL named spec side effects (not just config.json) explicitly asserted absent in failure paths?
+Key patterns from recent reviews:
+- **Guard-order tests** must simulate what downstream guards would do; identity mocks miss ordering failures
+- **Test isolation** requires pinned environment variables across all test cases  
+- **Fail-fast guards** need three assertions per test: error contract, no filesystem mutation, registry unchanged
+- **Dispatch-level tests** using vi.doMock don't exercise glue code; verify which layer is actually tested
+- **Multi-payload ordering**, hyphenated callsigns, and integration wiring all need explicit coverage
+- **.git-anchor resolver migrations** require regression test when .squad/ exists but .git/ does not
+- **Arity coverage** for multi-overload functions requires runtime tests even when compile-time typing is correct (FIDO 100%-on-critical-paths)
+- **Dependency mode control** needed for gate comparisons (clean-install vs workspace-linked results)
 
 ---
 
-### Piece 23 Adversarial Review — Shared CLI Conventions (2026-05-27)
+## Current Session — May 2026 (Piece 24-25 Reviews)
 
-**Verdict:** ⚠️ APPROVE-WITH-NITS
-
-**Commit reviewed:** `fced6e99` on `squad/piece-23-shared-cli-conventions`
-
-**What Flight got right:**
-- All four debt items addressed: D-3 (`hasCodingAgent`), D-5 (`resolveSquadDir`), D-11 (qrcode-terminal types), D-13 (decision documented) ✅
-- Net production LOC: +15 (well under the 200 ceiling; 53 insertions, 38 deletions across 12 prod files) ✅
-- Build: ✅ CLEAN (`tsc` + postbuild)
-- 11 new tests, 11/11 pass ✅ — hasCodingAgent suite covers all 6 spec-mandated cases
-- No `.squad/` state files in commit ✅
-- No new npm dependencies; `FSStorageProvider` import correctly removed from economy.ts ✅
-- Changeset: ✅ `.changeset/piece-23-shared-cli-conventions.md`, patch bump for `@bradygaster/squad-cli`
-- Decision file content is well-written and captures D-13 intent ✅
-
-**`.git`-marker divergence — bounded but undertested:**
-
-Read `packages/squad-sdk/src/resolution-v2.ts:69–80`. `findGitRoot()` walks up looking for a `.git` marker (file or directory). `resolveSquad` Step 2 (line 322) calls `findGitRoot` first — if no `.git` exists, it returns null and Step 2 is skipped entirely. The fallback chain (Steps 3–7) cannot find a **local** `.squad/` directory without either registry registration or platform-scope. The old manual walk in `economy.ts` checked `.squad/` existence directly, with no `.git` dependency.
-
-This is a real behavioral regression for: (a) downloaded repo zips with `.squad/` but no `.git/`, (b) any non-git directory with `.squad/` manually placed. Failure is **graceful** — all callers check for null and call `fatal()` with a clear error message.
-
-The test fixture at `economy-command.test.ts:20` explicitly creates `.git/` and comments "Squad projects always have .git/; resolveSquadDir (via SDK) requires it" — proving Flight knows the constraint. Both `resolveSquadDir` smoke tests in `squad-file-conventions.test.ts` also create `.git/` explicitly. **There is no test for `.squad/` present, `.git/` absent → null**, so the claim "graceful failure in this scenario" is untested.
-
-**Non-blocking nits:**
-1. **[test/cli/squad-file-conventions.test.ts]** — Missing regression test: `.squad/` present, `.git/` absent → `resolveSquadDir` returns null. Without this, a future change that removes the `.git` requirement would have no safety net to restore the old walk behavior.
-2. **[.squad/decisions/inbox/flight-piece-23-options-bag-seam.md]** — Naming convention violation. `.copilot-instructions.md` mandates `copilot-{brief-slug}.md`. File should be `copilot-piece-23-options-bag-seam.md`.
-3. **[commit message]** — References decision file as if it's in the commit, but it's not. The file lives on disk only (consistent with "do not commit .squad/ state" convention), but the commit message line `Decision: .squad/decisions/inbox/...` implies it was staged. Misleading.
-4. **[packages/squad-cli/src/cli/commands/watch/index.ts]** — Handoff §5 step 5 explicitly said to rename the local `hasCopilot` variable to `agentEnabled` (or similar) to avoid confusion with the `team-md.ts` export. Flight kept the name as `hasCopilot`. Functionally non-breaking (no `hasCopilot` is imported from `team-md.ts` in this file), but violates the handoff spec.
-
-**Pattern learned — `.git`-anchor resolver migrations:** When migrating from a raw filesystem walk to an SDK resolver that anchors on `.git`, the regression test set MUST include a case where `.squad/` exists but `.git/` does not. The fact that "production projects always have `.git/`" is a runtime assumption, not a tested invariant. Any future dev who sees the economy test fixture creating `.git/` will wonder why — that question is only answerable if a companion test proves what happens when `.git/` is absent.
-
----
-
-## Archive
-
-Older learnings (prior to 2026-05-14) have been archived to history-archive.md for reference.
-
----
-
----
-
-## 📌 Team Update — Piece 21 Ship Gate Cleared
-
-**Date:** 2026-05-22  
-**Event:** Post-stack-review gate clearance — all five required fixes shipped.
-
-Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
-
----
-
-### Piece 22 Adversarial Review — Doctor Unification (2026-05-22)
-
-**Verdict:** 🛑 REJECT (2 blockers)
-
-**Commit reviewed:** `ef09d3d3` on `squad/piece-22-unify-doctors`
-
-**What Flight got right:**
-- `DoctorFinding` type file created correctly (doctor-types.ts)
-- All 5 `TODO(piece-22)` markers removed ✅
-- `DoctorCheck` marked `@deprecated` ✅
-- cli-entry.ts renderer is single-pass with source grouping ✅
-- Exit code changed to 2 for errors (decision logged in decisions.md) ✅
-- LOC budget: 111 net production LOC — well within 200 ceiling ✅
-- Build passes clean ✅
-- 44/44 doctor tests pass ✅
-- Changeset present and correct ✅
-- No new deps, no `.squad/` state committed ✅
-
-**Blocker 1 — Warn findings go to stdout (cli-entry.ts:201-203):**
-`_renderFinding` uses `console.log` for ALL severities. Spec says "warn → 0 (warnings to stderr)". The comment just above `process.exit(2)` even says "Warnings go to stderr" — but the implementation uses stdout. Warn findings should use `console.error`. Without this, piped tooling can't distinguish warnings from info output, and the spec contract is broken.
-
-**Blocker 2 — Missing "unified severity derivation" test:**
-Spec §5 "New Tests Needed" explicitly mandates: "A test where system doctor produces a `warn` and registry doctor produces an `error` → overall exit code is 2." This is the core behavioral claim of the unification (cross-source severity escalation). None of the 5 new tests cover it. The other 4 new tests are all run against a healthy scaffold that produces zero errors — they cannot surface a severity escalation bug.
-
-**Non-blocking concerns:**
-- `test/cli/list-doctor.test.ts` not updated (spec §5 requires parallel assertions via unified runner) — pre-existing tests still pass, but new coverage was skipped
-- Registry doctor (`commands/doctor.ts`) not natively migrated — Flight adapted at the boundary in `runUnifiedDoctor` which is consistent with spec §2.4 ("internal helpers"), but deviates from handoff "done when" letter
-- Registry batch severity stamps all findings with max severity — per-spec ("existing behavior preserved") but loses per-finding granularity from migration table
-- `doctor-registry-cli.test.ts` CLI2 uses `not.toBe(0)` for `--purge` usage error — pre-existing weak gate, no `toBe(1)` to update per spec instructions
-
-**Pattern learned — Warn-to-stderr contracts:** When a spec uses the phrase "warn → N (warnings to stderr)", verify BOTH the exit code AND the stream routing in the rendering function. They are independent. A code comment saying "warnings go to stderr" is not the same as `console.error`. Always grep for `console.log` calls in severity-keyed render helpers.
-
-**Reassigned to:** CONTROL (Flight locked out)
-
----
-
-### Piece 22 Re-Verdict — CONTROL Revision (2026-05-22)
-
-**Verdict:** ✅ APPROVE
-
-**Commit reviewed:** `78297559` on `squad/piece-22-unify-doctors`
-
-**Blocker 1 (warn→stderr) — RESOLVED:**
-`renderFinding()` in `doctor.ts:780–802` uses `console.error` for both `error` and `warn` severities; `info` correctly routes to `console.log`. The old `_renderFinding` in `cli-entry.ts` (which used `console.log` for all severities) is fully removed. The comment at `cli-entry.ts:1077` — `// Exit code: error → 2, else 0. Warnings go to stderr.` — now accurately describes the implementation.
-
-**Blocker 2 (cross-source escalation test) — RESOLVED:**
-Test at `doctor.test.ts:545` constructs a system `warn` + registry `error` finding set, calls `renderFinding` on each, and asserts: `stderrSpy.toHaveBeenCalledTimes(2)`, `stdoutSpy` never called, `deriveExitCode(findings) === 2`. A companion test at line 564 asserts `info` goes to stdout only. Both tests would have **failed on ef09d3d3** because the old code called `console.log` for all severities — stderrSpy would have received 0 calls.
-
-**N1 (exhaustive deriveExitCode) — RESOLVED:**
-`deriveExitCode()` at `doctor.ts:809–824` uses a `switch` over `DoctorSeverity` with a `never` default arm. `renderFinding()` carries the same exhaustive switch. `cli-entry.ts:1072` uses `deriveExitCode(findings)` — the old inline `.filter(f => f.severity === 'error').length > 0` is gone.
-
-**Gate results:**
-- Build: ✅ CLEAN (`tsc` + postbuild)
-- Lint: ✅ CLEAN (`tsc --noEmit`)
-- Doctor tests: ✅ 53/53 (46 in doctor.test.ts + 7 in doctor-registry-cli.test.ts)
-- LOC budget: ✅ 159 net new lines (166 insertions, 7 deletions) — within 200 ceiling
-- State hygiene: ✅ No `.squad/` files in commit
-
-**Spot-check cleanups (N3, N4):**
-- N3: All `DoctorFinding` interface fields are `readonly` in `doctor-types.ts`. ✅
-- N4: The static `import type { DoctorFinding } from './cli/commands/doctor-types.js'` removed from `cli-entry.ts`; `renderFinding`/`deriveExitCode` destructured from the existing dynamic `import('./cli/commands/doctor.js')`. ✅
-
-**Pattern learned — Revision verification discipline:** When re-reviewing after a rejection, always run the new test against the mental model of the old code to confirm it would have caught the bug. For stream-routing assertions, spy on `console.error` directly — a test that only checks `console.log` cannot prove stderr routing.
-
----
-
-### Piece 24 Adversarial Review — SDK Adapter + OTel Typing Hardening (2026-05-27)
-
-**Verdict:** ⚠️ APPROVE-WITH-NITS
-
-**Commit reviewed:** `b1a710fd` on `squad/piece-24-sdk-adapter-otel-typing`
-
-**What Flight got right:**
-- D-6: Exactly 4 `any`s removed from `adapter/client.ts`. `CopilotSessionLike` and `CopilotSessionRawEvent` interfaces correctly shaped; all `inner` access sites covered. ✅
-- D-8: Blanket `/* eslint-disable */` block removed. All 3 inline `eslint-disable-line` comments removed. `_noopStartActiveSpan` standalone function with 3 overloads + 1 implementation body, zero `any`/`as`/`@ts-*`. ✅
-- D-9: 3 `eslint-disable-line` comments removed from `otel.ts`. Constructor interfaces (`OTelNodeSDKConstructor`, `OTelResourceConstructor`, `OTelMetricReaderConstructor`, `OTelExporterConstructor`) added to `otel-types.ts`. Null guard added at `otel.ts` — required consequence of typed `| undefined` variables, not scope creep. ✅
-- D-16: `markIdle` → `setIdle` rename complete; `@internal` removed; updated JSDoc. Zero `markIdle` references remain in production `.ts` files. ✅
-- D-14: Confirmed NOT in this commit. ✅
-- No `.squad/` files in commit. ✅
-- No new npm dependencies. ✅
-- Changeset present: `.changeset/piece-24-sdk-adapter-otel-typing.md`, `patch` bump for `@bradygaster/squad-sdk`. ✅
-- `tsc --noEmit`, `npm run build -w packages/squad-sdk`, `npm run lint`: all clean (independently verified). ✅
-- All production changes in `packages/squad-sdk/src/` only; no CLI files touched. ✅
-
-**Nits (required before PR merge):**
-
-1. **[test/otel-provider.test.ts — spec §9 criterion] — REQUIRED** — Spec §9 explicitly requires "Smoke test: `startSpan`, `setAttribute`, `end`, `isRecording` do not throw." Existing test covers `startSpan`, `end`, `spanContext` but NOT `setAttribute` or `isRecording`. Add two assertions (~3 lines) to `otel-provider.test.ts` line ~158.
-
-2. **[test — adversarial FIDO standard] — REQUIRED** — No test exercises all 3 `_noopStartActiveSpan` overload arities (`(name, fn)`, `(name, opts, fn)`, `(name, opts, ctx, fn)`). The 3-overload form is the entire substance of CONTROL's directive. FIDO's 100%-on-critical-paths standard requires runtime verification that each arity resolves the callback correctly. Add a test in `otel-provider.test.ts` or `otel-bridge.test.ts`.
-
-3. **[packages/squad-sdk/src/runtime/otel.ts:183,191 — undisclosed API change] — REQUIRES BRADY SIGN-OFF** — `getTracer()` and `getMeter()` had their explicit `: Tracer` and `: Meter` return type annotations removed. Spec §2.3 does not list this change. The handoff explains the technical reason (structural incompatibility between real OTel `Tracer` and local `OTelTracerLike` because `Span.addEvent` signatures differ). The TypeScript inferred return type is now a union `OTelTracerLike | Tracer` instead of the narrower `Tracer`. This changes the public `.d.ts` contract. Brady must explicitly sign off before PR merge.
-
-4. **[packages/squad-sdk/src/agents/lifecycle.ts:316 — micro-nit]** — `agent.setIdle()` has 12 leading spaces vs surrounding code's 10 spaces. Cosmetic only.
-
-5. **[chain handoff date]** — `stack-chain-piece-21-thru-24-handoff.md` header says "Date: 2025-07" — should be 2026-05-27.
-
-**LOC Drift Assessment:**
-- Actual net production LOC: ~125 (173 insertions − 12 changeset − 36 deletions)
-- Flight's stated claim: ~114 (comment/blank-line counting difference)
-- Forecast (CONTROL): ~59 net
-- Delta: +55-66 above forecast (~2x)
-- Breakdown:
-  - `otel-types.ts` (104 LOC vs 63 spec estimate): `OTelDiagLoggerLike` split required because `DiagConsoleLogger` implements `DiagLogger` (5 log methods), not `DiagAPI` (which adds `setLogger`/`disable`). Spec underestimated. +41 LOC over estimate.
-  - `otel-api.ts`: Full `NoopDiagLogger` class with 5 method implementations required for type conformance (`{ new(): OTelDiagLoggerLike }`). Spec estimated empty class. +6 LOC.
-  - Other files (`client.ts`, `otel.ts`, `lifecycle.ts`): Minor overages consistent with fuller interface method counts.
-- Classification: **All justified** — extra LOC is from the real API having two distinct logger interfaces (`DiagAPI` vs `DiagLogger`) that the spec treated as one. NOT scope creep. Process discipline note: the §8 LOC estimate was based on a single `OTelDiagLike` covering both surfaces.
-
-**Pattern learned — OTel interface surface underestimation:** When writing LOC estimates for OTel shim typing, `DiagConsoleLogger` (instances) and `diag` (the singleton) implement DIFFERENT interfaces in the real OTel API: `DiagLogger` (5 log methods) vs `DiagAPI` (which adds `setLogger`/`disable`). Treating them as the same interface in the spec produces a 6-line undercount per split. Future OTel typing estimates should account for this bifurcation.
-
-**Pattern learned — compile-time vs runtime test balance for overload functions:** 3-overload TypeScript functions have compile-time type correctness guaranteed by the type checker. However, FIDO's 100%-on-critical-paths standard still requires runtime tests for all arity paths to catch implementation body errors (wrong callback resolution logic) that type checking cannot catch. For any function with N≥2 overloads on a critical path, require N runtime arity tests.
-
----
-
-## Piece 24 Adversarial Review — SDK Adapter & OTel Typing Hardening (2026-05-27T16:00Z)
+### Piece 24 Adversarial Review — SDK Adapter & OTel Typing Hardening (2026-05-27T16:00Z)
 
 **Verdict:** ⚠️ APPROVE-WITH-NITS (three mandatory, two cosmetic)
 
-**Commitment assigned:** Flight locked out. Recommend EECOM for test additions (N1+N2).
+**Mandatory nits:** N1 — Missing smoke tests (setAttribute, isRecording). N2 — Incomplete arity coverage for _noopStartActiveSpan (need 3 tests for each overload path). N3 — Undisclosed return-type removal (getTracer/getMeter now return union type); Brady must sign off before PR merge.
 
-**Mandatory nits:**
+**Cosmetic:** N4 — 12-space indent vs 10-space at lifecycle.ts:316. N5 — Chain handoff date "2025-07" should be "2026-05-27".
 
-1. **N1 — Missing smoke tests (spec §9)** — Spec criterion "smoke test: `startSpan`, `setAttribute`, `end`, `isRecording` do not throw" only partially covered. Existing no-op tracer test covers `startSpan`/`end`/`spanContext` but NOT `setAttribute` and NOT `isRecording`. Add two assertions (~3 lines) to verify these methods don't throw when called on the noop.
+**LOC drift:** +55–66 LOC above forecast (~2×). Justified by real API bifurcation (DiagLogger vs DiagAPI require split interface). Process lesson: OTel Diag* surface bifurcates into instance vs singleton; budget both explicitly.
 
-2. **N2 — Incomplete arity coverage (FIDO critical-path standard)** — `_noopStartActiveSpan` has 3 distinct overloads: `(name, fn)`, `(name, opts, fn)`, `(name, opts, ctx, fn)`. No test exercises all three paths. Compile-time type checking guarantees signature conformance but cannot detect wrong callback-resolution logic in the implementation body. Add three test cases (one per arity) to `test/otel-provider.test.ts` or `test/otel-bridge.test.ts`. This is a 100%-on-critical-paths gate.
-
-3. **N3 — Undisclosed return-type removal, Brady sign-off required** — `getTracer()` and `getMeter()` had explicit `: Tracer` and `: Meter` return type annotations removed (now inferred union `OTelTracerLike | Tracer`). Spec §2.3 does not document this. Technical reason in handoff explains structural incompatibility (OTel's `Span.addEvent` vs local `OTelSpanLike`). Public `.d.ts` contract changed. Brady must explicitly sign off before PR merge.
-
-**Cosmetic nits:**
-
-- N4: `agent.setIdle()` at lifecycle.ts:316 has 12-space indent vs surrounding 10-space. Cosmetic.
-- N5: Chain handoff header date "2025-07" should be "2026-05-27".
-
-**LOC drift assessment:**
-
-- **Actual:** ~125 net production (173 insertions − 12 changeset − 36 deletions); Flight's ~114 is comment/blank-line variant of same count.
-- **Forecast:** ~59 net (CONTROL's +8 over Flight's ~51 baseline).
-- **Delta:** +55–66 LOC (~2× forecast). Justified.
-- **Root cause:** Spec treated OTel's `DiagConsoleLogger` (instance, implements `DiagLogger`: 5 log methods) and `diag` (singleton, is `DiagAPI`: adds `setLogger`/`disable`) as a single interface (`OTelDiagLike`). Real API has two. Requires split `OTelDiagLoggerLike` (+6 LOC) + full `NoopDiagLogger` class (+6 LOC). Unavoidable once type system enforces structural conformance.
-- **Not scope creep** — all extra LOC traces to real API surface requirements. This is the kind of drift that reveals underestimation in the spec, not author overreach.
-
-**Process lesson for future LOC estimates:** OTel's `Diag*` surface bifurcates into instance (`DiagLogger`, 5 methods) and singleton (`DiagAPI`, adds `setLogger`/`disable`). When estimating piece-sized OTel typing work, budget for both interfaces explicitly in the LOC envelope.
+- 2026-05-28: Piece-24 adversarial review (commit b1a710fd) — APPROVE-WITH-NITS.
+- EECOM assigned to apply N1+N2 nits.
 
 ### Piece 25 Adversarial Review — Resolver Rename and CLI Hardening (2026-05-28)
 
 **Verdict:** ⚠️ APPROVE-WITH-NITS
 
-**Commit reviewed:** `e67e0959` on `squad/piece-25-resolver-rename-and-cli-hardening`
+**Summary:** Option A implemented: esolveSquadDir canonical, esolveSquad deprecated alias, SDK barrel exports both, changeset SDK minor/CLI patch. Alias contract test proves equivalence. Build/lint/tsc gates PASS with workspace SDK. Full vitest is red on both parent and e67 with no new failures (e67 reduces 42 files to 15). Non-blocking nits: no @ts-expect-error regression proof for hypothetical DoctorSource variant, internal esolution.ts alias lacks 	ypeof annotation, dependency hygiene pre-existing (
+pm ci lock skew).
 
-**Summary:** Option A is implemented: `resolveSquadDir` is canonical, `resolveSquad` remains as a deprecated alias, the SDK barrel exports both names, the changeset is SDK minor/CLI patch, and the alias contract test proves equivalent results. Build/lint/package tsc gates pass for both parent and e67 when using the local workspace SDK; full `vitest` is red on both parent and e67 with no new failure class (e67 reduces failures from 42 files to 15). Non-blocking nits: no `// @ts-expect-error` regression proof for a future `DoctorSource` variant, internal `resolution.ts` alias is not `typeof`-annotated, and clean-install dependency hygiene remains pre-existing (`npm ci` lock skew / nested stale SDK).
-
-**Pattern learned — push-policy comparison needs dependency-mode control:** In this repo, clean `npm install` can create `packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9.4`, causing CLI tsc to resolve stale published declarations instead of the local workspace SDK. For commit-to-parent gate comparison, record both the raw clean-install failure class and the workspace-linked result; count blockers only when e67 introduces a new failure after controlling for the pre-existing dependency skew.
+**Pattern learned — dependency-mode control:** Clean 
+pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9.4 (stale published version), causing CLI tsc to resolve wrong declarations. For commit-to-parent gate comparison, record both raw clean-install failures and workspace-linked results; count blockers only when e67 introduces new failures after controlling for pre-existing skew.
 
 - 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.
 - 2026-05-28: Piece-25 revision (commit 185617e) — EECOM folded all approved nits (N1+N2+N3); gates clean.
+
+---
+
+## Archive — Older Learnings (see history-archive.md for pre-2026-05-28 full details)
