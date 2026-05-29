@@ -92,11 +92,13 @@ To assert on `runInit` registry writes, check `vi.mocked(writeRegistry).mock.cal
 ### Recursion-Guard Test Standard (Piece 34 FIDO Directive)
 ### Bump-build must fire exactly once per build root (2026-05-28)
 
-**Pattern:** In an npm workspaces monorepo, version bumping must happen at the root `prebuild` ONLY — never inside a workspace's `prebuild`. The bump script must update ALL three package.json files (root + each workspace) atomically AND rewrite any cross-workspace pins in the same pass. A workspace-scoped hotfix that edits only one package.json (even with good intentions) will always drift the tree.
+**Pattern:** In an npm workspaces monorepo, version bumping must happen at the root `prebuild` ONLY. The bump script must update ALL package.json files (root + each workspace) and rewrite cross-workspace pins atomically. A workspace-scoped hotfix commit that edits only ONE package.json will always drift the tree.
 
-**Idempotency guard:** Use `process.env.npm_package_name` — npm injects this as the current package's name for every script invocation. If the caller is a workspace package (name starts with the workspace scope prefix), exit without bumping. This prevents double-bump if a workspace `prebuild` is ever added, with zero file I/O.
+**Root cause of the `.10`/`.10`/`.11` drift:** Commit `0f5ac1d2` manually bumped only `packages/squad-cli/package.json` (version + sdk dep pin) to re-align with a published release, leaving root and sdk at `.10`. `scripts/bump-build.mjs` was NOT involved — Brady had `SKIP_BUILD_BUMP=1` set when he ran `npm run build`, so the script was skipped entirely. The drift was already on disk before the build ran.
 
-**Diagnostic technique:** The `npm run build` banner line (`> @scope/pkg@version build`) captures the version from `package.json` at the moment the workspace script is about to run. If two workspaces print different version numbers within a single root build, a drift commit touched fewer than all three package.json files. Fix: "highest on disk wins" — bring lower-versioned files up to the highest; never down.
+**Diagnostic technique:** The `npm run build` banner line (`> @scope/pkg@version build`) captures the version from `package.json` at the moment each workspace script is about to run. If two workspaces print different version numbers in a single root build invocation, a drift commit touched fewer than all three package.json files. Find it with: `git log --oneline -- package.json packages/squad-sdk/package.json packages/squad-cli/package.json`.
+
+**Repair rule:** Highest on disk wins — bring all lower-versioned files up to the highest; never down. Confirm with `SKIP_BUILD_BUMP=1 npm run build` (all banners must match).
 
 ### Piece 25 Rev — FIDO + CONTROL nits (2026-05-28)
 
