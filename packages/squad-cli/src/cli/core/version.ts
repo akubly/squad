@@ -33,8 +33,8 @@ export function applyVersionStamp(content: string, version: string): string {
   let stamped = content;
   // Replace version in HTML comment (must come immediately after frontmatter closing ---)
   stamped = stamped.replace(/<!-- version: [^>]+ -->/m, `<!-- version: ${version} -->`);
-  // Replace version in the Identity section's Version line
-  stamped = stamped.replace(/- \*\*Version:\*\* [0-9.]+(?:-[a-z]+(?:\.\d+)?)?/m, `- **Version:** ${version}`);
+  // Replace version in the Identity section's Version line (matches any semver including multi-segment prerelease)
+  stamped = stamped.replace(/- \*\*Version:\*\* \S+/m, `- **Version:** ${version}`);
   // Replace {version} placeholder in the greeting instruction so it's unambiguous
   stamped = stamped.replace(/`Squad v\{version\}`/g, `\`Squad v${version}\``);
   return stamped;
@@ -56,7 +56,7 @@ export function readInstalledVersion(filePath: string): string | null {
     if (!storage.existsSync(filePath)) return null;
     const content = storage.readSync(filePath) ?? '';
     // Try to read from HTML comment first (new format)
-    const commentMatch = content.match(/<!-- version: ([0-9.]+(?:-[a-z]+(?:\.\d+)?)?) -->/);
+    const commentMatch = content.match(/<!-- version: ([^\s>]+) -->/);
     if (commentMatch) return commentMatch[1]!;
     // Fallback: try old frontmatter format for backward compatibility during upgrade
     const frontmatterMatch = content.match(/^version:\s*"([^"]+)"/m);
