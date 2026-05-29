@@ -316,3 +316,58 @@ Protocol-change specs (any piece that alters an agent-observable behavior or mod
 This pattern was invented for piece 29 (TEAM_ROOT/WORK_ROOT protocol change). It is reusable for any future piece that changes coordinator templates or agent charter files that are read at session initialization.
 
 ---
+
+---
+
+### 2026-05-29: Deprecated alias targets and deprecation-warning mechanism for piece 26
+
+**By:** EECOM
+
+**What:** `projectDir` maps to `workSquadDir` (the `.squad/` directory in the product repo), not to `workRoot`. `teamDir` maps to `teamRoot` (the team repo root), not `teamSquadDir`. Deprecation fires via `Object.defineProperties` getters on the returned shape, guarded by a module-level `_deprecationFired` map (exported for test resets) so `console.warn` fires at most once per process per alias.
+
+**Why:** The original `projectDir` semantics pointed to the `.squad/` directory (what is now `workSquadDir`), not the repo root. Mapping it to `workRoot` would have silently broken all callers that use the path to write files inside `.squad/`. Similarly, `teamDir` historically pointed at the team repo root, so it maps to `teamRoot`. The once-per-process guard prevents noisy log spam in long-running CLI sessions while still giving downstream consumers a clear migration signal. The `_deprecationFired` export is the stable test-reset contract for pieces 27+.
+
+
+---
+
+### 2026-05-29: EECOM Piece 27 — Pre-existing build and scrub-gate baseline
+
+**Author:** EECOM
+**Piece:** 27 — explicit sync command
+
+## Build failure baseline
+
+`npm run build` was failing BEFORE piece 27 changes on branch `squad/piece-26-cross-repo-bind-config` (the piece-26 tip). Confirmed by stashing piece-27 changes and running `npm run build` — same errors produced.
+
+Failing files (all pre-existing, not touched in piece 27):
+- `packages/squad-cli/src/commands/doctor.ts` — imports missing SDK exports (`clonesMatch`, `isValidCallsign`, `normalisedPathKey`, `normalizeRemoteUrl`)
+- `packages/squad-cli/src/commands/init.ts` — imports missing SDK exports
+- `packages/squad-cli/src/commands/unassign.ts` — imports missing SDK exports
+
+Root cause: SDK refactor in an earlier piece removed or renamed these exports. CLI commands referencing them were not updated. This is a separate work item and not within piece 27 scope.
+
+**Action:** Flight or the next scheduled piece should reconcile CLI commands against current SDK exports. No piece-27 files introduce new TypeScript errors (confirmed via targeted `tsc --noEmit` check).
+
+## Scrub-gate Gate 1 baseline
+
+Scrub gate exits 1 due to pre-existing strip-listed paths:
+- `docs/_internal/` directory (16 files)
+- `templates/casting/`, `templates/identity/`, `templates/orchestration-log.md`
+- `packages/squad-cli/templates/` and `packages/squad-sdk/templates/` equivalents
+- `packages/squad-sdk/src/casting/`
+
+These paths have been present since before piece 08a. Per piece-08a coordinator decision: "Scrub gate failures are pre-existing upstream baseline contamination, not piece responsibility." The strip-list was designed to exclude MS-internal Windows wireless team artifacts; Squad's own product directories (`/casting/`, `/identity/`, `orchestration-log`) match the pattern incidentally. Piece 27 introduces zero new strip-listed paths.
+
+Gate 2 (wifi-aware): PASS
+Gate 3 (akubly mentions): WARN — `.squad/` state files only, expected
+Gate 4 (internal mentions): WARN — `.squad/` state files only, expected
+Gate 5 (ADO fixtures): PASS
+Gate 6 (file count): PASS (13 files)
+
+## Wiring test pre-existing failures
+
+Two wiring test failures pre-date piece 27:
+- `commands/doctor-types.ts is imported in cli-entry.ts` — FAIL (pre-existing)
+- `commands/init-remote.ts is imported in cli-entry.ts` — FAIL (pre-existing)
+
+These are not piece 27 responsibility. `sync` now passes the wiring test (wire added in piece 27).
