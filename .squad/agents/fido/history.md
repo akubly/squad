@@ -356,3 +356,7 @@ FIDO reviewed six pieces (24, 25, 32, 32-nits, 32-verify, 32.5) across May–Jun
 - Test isolation needs pinned env vars across all test cases
 
 Full details in entries above (Piece 32.5 entry contains adversarial findings re: idempotency, sessionId, PII-test robustness, boundary testing).
+- 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.
+- 2026-05-28: Piece-25 revision (commit 185617e) — EECOM folded all approved nits (N1+N2+N3); gates clean.
+
+📌 **Team update (2026-05-28 — Scope Scrub & Version Parser Fix):** EECOM completed rescope across 179 files (stale @bradygaster → @wifi-aware). Bonus fix: resolved version parser bug blocking 0.9.6-mc.preview.NN builds. Pattern: `applyVersionStamp` regex needed widening to handle preview suffix chains. Commits: 1823d761 (fix regex), abaad5d1 (rescope+changeset), 23fa339d (docs). Classification heuristic learned: when rescoping references across test fixtures and CLI args, prioritize test contracts first (mocks lock expectations), then internal wire, then surface docs. Flagged two items pending Brady review: Watch Mode refs in squad.agent.md, upgradeSDK mock origin in cli.test.ts (pre-existing from 8600b1a4).
