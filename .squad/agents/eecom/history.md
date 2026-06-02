@@ -8,6 +8,10 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active (Summary)
 
+📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your adversarial findings (CRITICAL allowlist, traversal guards, atomic metadata, fail-closed behavior) were addressed in CONTROL R2 commit aff12874. Flight gate approved all 23 items; both mutation guards confirmed live.
+
+📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Piece 28 revision landed: all 8 CONTROL code items + 7 test items merged; Flight gate approved commit aff12874. EECOM lockout closed. Ready for next scheduled work.
+
 **Pieces 15–24:** SDK lifecycle, registry health/doctor/fuzzy-match, init/unassign/bind refactors, Copilot payload orchestration, OTEL typing. All gate-cleared; revisions closed. Archive: pieces 1–14 in `history-archive.md`.
 
 ### Piece 09/10 Revisions (2026-05-15)
@@ -85,3 +89,4 @@ Piece 27 (explicit sync command) completed adversarial review with three indepen
 Older context (pieces 1–14, Q1 2026) in `history-archive.md`: template sync patterns, cherry-pick conflicts, loop command refactors, pre-Phase B lifecycle.
 
 ---
+📌 **2026-06-02 Piece 29 Spawn-Contract Update — Five Variables Required (Commit b642f9cd):** Piece 29 replaces single TEAM_ROOT label with five-variable protocol (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS). All future agent prompts must include all five without optional omission. State reads/writes via TEAM_ROOT; product work in WORK_ROOT. Backward-compat projection at WORK_ROOT/.squad is read-only. Session restart required for any active sessions.

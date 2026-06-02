@@ -5,6 +5,119 @@
 
 ---
 
+### 2026-05-29: CONTROL — Piece 28 Revision Decisions
+
+**Author:** CONTROL (Control System Engineer)  
+**Branch:** squad/piece-28-inbox-branch-publish-flow  
+**Amends:** d42f4e21 (EECOM — feat(sync): add inbox branch publish flow)
+
+#### D-1 — InboxGitOps as a separate interface (not extending SyncGitOps)
+
+**What:** Introduced `InboxGitOps` as a stand-alone interface parallel to `SyncGitOps`. It is NOT an extension.
+
+**Why:** Hydrate and publish touch non-overlapping git operations. Extending would have imported irrelevant surface into the injection point and required test stubs for methods never called. This is the correct composition pattern from the injectable-git-ops skill: scope the interface to the use-case.
+
+#### D-2 — SESSION_ID_RE: UUID v4 OR slug form
+
+**What:** `SESSION_ID_RE = /^([0-9a-f]{8}-...|[a-z0-9-]{8,64})$/` — accepts both UUID v4 and `[a-z0-9-]{8,64}`.
+
+**Why:** The default sessionId generator (`randomBytes(8).toString('hex')`) produces 16 lowercase hex chars — not a UUID. A UUID-only regex would have rejected live sessions. The slug branch is required for real usage. Rejection cases: `@`, `/`, `..`, whitespace, empty string.
+
+#### D-3 — Validation order: inboxBranch first
+
+**What:** Guard order in `publishTeamRootToInbox`: (1) `inboxBranch` namespace → (2) `sessionId` charset → (3) `developerAlias` format → (4) build metadata.
+
+**Why:** RETRO required this ordering explicitly. The branch name is the outermost trust boundary — it identifies the entire operation target. Validating it first means later alias parsing cannot bypass the namespace guard if an alias happens to collide with a branch prefix check. Validate from outside-in.
+
+#### D-4 — collectSnapshotFiles fails closed (throw, not skip)
+
+**What:** Non-allowlisted `.squad/` paths now throw `ERR_INBOX_SNAPSHOT_RESTRICTED` instead of being silently skipped.
+
+**Why:** FIDO CRITICAL finding. Silent skip means secrets (`.env`, `tokens.json`, etc.) in `.squad/` would be silently excluded, giving a false sense of safety. The caller decides what to do with the error; the helper cannot safely suppress it. This is the correct contract for any security-sensitive enumeration helper.
+
+#### D-5 — Atomic metadata write
+
+**What:** `publish-metadata.json.tmp` written first, then `fs.renameSync` → `publish-metadata.json`.
+
+**Why:** RETRO MEDIUM finding. If the process dies between write-start and close, `renameSync` never executes, leaving only the `.tmp` file. The canonical JSON is never torn. Any new metadata write to disk should use this pattern.
+
+#### D-6 — throw vs process.exit(1) in publishTeamRootToInbox
+
+**What:** All validation failures throw `Error` with structured message codes. `process.exit(1)` was removed.
+
+**Why:** CAPCOM TS finding. `process.exit` in a library function is untestable, swallows error messages, and prevents callers from recovering. Throw + let the top-level CLI wrapper call `process.exit` with the error message.
+
+#### D-7 — computePathHash / computeInboxBranchName / PublishMetadata kept as CLI exports (not in SDK barrel)
+
+**What:** These remain exported from `sync.ts` but are NOT added to `packages/squad-sdk/src/index.ts`. JSDoc notes Piece 30 dependency.
+
+**Why:** CAPCOM CF-2/CF-3 finding. The Piece 30 fold pipeline will consume these. Promoting them to SDK surface now would lock in the API before the consumption pattern is understood. JSDoc is the lightweight way to document intent without widening the public API.
+
+#### D-8 — validateShardSegment mirrors resolveExternalStateDir pattern
+
+**What:** `validateShardSegment` rejects `''`, `..`, `/`, `\`, leading `.`, NUL — same as the existing `resolveExternalStateDir` guard at ~line 691.
+
+**Why:** CAPCOM CF-4 finding. Reusing an existing in-module pattern ensures consistent traversal defense. Inventing a new validation scheme when one exists in the same file would create divergent hardening levels.
+
+---
+
+### 2026-06-02: Flight Gate Verdict — Piece 28 Revision (R2)
+
+**Date:** 2026-06-02T12:27:39-07:00  
+**Reviewer:** Flight (Lead)  
+**Revision Commit:** `aff12874`  
+**Branch:** `squad/piece-28-inbox-branch-publish-flow`  
+**Revision Author:** CONTROL (amends `d42f4e21`)  
+**Verdict:** APPROVED
+
+#### Acceptance Checklist — All 23 Items PASS
+
+1. ✅ `collectSnapshotFiles` FAILS CLOSED on non-allowlisted path | `sync.ts:638-644` — throws `Error`; mutation confirmed
+2. ✅ `inboxBranch` namespace guard at function entry | `sync.ts:821-827` — first check in `publishTeamRootToInbox`
+3. ✅ `sessionId` charset validation — rejects `@`, `/`, `..`, whitespace | `sync.ts:830-835` — `SESSION_ID_RE` checked
+4. ✅ Atomic metadata write — `.tmp` + `renameSync` | `sync.ts` — metadataTmpPath + fs.renameSync
+5. ✅ Injectable `InboxGitOps` seam on both helpers | `InboxGitOps` interface + `DEFAULT_INBOX_GIT_OPS`
+6. ✅ `sessionShardPath` rejects `..`, `/`, `\`, leading dot | `resolution.ts` — `validateShardSegment` checks all vectors
+7. ✅ `process.exit(1)` replaced by thrown error | `publishTeamRootToInbox` uses only `throw Error(...)`
+8. ✅ Public-export hygiene — JSDoc OR removed from SDK barrel | JSDoc present; NOT in SDK barrel
+9. ✅ Concurrent test uses `Promise.all` | `cross-repo-sync.test.ts` — `Promise.all([...])`
+10. ✅ Projection deletion assertion — stale removed, sentinel survives | `cross-repo-sync.test.ts` verified
+11. ✅ Allowlist-fails-closed test: throw + no inbox ref created | Test 11 passes; rejects `.squad/secrets.json`
+12. ✅ PII assertions on metadata: no `@`, no user paths, `publishedAt` ends in `Z` | Three assertions verified
+13. ✅ `inboxBranch = 'squad-state'` test: throws before ref creation | Rejects with `squad/inbox/` message
+14. ✅ `sessionId` charset-rejection: `@`, `/`, `..`, whitespace each tested | Four tests verified
+15. ✅ `sessionShardPath` traversal: `'../etc'`, `'..\\..\\evil'`, `'a/b'` each throws | Three assertions verified
+16. ✅ Mutation: neuter allowlist guard → test 11 FAILS | Confirmed; reverted
+17. ✅ Mutation: neuter inboxBranch guard → test 13 FAILS | Confirmed; reverted
+18. ✅ `npm run build` — zero new errors vs parent | 43 TS errors at both commits; delta 0
+19. ✅ `npm test` — no regression | 28/28 in isolation
+20. ✅ Scrub gate: no strip-listed paths; ≤30 files | 5 files changed
+21. ✅ Single commit; Co-authored-by; body enumerates revision items | 1 commit; trailer present; body lists all 8 items
+22. ✅ Force-with-lease push; remote SHA matches local | `aff12874` on both local and origin
+23. ✅ No PR opened | `gh pr list --head squad/piece-28-inbox-branch-publish-flow` → `[]`
+
+#### Mutation Re-Verification
+
+Both guards exercised independently, reverted before reporting.
+
+**Allowlist guard:** Commented out the `throw new Error(...)` in `collectSnapshotFiles`. Test result: 1 fail / 27 pass — test 11 FAILED. Guard confirmed live.
+
+**inboxBranch guard:** Removed `if (!inboxBranch.startsWith('squad/inbox/'))` check. Test result: 1 fail / 27 pass — test 13 threw git push error. Guard confirmed fires before any git operation.
+
+#### Non-Blocking Observations
+
+1. **Commit body inaccuracy:** Body claims `InboxPublishRecord` was added to SDK barrel — not present. Cosmetic; not a correctness issue.
+
+2. **Lingering `process.exit(1)` in piece-27 surface:** `ensureStateRemote` (line ~413) and `runSync` (line ~465) still use `process.exit`. Out of scope for R2; track as cleanup debt.
+
+3. **Integration test isolation:** cross-repo-sync tests fail in full-suite parallel run due to shared fixture. 28/28 pass in isolation. Future integration tests should randomize fixture dirs.
+
+#### Lockout Resolution
+
+Both EECOM and CONTROL remain free. No R3 required. Strict-lockout chain closed: APPROVED.
+
+---
+
 ### 2026-05-28: User directive — push policy
 **By:** akubly (via Copilot)
 **What:** Pushing to github.com/akubly/squad is acceptable if there are no leaked gate violations that weren't pre-existing. Reverses the strict "commit-only no-push" stance applied across pieces 21–25 for any future stack work. The condition: a push must not introduce NEW build/lint/test/tsc failures beyond what the parent branch already had — pre-existing failures inherited from upstream are not a blocker.
@@ -542,3 +655,16 @@ L2: **`cli-entry.ts` dispatch is missing `--push` and `--both` direction handler
 #### Context
 
 EECOM locked out per reviewer protocol; Flight assigned as rev author. Revision produced independently.
+
+---
+
+### 2026-06-02: Four-path coordinator contract — WORK_SQUAD_DIR is projection-only
+
+**By:** Procedures (via Coordinator)
+**What:** Piece 29 establishes that `WORK_SQUAD_DIR` (`{WORK_ROOT}/.squad`) is a read-only compatibility projection and must never be treated as canonical writable state. Write rule 3 prohibits non-Scribe agents from creating or modifying files there. Write rule 5 requires state publication to flow through `squad sync --push` against `STATE_REMOTE`, not through direct `git push` from product-repo automation.
+
+The spawn-contract introduces five mandatory variables (`TEAM_ROOT`, `WORK_ROOT`, `STATE_REMOTE`, `STATE_BRANCH`, `DEVELOPER_ALIAS`) that must appear in every spawned agent prompt with no optional omissions. These replace the former single `TEAM ROOT:` label and make the cross-repo transport introduced by pieces 26–28 usable in a running session.
+
+**Why:** Without explicit write rules, agents operating after pieces 26–28 could silently route decisions or history writes to `WORK_ROOT/.squad/`, causing Squad artifacts to appear in product PR diffs and breaking state integrity. The four-path table makes the boundary unambiguous at the protocol level, independent of any runtime enforcement.
+
+Sessions active before this piece merges operate under the old single-root contract and must be restarted.

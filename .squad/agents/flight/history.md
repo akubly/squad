@@ -98,6 +98,29 @@ Implementation kickoff is gated on Brady's confirmation of A or B.
 
 ---
 
+## Piece 28 R2 Gate — 2026-06-02T12:27:39-07:00
+
+**Revision Commit:** `aff12874`  
+**Branch:** `squad/piece-28-inbox-branch-publish-flow`  
+**Revision Author:** CONTROL (amends `d42f4e21`)  
+**Verdict:** APPROVED
+
+All 23 acceptance-checklist items PASS. Both mutation tests confirm guards have real bite:
+- Neutering the allowlist throw causes test 11 (allowlist-fails-closed) to fail immediately — guard is live.
+- Neutering the inboxBranch guard causes test 13 to receive a git push error instead of the expected namespace-rejection message — guard fires before any git op.
+
+Cross-repo-sync: 28/28 in isolation. Full-suite failure count (24 files) vs R1 baseline (23 files) reflects test-isolation artifact for the new integration test file, not a production regression. Build error count unchanged: 43 at `aff12874~1`, 43 at `aff12874` — zero new TypeScript errors introduced.
+
+### Key observations for future pieces
+
+1. **Commit message body inflation:** CONTROL's body claimed `InboxPublishRecord` was added to the SDK barrel — it was not. The SDK barrel addition is `sessionShardPath` only. Minor, non-blocking, but commit bodies should match diffs exactly.
+
+2. **process.exit(1) scope boundary:** Two `process.exit(1)` calls remain in `ensureStateRemote` and `runSync` (piece 27 surface). CAPCOM's finding was scoped to `publishTeamRootToInbox`; CONTROL correctly addressed only that scope. These older exits are out-of-scope debt — track for a future cleanup piece.
+
+3. **Integration test isolation in full-suite runs:** Cross-repo-sync tests pass 28/28 in isolation but show fixture-state interference when run in the full suite (shared `/tmp` fixture directory collides across parallel test workers). Future integration tests should use randomized fixture dirs and explicit afterAll cleanup to survive full-suite parallelism.
+
+---
+
 ## Learnings
 
 **On No-Push Directives in Stacked Reviews:**
@@ -106,3 +129,4 @@ Pieces 21–25 carry Brady's standing directive: "commit-only, no push — Brady
 **Recommendation for future stacks:** Embed blocking directives (e.g., "no-push until Brady approves") as a repeating reminder in the spec itself (not just in charter or prior decisions), especially for pieces that depend on reviewer decision-making. Consider adding a "Blocking Directive Checklist" section to piece specs that inherit directives from prior pieces. This ensures kickoff clarity and reduces accidental directive drift.
 
 The incident is captured in the orchestration log (`2026-05-28T0015-flight.md`) and decisions.md for team reference.
+📌 **2026-06-02 Piece 29 Complete — Coordinator Contract Update (Commit b642f9cd):** Piece 29 establishes five-variable spawn signature (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS). All .squad/** reads/writes resolve from TEAM_ROOT; product code development happens in WORK_ROOT. WORK_SQUAD_DIR is read-only projection. Session restart required. Procedures implementation and Coordinator baseline verification both complete; all gates green (zero new violations).

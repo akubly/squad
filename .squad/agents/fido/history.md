@@ -8,6 +8,8 @@ Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPE
 
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils module). All 137 targeted tests GREEN. 11 new tests added per spec. No test assertion changes. Scrub gate 1 (legacy coverage) pre-existing baseline carryover approved by Brady; gates 2–6 pass. Decision merged to decisions.md: path-utils canonical home policy. Branch ready for Phase C (PR review). Next session: piece 05.
 
+📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your FIDO adversarial findings (CRITICAL allowlist, atomic metadata, fail-closed behavior) were fully addressed in CONTROL R2 commit aff12874. Flight gate approved; all mutation guards confirmed live (28/28 tests pass in isolation).
+
 ## Learnings — Summary (see history-archive.md for full pre-2026-05-28 details)
 
 Key patterns from recent reviews:
@@ -77,3 +79,4 @@ pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9
 - Build baseline validation: `npm run build` output on parent vs child — zero new errors is sufficient evidence for pre-existing claim.
 
 ## Archive — Older Learnings (see history-archive.md for pre-2026-05-28 full details)
+📌 **2026-06-02 Piece 29 Coordinator Protocol — Cross-Repo Multi-Root Support (Commit b642f9cd):** Piece 29 protocol update establishes four-path coordinator model: TEAM_ROOT (canonical state), TEAM_SQUAD_DIR, WORK_ROOT (product repo), WORK_SQUAD_DIR (projection). Five spawn-contract variables now required for all agent dispatches. Write rules prohibit non-Scribe agents from modifying WORK_SQUAD_DIR directly. State publication via squad sync --push only. Scrub gates verified clean; zero new violations vs piece-28 baseline.
