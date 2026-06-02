@@ -5,6 +5,29 @@
 
 ---
 
+### 2026-06-02: Piece 29 adversarial-review nit revision complete
+
+**By:** Flight (revision author, per lockout protocol — Procedures locked out)
+**Branch:** `squad/piece-29-team-root-work-root-protocol`
+**Revision SHA:** b7ff4f99 (atop b642f9cd)
+**Pattern:** Same-branch revision (mirrors piece-27 precedent, commit 5d8509f4)
+
+**Nits resolved:**
+
+- **M1 (Flight N1 + PAO N1):** Explore agent spawn pattern updated to carry all five mandatory variables (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS) with consistent `KEY: value` format. Old `TEAM ROOT:` (space, no underscore) format eliminated.
+
+- **M2 (Flight N2):** Added "WORK_ROOT resolution procedure" paragraph documenting actual SDK semantics: `loadDirConfig()` reads `teamRoot` from `{WORK_ROOT}/.squad/config.json`; resolves relative to WORK_ROOT; absent config → TEAM_ROOT == WORK_ROOT fallback.
+
+- **M3 (PAO N2):** Added "Single-repo case" callout. When TEAM_ROOT == WORK_ROOT, four paths collapse to two; write rules still apply; Coordinator must still pass both variables in spawn prompts.
+
+**Test delta:** +45 new assertions (80 → 125 total in `team-root-work-root-protocol.test.ts`). `template-sync.test.ts` unchanged (160/160).
+
+**Scrub-gate:** Zero new violations vs parent. Gate 1 FAIL + Gate 3/4 WARN are pre-existing baseline per prior decisions.
+
+**Files changed (6):** canonical template, 4 mirrors, 1 test file.
+
+---
+
 ### 2026-05-29: CONTROL — Piece 28 Revision Decisions
 
 **Author:** CONTROL (Control System Engineer)  

@@ -10,6 +10,8 @@ Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPE
 
 📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your FIDO adversarial findings (CRITICAL allowlist, atomic metadata, fail-closed behavior) were fully addressed in CONTROL R2 commit aff12874. Flight gate approved; all mutation guards confirmed live (28/28 tests pass in isolation).
 
+📌 **Team update (2026-06-02T21:16:49Z — Piece 29 Nit Revision Complete):** All 3 mandatory nits resolved (Flight, PAO identified M1+M3; Flight identified M2). Your mutation-test verification pass on baseline team-root-work-root-protocol.test.ts (+45 new assertions) gave confidence for revision. SHA b7ff4f99 pushed. Tests: 223/223 green. Scrub-gate zero new violations. Ready for Phase C.
+
 ## Learnings — Summary (see history-archive.md for full pre-2026-05-28 details)
 
 Key patterns from recent reviews:
@@ -80,3 +82,10 @@ pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9
 
 ## Archive — Older Learnings (see history-archive.md for pre-2026-05-28 full details)
 📌 **2026-06-02 Piece 29 Coordinator Protocol — Cross-Repo Multi-Root Support (Commit b642f9cd):** Piece 29 protocol update establishes four-path coordinator model: TEAM_ROOT (canonical state), TEAM_SQUAD_DIR, WORK_ROOT (product repo), WORK_SQUAD_DIR (projection). Five spawn-contract variables now required for all agent dispatches. Write rules prohibit non-Scribe agents from modifying WORK_SQUAD_DIR directly. State publication via squad sync --push only. Scrub gates verified clean; zero new violations vs piece-28 baseline.
+
+## Learnings
+
+- **indexOf-with-colon pattern** for spawn-variable ordering assertions (e.g., `content.indexOf('WORK_ROOT:')`) doubles as a rename-detection guard — if the variable name changes, indexOf returns -1, failing the > -1 check before the ordering check even runs. Useful trick for template governance.
+- **Lookbehind-based negative guards** (e.g., `(?<!never|must not)` before a grant phrase) effectively detect accidental permission drift in prompt templates without flagging the prohibition itself. Remember this for future write-discipline tests.
+- **Stray .tmp files** from sync-templates.mjs can break the "no extra files" guard in template-sync tests. Always check for and clean untracked artifacts before concluding test failures are real regressions.
+- **Gate-1 "changed file count"** is the only metric expected to differ between parent and child commits; all other gate results should be byte-identical for a baseline-clean piece.

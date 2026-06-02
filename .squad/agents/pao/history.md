@@ -28,6 +28,8 @@ See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc re
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. PAO owns GitHub auth docs (#488), REPL documentation gate (#478), and Guide v0.4.1 refresh (#476). High community value on Guide update. Ready to begin documentation work on next sprint.
 
+📌 **Team update (2026-06-02T21:16:49Z — Piece 29 Nit Revision Complete):** Your mandatory nits (N1 explore-spawn five-variable contract, N2 single-repo case callout) landed as M1 and M3 in Flight's revision. All 3 mandatory nits now resolved (SHA b7ff4f99). Spawn-template scannability improved: STATE_REMOTE/STATE_BRANCH/DEVELOPER_ALIAS now carry inline purpose notes. Tests: 223/223 green. Ready for Phase C.
+
 ---
 
 ## 📌 Team Update — Piece 21 Ship Gate Cleared
@@ -36,3 +38,12 @@ See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc re
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+## 📌 Piece 29 Adversarial Review — 2026-06-02
+
+- **New pattern:** PAO pulled into adversarial review panel for prose-heavy template changes. Scope: readability/comprehension/tone (not architecture or security).
+- Coordinator template is "audience-facing doc" for agents — same scannability standards apply as external docs.
+- Key finding: spawn variable blocks need inline purpose hints; variables without context cause hesitation on cold spawn.
+- Deep-probe walkthrough (line-by-line as fresh agent) is an effective technique for surfacing comprehension gaps invisible to the author.

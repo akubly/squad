@@ -8,6 +8,10 @@
 
 **Pieces 01–03 Foundation:** Established core security model — registry validation, callsign character-set restrictions, symlink defense via `lstatSync`. All git invocations injection-free (`execFileSync` array args, no shell).
 
+📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your RETRO adversarial findings (validation ordering, atomic metadata write, fail-closed semantics) were fully addressed in CONTROL R2 commit aff12874. Flight gate approved; both guards confirmed live via independent mutation tests.
+
+📌 **Team update (2026-06-02T21:16:49Z — Piece 29 Nit Revision Complete):** Piece 29 adversarial review security assessment approved. All 3 mandatory nits resolved in same-branch revision by Flight (SHA b7ff4f99). No new security surfaces introduced; attack-surface assessment confirmed SAFE-FAIL on all vectors. Pushed to origin. Ready for Phase C.
+
 **Pieces 08–10 Lifecycle:** Hardened path validation. Piece 08b: added `path.isAbsolute()` and `..`-segment detection for `--home` and `--cwd`; env isolation. Piece 10: registry guards unified across all callsign sources (flag, env, default); symlink sentinel logic prevents redirect-escape. Result: fail-closed pattern established across init and assignment flows.
 
 **Key hardening pattern:** Validation at resolver boundary + atomic file operations. Applied in 05bd332f (piece 02), revisions 1a47e601 (piece 14), ff55ecf7 (piece 08c), and piece 10 revisions.
@@ -104,3 +108,12 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 **Privilege boundary — clean:** No `git config --global` anywhere. All config operations are repo-local.
 
 **Pattern to carry forward:** When a remote name or alias will later be interpolated into a git refspec, add a charset allowlist at the validation boundary BEFORE the feature that uses it lands. Piece 27 validates presence only; piece 28+ inbox refspecs will need `[a-z][a-z0-9-]{0,38}` enforcement at the alias guard site in `runSync()`.
+
+### Piece 29 Adversarial Review (2026-06-02)
+
+**Verdict:** APPROVE-WITH-NITS (0 critical, 0 high, 2 medium, 2 low)
+
+- Template-only changes that add spawn-contract variables do NOT introduce shell-injection risk because agent platforms consume prompt text as structured data, not shell scripts. Platform-level absolute-path enforcement on file tools is a defence layer beyond prompt guidance.
+- Prompt-only write guards (WORK_SQUAD_DIR rule 3) are the current architectural norm. Flag for hook-based enforcement in a future governance piece, but do not block template changes that use the existing model.
+- DEVELOPER_ALIAS charset validation at the CLI boundary (`[a-z][a-z0-9-]{0,38}$`) is the definitive injection defence for the alias surface. Confirm it remains intact when reviewing any piece that threads the alias into new contexts.
+- Scribe orphan-push uses hardcoded `origin` — verify this remains true if STATE_REMOTE is ever generalized to Scribe's git operations.
