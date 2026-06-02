@@ -132,6 +132,19 @@ describe('hook chaining', () => {
 
     expect(afterSecond).toBe(afterFirst);
   });
+
+  // Nit 2 — force:true must be idempotent (no duplicate squad sections)
+  it('force reinstall is idempotent — exactly one squad section after two force calls', () => {
+    seedFakeGitDir(WORK_ROOT);
+
+    installHooks(WORK_ROOT, true);
+    installHooks(WORK_ROOT, true);
+
+    const content = readFileSync(join(HOOKS_DIR, 'post-merge'), 'utf-8');
+    const markerCount = (content.match(/squad-sync-hook/g) ?? []).length;
+    expect(markerCount).toBe(1);
+    expect(content).toContain('SQUAD_SYNC_ACTIVE');
+  });
 });
 
 // ---------------------------------------------------------------------------

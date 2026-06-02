@@ -160,12 +160,17 @@ function installHook(hooksDir: string, hookName: string, content: string, force:
     // Already has our marker — skip unless force
     if (existing.includes(SQUAD_HOOK_MARKER)) {
       if (!force) return 'skipped';
-      // Force: remove old squad section and re-append
-      const cleaned = existing.split('\n').filter(line => {
-        // Remove lines between markers
-        return true; // simplified: just replace the file
-      }).join('\n');
-      // For simplicity on force, rewrite with chaining
+      // Force: strip the old squad section and write a fresh replacement
+      const markerIdx = existing.indexOf(SQUAD_HOOK_MARKER);
+      const beforeSquad = existing.slice(0, markerIdx).trimEnd();
+      const squadSection = content.split('\n').slice(1).join('\n'); // remove #!/bin/sh
+      // If there is a meaningful user portion before our marker, chain; otherwise write fresh.
+      const isUserPortion = beforeSquad.split('\n').some(l => l.trim() && !l.startsWith('#!'));
+      const newContent = isUserPortion
+        ? beforeSquad + '\n\n' + squadSection
+        : content;
+      fs.writeFileSync(hookPath, newContent, { mode: 0o755 });
+      return 'installed';
     }
 
     // Chain: existing hook runs first, then squad hook (without shebang)

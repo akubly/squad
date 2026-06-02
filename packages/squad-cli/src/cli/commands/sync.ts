@@ -15,6 +15,16 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import type { SquadDirConfig } from '@bradygaster/squad-sdk';
+
+// Bridge: the installed SDK version predates stateRemote/developerAlias additions.
+// Augmenting here preserves compile-time field-rename safety against the SDK interface.
+declare module '@bradygaster/squad-sdk' {
+  interface SquadDirConfig {
+    stateRemote?: string;
+    developerAlias?: string;
+  }
+}
 
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';
 const STATE_BRANCH_PREFIX = 'squad-state';
@@ -269,30 +279,26 @@ function syncPush(cwd: string, remote: string, backend: string | null, quiet: bo
 }
 
 /**
- * Read stateRemote from .squad/config.json, returns undefined if absent.
+ * Typed subset of .squad/config.json fields used by sync.
+ * Typed against SquadDirConfig so field renames in the SDK schema produce tsc errors.
  */
-function readStateRemoteFromConfig(repoRoot: string): string | undefined {
-  try {
-    const configPath = path.join(repoRoot, '.squad', 'config.json');
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw);
-    return config.stateRemote || undefined;
-  } catch {
-    return undefined;
-  }
-}
+type SyncConfig = Pick<SquadDirConfig, 'stateRemote' | 'developerAlias'>;
 
 /**
- * Read developerAlias from .squad/config.json, returns undefined if absent.
+ * Read sync-relevant fields from .squad/config.json with full type safety.
+ * Returns null when the file is absent or unparseable.
  */
-function readDeveloperAliasFromConfig(repoRoot: string): string | undefined {
+function readSyncConfig(repoRoot: string): SyncConfig | null {
   try {
     const configPath = path.join(repoRoot, '.squad', 'config.json');
     const raw = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw);
-    return config.developerAlias || undefined;
+    const parsed = JSON.parse(raw) as Partial<SquadDirConfig>;
+    return {
+      stateRemote: typeof parsed.stateRemote === 'string' ? parsed.stateRemote : undefined,
+      developerAlias: typeof parsed.developerAlias === 'string' ? parsed.developerAlias : undefined,
+    };
   } catch {
-    return undefined;
+    return null;
   }
 }
 
@@ -342,9 +348,10 @@ export async function runSync(options: SyncOptions): Promise<void> {
     const repoRoot = options.workRoot ?? getRepoRoot(cwd);
 
     // Remote resolution: CLI flag → config → default
+    const syncConfig = readSyncConfig(repoRoot);
     const remote =
       options.remote ??
-      readStateRemoteFromConfig(repoRoot) ??
+      syncConfig?.stateRemote ??
       'squad-docs';
 
     const gitOps = options.gitOps ?? DEFAULT_SYNC_GIT_OPS;
@@ -361,9 +368,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
       const alias =
         options.developer !== undefined
           ? options.developer
-          : readDeveloperAliasFromConfig(repoRoot);
+          : syncConfig?.developerAlias;
 
-      if (!alias) {
+      if (!alias || !alias.trim()) {
         console.error(
           `squad sync: --developer <alias> is required for push operations.\n` +
           `  Provide it via: squad sync --push --developer <alias>\n` +

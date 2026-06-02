@@ -257,7 +257,7 @@ describe('--developer alias guard', () => {
 
     // Should NOT exit 1
     await expect(
-      runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true, gitOps }),
+      runSync({ direction: 'push', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
     ).resolves.not.toThrow();
   });
 
@@ -267,8 +267,90 @@ describe('--developer alias guard', () => {
     const gitOps = makeGitOps({ remotes: ['squad-docs'] });
 
     await expect(
-      runSync({ direction: 'push', developer: 'bob', workRoot: WORK_ROOT, quiet: true, gitOps }),
+      runSync({ direction: 'push', developer: 'bob', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
     ).resolves.not.toThrow();
+  });
+
+  // Nit 1 — whitespace-only alias must be rejected like empty string
+  it('exits 1 when --developer is a single space', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: ' ', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when --developer is multiple spaces', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: '   ', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when --developer is a tab character', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: '\t', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when --developer is a newline character', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: '\n', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when --developer is tab+newline', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: '\t\n', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when --developer is a control character', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: '\x01', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('whitespace alias error message contains --developer', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', developer: ' ', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('--developer'));
+  });
+
+  it('rejects whitespace-only alias for both direction', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'both', developer: ' ', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('rejects whitespace-only alias for publish-only direction', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot();
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'publish-only', developer: ' ', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
+  });
+
+  it('exits 1 when config developerAlias is whitespace-only', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ developerAlias: '   ' });
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true })).rejects.toThrow('process.exit(1)');
   });
 });
 
@@ -334,5 +416,83 @@ describe('direction flags', () => {
       runSync({ direction: 'publish-only', workRoot: WORK_ROOT, quiet: true }),
     ).rejects.toThrow('process.exit(1)');
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nit 3 — typed config reader (readSyncConfig via runSync behaviour)
+// ---------------------------------------------------------------------------
+
+describe('typed config resolution', () => {
+  it('reads stateRemote from config (typed path)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ stateRemote: 'my-remote', developerAlias: 'alice' });
+    const gitOps = makeGitOps({ remotes: ['my-remote'] });
+
+    // Passes -- remote is resolved from config, not defaulted to squad-docs
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+
+    const listCalls = gitOps.calls.filter(c => c.method === 'listRemotes');
+    expect(listCalls.length).toBeGreaterThan(0);
+  });
+
+  it('reads developerAlias from config (typed path)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ developerAlias: 'carol' });
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+
+    // Must not exit 1 — alias is resolved from typed config
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('returns null config gracefully when config file is absent', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    // seedWorkRoot without config still creates .squad dir, but skip it entirely
+    mkdirSync(join(WORK_ROOT, '.git'), { recursive: true });
+    writeFileSync(join(WORK_ROOT, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    mkdirSync(join(WORK_ROOT, '.squad'), { recursive: true });
+    // no config.json written
+
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // pull direction doesn't need alias — should succeed even with null config
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    await expect(
+      runSync({ direction: 'pull', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('returns null config gracefully when config JSON is invalid', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    mkdirSync(join(WORK_ROOT, '.git'), { recursive: true });
+    writeFileSync(join(WORK_ROOT, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    mkdirSync(join(WORK_ROOT, '.squad'), { recursive: true });
+    writeFileSync(join(WORK_ROOT, '.squad', 'config.json'), 'NOT VALID JSON');
+
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => { throw new Error(`process.exit(${_code})`); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    await expect(
+      runSync({ direction: 'pull', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('falls back to squad-docs when stateRemote not in config', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ developerAlias: 'dave' }); // no stateRemote
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, cwd: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+
+    const listCalls = gitOps.calls.filter(c => c.method === 'listRemotes');
+    expect(listCalls.length).toBeGreaterThan(0);
   });
 });
