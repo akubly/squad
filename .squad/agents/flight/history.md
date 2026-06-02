@@ -18,6 +18,8 @@ See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots,
 
 ## 📌 Team Updates — Recent
 
+**2026-06-02 Piece 29 Adversarial Review Complete (4 Reviewers, APPROVE-WITH-NITS):** Flight (lead), FIDO, RETRO, PAO conducted adversarial review of coordinator template. Three convergent mandatory themes: (1) Explore agent spawn omits WORK_ROOT (Flight N1 + PAO N1); (2) WORK_ROOT resolution undocumented (Flight N2); (3) Single-repo case unaddressed (PAO N2). Procedures locked out. Candidate revision authors: EECOM, Flight, or CONTROL. Awaiting user decision.
+
 **2026-05-28 Piece 25 Implementation Complete — Commit e67e0959:** Piece 25 (resolver rename + CLI hardening, D-18/CONTROL N2/CONTROL Directive 2) implemented and committed to `squad/piece-25-resolver-rename-and-cli-hardening` off piece-24. All gates passed: tsc clean, build clean, lint clean, tests pass (4 new env-seam tests, 46/46 doctor tests, D-18 backward-compat test). Net production LOC: +23 (within ≤50 acceptance criteria). CONTROL Directive 2 was already present from piece-23; piece-25 work was import alias update only. PR blocked by EMU restriction — branch pushed to origin.
 
 📌 **2026-05-28 Piece 25 Revision Clean (Commit 185617e):** EECOM folded approved nits (N1+N2+N3); all gates clean (tsc/build/lint passed; doctor.test.ts 47/47; full vitest red inherited only). Revision complete.
@@ -130,3 +132,8 @@ Pieces 21–25 carry Brady's standing directive: "commit-only, no push — Brady
 
 The incident is captured in the orchestration log (`2026-05-28T0015-flight.md`) and decisions.md for team reference.
 📌 **2026-06-02 Piece 29 Complete — Coordinator Contract Update (Commit b642f9cd):** Piece 29 establishes five-variable spawn signature (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS). All .squad/** reads/writes resolve from TEAM_ROOT; product code development happens in WORK_ROOT. WORK_SQUAD_DIR is read-only projection. Session restart required. Procedures implementation and Coordinator baseline verification both complete; all gates green (zero new violations).
+
+**2026-06-02 Piece 29 Adversarial Review — Contract Clarity Learnings:**
+1. When a template declares "these N variables are mandatory — never omit any," every spawn pattern in the file must be audited — including inline one-liners (explore agent) that predate the new rule. Stale patterns that escape the search-and-replace are the #1 source of silent-omission bugs.
+2. Introducing a new variable to spawn prompts is only half the contract. The other half is a resolution procedure telling the Coordinator how to COMPUTE the variable's value. TEAM_ROOT has a 6-step chain; WORK_ROOT has none — this is a real gap that will cause ambiguity in cross-repo bind sessions.
+3. Hardcoded defaults in spawn templates (e.g., `STATE_BRANCH: squad-state`) are fine today but should carry a comment noting they are defaults, to prevent future config-driven overrides from silently diverging from the template's baked-in value.

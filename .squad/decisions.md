@@ -118,6 +118,314 @@ Both EECOM and CONTROL remain free. No R3 required. Strict-lockout chain closed:
 
 ---
 
+
+---
+
+### 2026-06-02: Piece 29 adversarial review — Flight verdict
+**By:** Flight (Lead)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- Four-path model is architecturally sound. The TEAM_ROOT/WORK_ROOT split correctly partitions state from code, and the write rules create an unambiguous authority boundary.
+- The three primary spawn templates (Full/Standard/Lightweight + Scribe) all carry the five mandatory variables in consistent order — the contract is well-threaded.
+- Mirror drift is zero — all four copies are byte-for-byte identical to canonical. The sync script and template-sync test remain fit-for-purpose.
+- One significant contract gap exists: the explore agent inline spawn was NOT updated. It still uses old `TEAM ROOT:` format (space, no underscore) and omits WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS — directly violating the "never omit any of them" rule established 100 lines above in the same file.
+- The template mandates passing WORK_ROOT into spawns but provides NO resolution procedure for how the Coordinator determines WORK_ROOT's value at session start. TEAM_ROOT has a detailed 6-step resolution chain; WORK_ROOT has nothing. In the cross-repo bind case, this must come from `.squad/config.json` → `workRoot` field (piece 26), but the template is silent.
+
+**Mandatory nits (must resolve before any PR opens):**
+N1: **Explore agent spawn pattern not updated.** Line ~381: `For read-only queries, use the explore agent: agent_type: "explore" with "You are {Name}, the {Role}. CURRENT_DATETIME: {current_datetime} — {question} TEAM ROOT: {team_root}"` — uses old `TEAM ROOT:` format and omits 4 of 5 mandatory variables. **Counterexample:** Coordinator spawns an explore agent to answer "what tests cover the bind function?" The agent receives only TEAM_ROOT. It `cd`s to the squad-state repo and runs `grep -r "bind"` — finds nothing because tests live in WORK_ROOT which was never provided. Agent reports "no tests found." **Fix:** Update to include all five variables: `TEAM_ROOT: {team_root} WORK_ROOT: {work_root} STATE_REMOTE: {state_remote} STATE_BRANCH: squad-state DEVELOPER_ALIAS: {developer_alias}` and rename to `TEAM_ROOT:` (underscore).
+
+N2: **No WORK_ROOT resolution procedure at session start.** The "On every session start" paragraph instructs: "Pass the Working Directory Model variables (`TEAM_ROOT`, `WORK_ROOT`, …)." But TEAM_ROOT has a 6-step resolution chain (steps 1–6); WORK_ROOT has no equivalent procedure. In the TEAM_ROOT ≠ WORK_ROOT case (cross-repo bind from piece 26), the Coordinator must read `.squad/config.json` → `workRoot` field. In the TEAM_ROOT == WORK_ROOT case (single-repo default), it should be set to CWD/team_root. Neither case is documented. **Counterexample:** A Coordinator starts a session on a repo that was `squad bind`'d to a separate docs sidecar. It resolves TEAM_ROOT correctly via step 2 (symlink). It then has no instruction for WORK_ROOT. It guesses CWD (which IS the product repo) — happens to be correct by coincidence. On a different machine where the user opens the sidecar repo directly, CWD == TEAM_ROOT and WORK_ROOT is undefined. **Fix:** Add a resolution paragraph after the four-path table: "WORK_ROOT resolution: If `.squad/config.json` contains a `workRoot` field, use that absolute path. Otherwise, WORK_ROOT = TEAM_ROOT (single-repo mode)."
+
+**Non-blocking nits:**
+N3: **`STATE_BRANCH` is hardcoded as `squad-state` in all spawn templates.** Piece 27's sync command allows `--branch` override. The spawn templates lock the value to `squad-state` without noting this is a default that config could override. Not blocking because no config-driven branch override exists yet, but creates a future inconsistency surface when it does.
+
+N4: **Init Mode note is minimal.** Line 85: "Init Mode creates `.squad/` in the current repo (which becomes TEAM_ROOT). For shared-squad consumer repos, state is written to TEAM_ROOT (not CWD)." This is the only guidance connecting Init Mode to the new four-path model. It does not address what WORK_ROOT becomes after Init (answer: same as TEAM_ROOT). Minor gap; inferrable from context.
+
+**DEEP PROBE — cross-repo bind scenario:**
+
+Scenario: Developer has two repos:
+- `D:\docs-sidecar` — Squad state repo (TEAM_ROOT), contains `.squad/`
+- `D:\product` — Product repo (WORK_ROOT), contains source code
+- Piece 26's `squad bind` linked them; `D:\docs-sidecar\.squad\config.json` has `"workRoot": "D:\\product"`
+
+The Coordinator starts a session in `D:\product`. Step 2 of the resolution chain finds `.squad` via the symlink/include path. Resolves TEAM_ROOT = `D:\docs-sidecar`.
+
+**Literal spawn prompt the Coordinator would emit (Standard template):**
+
+```
+You are EECOM, the Core Dev on this project.
+
+YOUR CHARTER:
+{contents of D:\docs-sidecar\.squad\agents\eecom\charter.md}
+
+TEAM_ROOT: D:\docs-sidecar
+WORK_ROOT: D:\product
+STATE_REMOTE: squad-docs
+STATE_BRANCH: squad-state
+DEVELOPER_ALIAS: akubly
+CURRENT_DATETIME: 2026-06-02T13:51:32-07:00
+All `.squad/` paths are relative to TEAM_ROOT. Code search, builds, and tests operate from WORK_ROOT.
+
+PERSONAL_AGENT: false
+GHOST_PROTOCOL: false
+...
+```
+
+**Walkthrough:** EECOM receives the prompt. It needs to write a decision after completing work. The prompt says "All `.squad/` paths are relative to TEAM_ROOT." EECOM writes to `D:\docs-sidecar\.squad\decisions\inbox\eecom-fix.md`. ✅ Correct.
+
+EECOM needs to run tests. The prompt says "Code search, builds, and tests operate from WORK_ROOT." EECOM runs `cd D:\product && npm test`. ✅ Correct.
+
+**Failure case (N2):** Now consider the Coordinator itself. It started in `D:\product`. It resolved TEAM_ROOT via the chain. But the template never told it HOW to determine WORK_ROOT. It has two plausible guesses: (a) CWD at session start (`D:\product` — happens to be correct), or (b) undefined/same-as-TEAM_ROOT (`D:\docs-sidecar` — WRONG). Without an explicit resolution rule, a Coordinator implementation that caches CWD before resolving TEAM_ROOT would get it right by accident, but one that reads the prompt literally has no instruction. This is why N2 is mandatory.
+
+**Additional failure case (N1):** The Coordinator spawns an explore agent: `"You are EECOM, the Core Dev. CURRENT_DATETIME: 2026-06-02T13:51:32-07:00 — Find all usages of runBind in tests. TEAM ROOT: D:\docs-sidecar"`. The explore agent searches `D:\docs-sidecar` for test files. Finds none (tests are in `D:\product`). Reports: "No usages found." The user gets a false negative because WORK_ROOT was never communicated.
+
+**Cross-piece consistency:** PARTIAL
+- Piece 26 (bind): The `workRoot` config field introduced by piece 26 is the mechanism for resolving WORK_ROOT, but piece 29's template does not reference it or describe reading it. Contract assumes the Coordinator "just knows" WORK_ROOT.
+- Piece 27 (sync): `STATE_REMOTE` and `DEVELOPER_ALIAS` semantics align perfectly with piece 27's `--remote` and `--developer` flags. The fallback chain (`options.remote ?? config ?? 'squad-docs'`) matches the default in spawn templates.
+- Piece 28 (inbox publish): Write rule 5 ("State publication runs via `squad sync --push` against `STATE_REMOTE`") correctly wraps piece 28's publish flow. No drift.
+
+**Mirror drift:** PASS — all four mirrors byte-for-byte identical to canonical (`fc.exe` confirmed).
+
+**Spawn-template five-variable consistency:**
+- Full spawn template: PASS (5/5 variables present, correct order)
+- Standard spawn template: PASS (5/5 variables present, correct order)
+- Scribe spawn template: PASS (5/5 variables present, correct order)
+- Lightweight spawn template: PASS (5/5 variables present, correct order)
+- Explore agent inline spawn: **FAIL** (1/5 — only TEAM_ROOT present, in old format)
+
+**Cross-reviewer pointers:**
+- FIDO: The test file `team-root-work-root-protocol.test.ts` does not assert that the explore agent spawn pattern contains the five variables — test gap.
+- PAO: The "Working Directory Model" section uses "docs/specs sidecar clone" in the TEAM_ROOT definition, which may be confusing for single-repo users where TEAM_ROOT == WORK_ROOT.
+
+**If REJECT:** N/A — not rejected. Mandatory nits N1 and N2 are fixable without architectural rethink. Procedures is locked out (implementer). If revision needed: recommend EECOM (pure template text change, no type system implications).
+
+
+---
+
+### 2026-06-02: Piece 29 adversarial review — FIDO verdict
+
+**By:** FIDO (Quality Owner)
+**Verdict:** APPROVE
+**Why:**
+- All 60 presence/structural assertions pass (223/223 total with template-sync).
+- Deep mutation probe: both mutations (write rule deletion AND spawn-variable rename) caught immediately by specific assertions — no tautological tests detected.
+- Gate-1 baseline re-confirmed: identical scrub-gate results at `aff12874` (parent) and `b642f9cd` (piece 29). Zero new violations introduced.
+- Write rules use regex patterns tight enough to catch deletion but flexible enough to survive minor rewording (good calibration).
+- Spawn-variable ordering assertion (TEAM_ROOT before WORK_ROOT) adds structural rigor beyond simple presence.
+- Negative guard (section 4) uses lookbehind to verify no accidental write-grant to WORK_SQUAD_DIR — creative and effective.
+
+**Mandatory nits (must resolve before any PR opens):**
+None.
+
+**Non-blocking nits:**
+N1: **Path semantics paragraph untested** — The "Path semantics" paragraph (line 54 in canonical template) specifies which files resolve from TEAM_ROOT vs WORK_ROOT. No assertion verifies this paragraph exists or contains the correct resolution rules. A deletion of this paragraph would go undetected. LOW severity (the write rules cover the actionable constraints; path semantics is informational guidance).
+
+N2: **Section 1 presence tests are trivially satisfiable** — `expect(content).toContain('TEAM_ROOT')` passes if TEAM_ROOT appears *anywhere* in the file (e.g., in prose or comments), not specifically in the four-path table. This is by-design for lightweight governance, but a mutation that removes the table row while leaving TEAM_ROOT in the spawn template wouldn't fire. Acceptable tradeoff — the template-sync byte-for-byte parity test covers table integrity independently.
+
+N3: **Stray `_mirror1.tmp` in `.github/agents/`** — Found during test run; caused template-sync test failure. File is untracked and should be gitignored or cleaned. Not introduced by piece 29 (pre-existing artifact from a prior sync-templates run).
+
+**Mutation-test summary (DEEP probe):**
+- Mutation A (write rule 3 deletion — "Non-Scribe agents must not create or modify files under WORK_SQUAD_DIR"): **CAUGHT** by test "rule 3 — non-Scribe agents must not write under WORK_SQUAD_DIR" (line 83, regex match on content).
+- Mutation B (spawn-variable rename — `WORK_ROOT:` → `WorkRoot:`): **CAUGHT** by test "spawn contract lists TEAM_ROOT before WORK_ROOT" (line 119, `content.indexOf('WORK_ROOT:')` returns -1, assertion fails).
+- Template restored cleanly: **YES** — `git checkout -- .squad-templates/squad.agent.md` executed; `git status` reports "nothing to commit, working tree clean".
+
+**Test/spec parity audit:**
+- Write rules with assertions: **5/5** (all five write rules from canonical template are regex-tested across all 5 copies)
+- Spawn variables with presence tests across all 5 copies: **5/5** (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS — each tested in all 5 locations)
+- Four-path table variables presence-tested: **4/4** (TEAM_ROOT, TEAM_SQUAD_DIR, WORK_ROOT, WORK_SQUAD_DIR)
+- Gaps:
+  - Path semantics paragraph (informational, not write-rule-critical) — no presence test. LOW.
+  - `WORK_SQUAD_DIR` definition as "projection/cache only; never canonical writable state" — tested indirectly via write-permission guard (section 4) but no direct substring assertion on the definition text.
+  - Ordering assertion only checks TEAM_ROOT before WORK_ROOT in the canonical copy (line 116 uses `content.indexOf` on single-file content). All 5 copies tested. ✓
+
+**Gate-1 baseline re-confirmation:**
+- At parent `aff12874`: Gate 1 FAIL (31 strip-listed paths, pre-existing). Gate 2 PASS. Gate 3 WARN (akubly refs in `.squad/` state). Gate 4 WARN (internal refs in `.squad/` state). Gates 5-9 PASS/SKIP.
+- At piece-29 `b642f9cd`: Gate 1 FAIL (same 31 strip-listed paths). Gate 2 PASS. Gate 3 WARN (same refs). Gate 4 WARN (same refs). Gates 5-9 PASS/SKIP. Changed file count: 12 (vs 5 at parent — reflects piece 29 additions).
+- Verdict: **BASELINE CONFIRMED** — zero new violations introduced by piece 29. All gate results are identical in substance; only "changed file count" differs (expected for a new piece).
+
+**Full test suite status:** 223/223 green (60 team-root-work-root-protocol + 163 template-sync). Zero failures after clearing pre-existing stray `_mirror1.tmp`.
+
+**Realistic regression scenario analysis:**
+| # | Mutation | Caught? | By which test? |
+|---|----------|---------|----------------|
+| 1 | Rename WORK_ROOT → PRODUCT_ROOT in spawn template | YES | Section 3 ordering + presence |
+| 2 | Delete write rule 3 entirely | YES | Section 2 rule 3 regex |
+| 3 | Change "must not create or modify" → "should avoid" in rule 3 | YES | Regex requires "must not" |
+| 4 | sync-templates.mjs adds trailing whitespace to mirrors | NO (but caught by template-sync.test.ts byte parity) | Indirectly covered |
+| 5 | Scribe spawn loses DEVELOPER_ALIAS line | YES | Section 3 presence check |
+
+
+---
+
+### 2026-06-02: Piece 29 adversarial security review — RETRO verdict
+**By:** RETRO (Security)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- The four-path model correctly separates writable state (TEAM_ROOT) from code (WORK_ROOT) and marks WORK_SQUAD_DIR as read-only. This is a net positive for security — it makes accidental state-into-product leakage structurally less likely.
+- The spawn-contract variables are passed as prompt-level text, not as shell environment variables or interpolated into command strings. Agents consume them as plaintext path constants. No template prose instructs agents to run `cd $WORK_ROOT` or `git push $STATE_REMOTE` with unquoted shell interpolation — the template uses curly-brace placeholders (`{work_root}`) that resolve before prompt injection reaches an agent.
+- STATE_REMOTE injection remains closed by piece-27's `remotes.includes()` guard in `sync.ts:407`. The new template does NOT introduce any shell-string path that bypasses that check — write rule 5 explicitly says "via `squad sync --push`", routing through the validated CLI code path.
+- DEVELOPER_ALIAS charset validation (`/^[a-z][a-z0-9-]{0,38}$/` at `sync.ts:504`) was landed in piece-28 R2. The regex rejects shell metacharacters, path separators, dots, whitespace, and control characters at the CLI boundary before any git operation. The template does not weaken this — it merely threads the already-validated value into spawn prompts.
+- The WORK_SQUAD_DIR guard is prompt-only (no enforcement hook). This is acknowledged as a design gap but is consistent with the existing model where ALL write-discipline is prompt-enforced for agents. No hook framework exists yet to enforce file-path constraints at runtime.
+
+**Critical findings (BLOCK PR):**
+None.
+
+**High findings (mandatory before PR):**
+None.
+
+**Medium / Low findings (non-blocking):**
+
+M1: **WORK_SQUAD_DIR write guard is prompt-only — no enforcement hook.**
+- Write rule 3 ("Non-Scribe agents must not create or modify files under WORK_SQUAD_DIR") exists only as natural-language instruction. An agent that misunderstands context, hallucinates a path, or is given a conflicting user instruction could write `.squad/` state into the product repo. Per my charter: "hooks are code, prompts can be ignored."
+- Mitigation: This is consistent with the existing model (all agent write discipline is prompt-based today). A future piece should add a file-write guard hook that rejects `WORK_SQUAD_DIR` writes at the tool-call layer. Acceptable to ship without — no regression from pre-29 state.
+- Severity: MEDIUM. The prompt language is clear and unambiguous. Risk requires agent misbehavior, not attacker action.
+
+M2: **DEVELOPER_ALIAS appears in committed files (history.md, decisions.md) without explicit PII classification.**
+- The template threads `DEVELOPER_ALIAS` into spawn prompts. Agents write "Requested by: {user}" into history and decision files. If the alias matches a corporate identity (e.g., GitHub username), it persists in committed state. The template says "Never read or store `git config user.email`" (line 69) but does not classify DEVELOPER_ALIAS as PII or non-PII.
+- Assessment: DEVELOPER_ALIAS is validated as `[a-z][a-z0-9-]{0,38}` — it cannot contain an email address. It is a chosen identifier (like a GitHub handle), not PII in the GDPR Article 9 sense. However, the template should explicitly state that DEVELOPER_ALIAS is safe to commit because it is a pseudonym, not a real-name identifier. Currently ambiguous.
+- Severity: LOW. The charset validation prevents email-as-alias. The gap is documentation clarity, not a leak path.
+
+L1: **Scribe spawn template says "do not write under WORK_ROOT" but provides no guard against CWD confusion.**
+- The Scribe prompt says `Write decisions and logs to TEAM_SQUAD_DIR; do not write under WORK_ROOT.` and defines `SQUAD_DIR: {TEAM_ROOT}/.squad`. This is clear. However, if Scribe's CWD is set to WORK_ROOT (which is the default working tree), a bare `git add .squad/` in step 7 would stage from the wrong root.
+- Mitigation: Step 7 already uses `git-root-relative paths` filtering and explicitly stages individual files under `{SQUAD_DIR}`. The prose says "filtered to allowed git-root-relative paths" — not bare globs. Safe as written. Noting for future hardening.
+- Severity: LOW. Would require Scribe to deviate from explicit per-file staging instructions.
+
+L2: **No explicit "absolute path required" assertion for WORK_ROOT/TEAM_ROOT at coordinator resolution time.**
+- The table says "Absolute path to the product repo root" but there is no validation step in the template prose that says "if WORK_ROOT is not absolute, refuse to proceed." An implementation that resolves WORK_ROOT from user input without calling `path.isAbsolute()` could accept relative paths.
+- Mitigation: The CLI already validates paths at the `resolveSquadDir()` boundary (piece 08 hardening: `path.isAbsolute()` + `..`-segment detection). The template is guidance for prompt-level coordinators that delegate to CLI. Risk is low given existing CLI guards.
+- Severity: LOW. Defence-in-depth note for future coordinator implementation.
+
+**DEEP PROBE — hostile-input scenarios:**
+
+**Scenario A: `WORK_ROOT="..\..\..\..\Windows\System32"`**
+
+Literal spawn prompt the coordinator would emit per template (line 818-824):
+```
+TEAM_ROOT: D:\git\docs-sidecar
+WORK_ROOT: ..\..\..\..\Windows\System32
+STATE_REMOTE: squad-docs
+STATE_BRANCH: squad-state
+DEVELOPER_ALIAS: akubly
+CURRENT_DATETIME: 2026-06-02T13:51:32-07:00
+All `.squad/` paths are relative to TEAM_ROOT. Code search, builds, and tests operate from WORK_ROOT.
+```
+
+Agent walkthrough: The agent reads this spawn prompt. What does it DO with `WORK_ROOT`?
+1. The template says "Code search, builds, and tests operate from WORK_ROOT." An agent would attempt `cd ..\..\..\..\Windows\System32` or `view ..\..\..\..\Windows\System32\some-file`. 
+2. On the Copilot CLI platform, `view` and `edit` tools require absolute paths. A relative WORK_ROOT would fail tool validation immediately ("Path MUST be absolute"). The agent cannot read or write System32 via this path.
+3. If the agent tried `powershell cd ..\..\..\..\Windows\System32 && npm test`, it would cd to an unrelated directory and `npm test` would fail (no package.json). No state corruption occurs.
+4. The template's table definition says "Absolute path" — a coordinator that fills in a relative path violates its own spec. But even if violated, the agent platform's absolute-path requirement on file tools prevents exploitation.
+
+**Verdict: SAFE-FAIL.** Platform-level absolute-path enforcement on file tools prevents exploitation. The agent cannot write to arbitrary paths via a relative WORK_ROOT because `edit`/`create` reject non-absolute paths. Shell commands would fail harmlessly (wrong directory, no targets).
+
+**Scenario B: `DEVELOPER_ALIAS="; rm -rf /"`**
+
+This value would be rejected at the CLI validation boundary. `DEVELOPER_ALIAS_RE = /^[a-z][a-z0-9-]{0,38}$/` (sync.ts:504) rejects semicolons, spaces, slashes, and the string starts with `;` not `[a-z]`. The coordinator cannot obtain this alias from `squad bind` or `config.json` — both paths go through the same regex.
+
+But assume a hostile coordinator manually sets this in a spawn prompt (bypassing CLI):
+```
+TEAM_ROOT: D:\git\docs-sidecar
+WORK_ROOT: D:\git\product
+STATE_REMOTE: squad-docs
+STATE_BRANCH: squad-state
+DEVELOPER_ALIAS: ; rm -rf /
+CURRENT_DATETIME: 2026-06-02T13:51:32-07:00
+```
+
+Agent walkthrough:
+1. The agent sees `DEVELOPER_ALIAS: ; rm -rf /` as a plaintext variable in its prompt context.
+2. The agent would write this value into `history.md` as "Requested by: ; rm -rf /" — this is inert text in a markdown file, not executed.
+3. If the agent attempted `squad sync --push --developer "; rm -rf /"`, the CLI rejects it at the DEVELOPER_ALIAS_RE check (sync.ts:838) with exit 1.
+4. The value never reaches a shell interpolation context. Agent spawn prompts are consumed as structured text, not executed as shell scripts. There is no template guidance that says "run `echo $DEVELOPER_ALIAS`" in a shell.
+
+**Verdict: SAFE-FAIL.** CLI charset validation blocks the value at every programmatic boundary. Even with bypass, the value is consumed as prompt text — never shell-interpolated by the template's guidance. The only consequence is a weird string in history.md.
+
+**Attack surface assessed:**
+- WORK_SQUAD_DIR guard: **partial** — prompt-only, no hook enforcement. Clear language, no ambiguity. Consistent with pre-29 model.
+- TEAM_ROOT / WORK_ROOT path traversal: **pass** — table requires absolute paths; platform file tools enforce absolute paths; CLI resolvers validate with `path.isAbsolute()` + `..`-detection.
+- DEVELOPER_ALIAS surface: **pass** — charset validation at CLI boundary (`[a-z][a-z0-9-]{0,38}$`) blocks all injection payloads. Template does not weaken this.
+- STATE_REMOTE injection: **pass** — write rule 5 routes all publication through `squad sync --push`, which goes through `ensureStateRemote()` → `remotes.includes()`. No new raw `git push $STATE_REMOTE` in template. Scribe orphan-push uses hardcoded `origin`, not STATE_REMOTE.
+- PII / secret leak: **pass** — DEVELOPER_ALIAS charset prevents email-as-alias. Template explicitly prohibits `git config user.email`. Alias is a pseudonym within `[a-z0-9-]` charset.
+- Scribe carve-out: **pass** — Scribe spawn prompt explicitly says "Write decisions and logs to TEAM_SQUAD_DIR; do not write under WORK_ROOT." SQUAD_DIR is anchored to TEAM_ROOT. Orphan-push uses `origin` (not WORK_ROOT remote). No path by which Scribe writes state to WORK_ROOT.
+
+**Cross-piece consistency with piece-27 RETRO findings:**
+- H1 (whitespace alias): **still defended** — piece-27 nit revision landed `!alias || !alias.trim()` in sync.ts. Piece 29 does not modify sync.ts. Guard intact.
+- M4 (alias charset): **newly addressed** — piece-28 R2 landed `DEVELOPER_ALIAS_RE = /^[a-z][a-z0-9-]{0,38}$/` at sync.ts:504 for the publish path. The spawn-contract variable threads this already-validated value. The piece-27 `runSync()` push-direction guard still only checks presence+whitespace (not charset), but the actual dangerous interpolation site (inbox branch name) has full charset validation. Acceptable layering.
+
+**Net assessment:** Piece 29 is a template-only change that improves the security posture by making the TEAM_ROOT/WORK_ROOT boundary explicit. No new injection surfaces introduced. The prompt-only enforcement model (M1) is a known architectural limitation shared with the entire agent framework — not a regression. Ship it.
+
+
+---
+
+### 2026-06-02: Piece 29 adversarial review — PAO verdict
+
+**By:** PAO (DevRel)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- The four-path table is well-structured and scannable — a spawned agent can locate it instantly.
+- Write rules are crisp, numbered, and actionable.
+- Spawn templates now carry all five mandatory variables consistently across lightweight, standard, and Scribe modes.
+- One real comprehension risk exists: the table says "four path variables" but the mandatory spawn contract lists five non-path variables — an agent could confuse "four paths" with "five spawn variables" on first read.
+- The single-repo degenerate case (TEAM_ROOT == WORK_ROOT) is never addressed, which will cause hesitation the first time a mono-repo project spawns agents.
+- Path semantics paragraph is dense; it passes the scannability test only because the preceding table gives it structure — but a split into a two-column table would be stronger.
+
+**Mandatory nits (clarity blocks that will cost the team on every spawn):**
+
+N1: Line 45 — "Every session resolves four path variables" vs. line 146 "Pass the Working Directory Model variables (`TEAM_ROOT`, `WORK_ROOT`, `STATE_REMOTE`, `STATE_BRANCH`, `DEVELOPER_ALIAS`)" — The table defines 4 path variables, but the spawn contract names 5 non-table variables. `STATE_REMOTE`, `STATE_BRANCH`, and `DEVELOPER_ALIAS` are not in the table. An agent reading both passages will ask: "are there four variables or nine?" — Proposed fix: Add a sentence after the table: "Three additional session variables complete the spawn contract: `STATE_REMOTE`, `STATE_BRANCH`, `DEVELOPER_ALIAS`. These are not path variables but are mandatory in every spawn prompt alongside the four paths above."
+
+N2: Line 43–62 — No guidance for the degenerate case where `TEAM_ROOT == WORK_ROOT` (single-repo project with no sidecar). A freshly spawned agent in a mono-repo will read "projection/cache only; never canonical writable state" for `WORK_SQUAD_DIR` and wonder whether writes to `.squad/` are legal since both roots point to the same directory. — Proposed fix: Add after the table: "When the project uses a single repository (no sidecar), `TEAM_ROOT` and `WORK_ROOT` resolve to the same path. All rules still apply — resolve Squad state from `TEAM_ROOT` and product operations from `WORK_ROOT`; the values just happen to be identical."
+
+**Non-blocking nits (polish):**
+
+N3: Line 54 — "Path semantics" paragraph is a single dense sentence listing 7+ glob paths. Converts well to a two-row table: "Resolve from TEAM_ROOT" | "Resolve from WORK_ROOT". Not blocking because the preceding four-path table provides enough scaffolding, but a table would improve scanning speed.
+
+N4: Line 146 — The "On every session start" paragraph now packs two distinct instructions (pass Working Directory Model variables AND pass user name) into one run-on thought. Consider splitting into two sentences: one for the five mandatory variables, one for the user identity pass-through.
+
+N5: Line 1015 (Scribe spawn) — Uses `TEAM_SQUAD_DIR` inline but never defines it in the Scribe prompt's variable block. The Scribe spawn lists `SQUAD_DIR: {TEAM_ROOT}/.squad` — an agent must infer that `TEAM_SQUAD_DIR` in the instruction sentence equals `SQUAD_DIR` in the variable. — Proposed fix: Either use `SQUAD_DIR` consistently in the instruction sentence, or add `TEAM_SQUAD_DIR` to the Scribe variable block.
+
+N6: Line 50 — `TEAM_SQUAD_DIR` definition uses `{TEAM_ROOT}/.squad` with curly-brace placeholder syntax, but this is a definition table, not a spawn template. Reads fine in context but could confuse an agent about whether `{TEAM_ROOT}` is a literal placeholder to substitute or a variable reference. Minor — the surrounding text disambiguates.
+
+**DEEP PROBE — lightweight spawn walkthrough as a fresh agent:**
+
+- Line `agent_type: "general-purpose"`: Clear — I know my execution mode.
+- Line `model: "{resolved_model}"`: Clear — Coordinator fills this.
+- Line `mode: "background"`: Clear.
+- Line `name: "{name}"`: Clear.
+- Line `description: "{emoji} {Name}: {brief task summary}"`: Clear.
+- Line `You are {Name}, the {Role} on this project.`: Clear — identity established.
+- Line `TEAM_ROOT: {team_root}`: Clear — I know where Squad state lives.
+- Line `WORK_ROOT: {work_root}`: Clear — I know where code lives.
+- Line `STATE_REMOTE: {state_remote}`: **Hesitation** — What is this for? No inline explanation. I don't know whether I should push to it, read from it, or ignore it. Fix: append "(remote for `squad sync --push`; do not use directly)".
+- Line `STATE_BRANCH: squad-state`: **Hesitation** — Same issue. Is this the branch I'm on? A branch I push to? Fix: append "(target branch on STATE_REMOTE; managed by Scribe)".
+- Line `DEVELOPER_ALIAS: {developer_alias}`: **Hesitation** — What do I use this for? Is it my name? The human's name? Fix: append "(alias of the human developer; use in commit trailers and log attribution)".
+- Line `CURRENT_DATETIME: {current_datetime}`: Clear.
+- Line `WORKTREE_PATH: {worktree_path}`: Clear — my working directory.
+- Line `WORKTREE_MODE: {true|false}`: Clear.
+- Line `**Requested by:** {current user name}`: Clear.
+- Line `{% if WORKTREE_MODE %}...{% endif %}`: Clear — conditional context.
+- Line `TASK: {specific task description}`: Clear.
+- Line `TARGET FILE(S): {exact file path(s)}`: Clear.
+- Line `Do the work. Keep it focused.`: Clear — tone is direct.
+- Line `{% if STATE_BACKEND == "git-notes" %}`: **Hesitation** — `STATE_BACKEND` was never declared in this template's variable block. A lightweight-spawned agent has no `STATE_BACKEND` variable in its prompt header. The Coordinator must either always include it or the template Jinja branch is dead code in lightweight mode. Fix: either add `STATE_BACKEND: {state_backend}` to the lightweight variable block, or add a comment: "(Coordinator resolves this at spawn time; one branch renders)".
+- Line `powershell {TEAM_ROOT}/.squad/scripts/notes/write-note.ps1 ...`: Clear — exact command given.
+- Line `write to {TEAM_ROOT}/.squad/decisions/inbox/{name}-{brief-slug}.md`: Clear — path uses TEAM_ROOT correctly.
+- Line `⚠️ OUTPUT: Report outcomes in human terms.`: Clear.
+- Line `⚠️ RESPONSE ORDER: After ALL tool calls, write a plain text summary as FINAL output.`: Clear.
+
+**Hesitation points total: 4** (STATE_REMOTE purpose, STATE_BRANCH purpose, DEVELOPER_ALIAS purpose, STATE_BACKEND undeclared in lightweight block).
+
+**Tone & Record compliance:** PASS — No comparison framing, version leaks, or fork residue in the new diff content. Pre-existing `@bradygaster/squad-cli` package references are unchanged by this piece and are legitimate package-name usage, not protocol references.
+
+**Voice consistency with surrounding template:** PASS — New prose is second-person, present-tense, active voice, sentence-case headings ("Working Directory Model" matches surrounding bold-label convention). No drift to passive or third-person "the agent should."
+
+**Scannability of "Working Directory Model" section:** PASS (with N3 as polish) — Table + numbered list structure is correct. The Path semantics paragraph (line 54) is the densest unit but does not block comprehension because the table above it provides the lookup anchor.
+
+**Spawn-template placeholder consistency:** PASS — All templates use `{lower_snake_case}` for Coordinator-filled values consistently. `STATE_BRANCH: squad-state` is a literal (not a placeholder), matching the upstream spec. Backtick usage around variable names in prose is consistent with surrounding template style.
+
+**Mirror voice drift:** PASS — All four mirrors carry byte-identical diffs to the canonical. No flattening or expansion detected.
+
+**If REJECT:** N/A — approving with nits. N1 and N2 are the only items that will reliably cost time on spawns; both are addressable in a follow-up without blocking merge.
+
 ### 2026-05-28: User directive — push policy
 **By:** akubly (via Copilot)
 **What:** Pushing to github.com/akubly/squad is acceptable if there are no leaked gate violations that weren't pre-existing. Reverses the strict "commit-only no-push" stance applied across pieces 21–25 for any future stack work. The condition: a push must not introduce NEW build/lint/test/tsc failures beyond what the parent branch already had — pre-existing failures inherited from upstream are not a blocker.

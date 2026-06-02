@@ -2,6 +2,8 @@
 
 > Control System Engineer
 
+📌 **Team update (2026-06-02T20:51:32Z — Piece 29 Adversarial Review Complete):** Piece 29 adversarial review completed by Flight, FIDO, RETRO, PAO (4 parallel reviewers). Verdict: APPROVE-WITH-NITS. Three convergent mandatory themes: (1) Explore agent spawn omits WORK_ROOT; (2) WORK_ROOT resolution undocumented; (3) Single-repo degenerate case unaddressed. Procedures locked out per strict rejection lockout. Candidate revision authors: EECOM, Flight, or CONTROL. Decisions merged. Awaiting user decision on revision dispatch.
+
 📌 **Team update (2026-05-19 — Piece 18 Revision Complete):** Piece 18 doctor enhancements (EECOM implementation) revised by CONTROL per adversarial review (F1–F7, N1–N5). All 33 unit tests and 7 CLI-layer subprocess tests pass. CRLF normalization applied to cli-entry.ts. Branch `akubly/upstream-18-doctor-enhancements` force-pushed to `c515745b`.
 
 ## Current Session — May 2026

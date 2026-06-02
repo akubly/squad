@@ -8,6 +8,8 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active (Summary)
 
+📌 **Team update (2026-06-02T20:51:32Z — Piece 29 Adversarial Review Complete):** Piece 29 adversarial review (4 parallel reviewers: Flight, FIDO, RETRO, PAO) verdict APPROVE-WITH-NITS. Three convergent mandatory themes: (1) Explore agent spawn omits WORK_ROOT; (2) WORK_ROOT resolution undocumented at session start; (3) Single-repo degenerate case unaddressed. Procedures locked out. Candidate revision authors: EECOM, Flight, or CONTROL. Awaiting user decision on revision dispatch.
+
 📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your adversarial findings (CRITICAL allowlist, traversal guards, atomic metadata, fail-closed behavior) were addressed in CONTROL R2 commit aff12874. Flight gate approved all 23 items; both mutation guards confirmed live.
 
 📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Piece 28 revision landed: all 8 CONTROL code items + 7 test items merged; Flight gate approved commit aff12874. EECOM lockout closed. Ready for next scheduled work.

@@ -4,7 +4,21 @@
 
 ## Learnings
 
-### TEAM_ROOT Write Discipline (2026-05-21)
+### Four-Path Working Directory Model (2026-06-02)
+
+📌 **Adversarial Review Outcome (2026-06-02T20:51:32Z):** Piece 29 adversarial review completed by Flight, FIDO, RETRO, PAO (4 parallel reviewers). Verdict: APPROVE-WITH-NITS. Three convergent mandatory themes: (1) Explore agent spawn omits WORK_ROOT (Flight N1 + PAO N1); (2) WORK_ROOT resolution procedure undocumented at session start (Flight N2); (3) Single-repo degenerate case unaddressed (PAO N2). You are locked out per strict reviewer rejection lockout. Candidate revision authors: EECOM, Flight, or CONTROL. Decisions merged to `.squad/decisions.md`. No code changes this session.
+
+Piece 29 replaces the single-root coordinator contract with four explicit path variables: `TEAM_ROOT` (Squad state sidecar), `TEAM_SQUAD_DIR` (`{TEAM_ROOT}/.squad`), `WORK_ROOT` (product repo), `WORK_SQUAD_DIR` (`{WORK_ROOT}/.squad`, read-only projection only). The write rules are: Scribe and directive capture write only to `TEAM_SQUAD_DIR`; non-Scribe agents must not touch `WORK_SQUAD_DIR`; product git operations (branches, PRs, builds, tests) run against `WORK_ROOT`; state publication goes via `squad sync --push` against `STATE_REMOTE`.
+
+The five mandatory spawn-contract variables — `TEAM_ROOT`, `WORK_ROOT`, `STATE_REMOTE`, `STATE_BRANCH`, `DEVELOPER_ALIAS` — must appear in every spawn prompt with no optional omissions. Previously the template used `TEAM ROOT:` (space, not underscore) and omitted the other four; this was corrected across all spawn templates (full, lightweight, Scribe).
+
+Pitfalls:
+- **Scrub gate scans ALL tracked files, not just the diff.** Gate 1 (`git ls-files`) will fail on pre-existing strip-listed paths (Squad's own `/casting/`, `/identity/`, `orchestration-log` template directories) regardless of what the piece touches. Verify your specific changes add zero new strip-listed paths rather than expecting a clean gate run.
+- **sync-templates.mjs requires direct invocation** (no `--sync` flag needed when invoked as `node scripts/sync-templates.mjs` directly — the guard only activates when the script receives non-direct arguments without flags).
+- **TDD against the canonical template works cleanly**: write substring/regex assertions against `.squad-templates/squad.agent.md`, confirm red, edit canonical, run sync, confirm green across all 5 copies. The existing `template-sync.test.ts` pre-sync parity gate will catch any mirror copies not regenerated before commit.
+- **Commit message with newlines + backticks**: use `create` tool to write message to file, then `git commit -F` — avoids PowerShell double-quote/backtick hazard entirely.
+
+
 
 Spawn-template file writes must be anchored at TEAM_ROOT (or a derived SQUAD_DIR). Bare `.squad/` paths resolve against agent CWD, which can be a shared-squad consumer repo instead of the owning team root.
 
