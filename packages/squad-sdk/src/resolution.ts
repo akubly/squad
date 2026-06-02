@@ -822,6 +822,60 @@ export interface SquadStateContext {
   resolution: ResolvedSquad;
 }
 
+// ============================================================================
+// Session shard path (Piece 28 — inbox branch publish flow)
+// ============================================================================
+
+/**
+ * Build the canonical session shard path for a given project key, workstream,
+ * and session ID.
+ *
+ * Format: `.squad/sessions/<projectKey>/<workstream>/<sessionId>`
+ *
+ * This shard structure reduces fold conflicts when two developers publish
+ * sessions in the same workstream: paths diverge at the `<sessionId>` level
+ * and do not conflict.
+ *
+ * The shard format is locked at Piece 28. The fold pipeline (Piece 30) depends
+ * on this structure to enumerate and merge inbox payloads deterministically.
+ *
+ * @param projectKey - Identifies the product repository (e.g. `'my-app'`).
+ * @param workstream - Names the active workstream (e.g. `'main'`, `'feature-x'`).
+ * @param sessionId  - UUID or short ID uniquely identifying this session.
+ * @returns Relative path string suitable for use as a key in squad state operations.
+ */
+export function sessionShardPath(
+  projectKey: string,
+  workstream: string,
+  sessionId: string,
+): string {
+  validateShardSegment(projectKey, 'projectKey');
+  validateShardSegment(workstream, 'workstream');
+  validateShardSegment(sessionId, 'sessionId');
+  return `.squad/sessions/${projectKey}/${workstream}/${sessionId}`;
+}
+
+/**
+ * Validate a single shard path segment.
+ * Rejects empty values, path-traversal sequences (`..`), path separators (`/`, `\`),
+ * leading dots, and NUL bytes — matching the validation pattern in resolveExternalStateDir.
+ */
+function validateShardSegment(value: string, name: string): void {
+  if (
+    !value ||
+    value.includes('..') ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.startsWith('.') ||
+    value.includes('\0')
+  ) {
+    throw new Error(
+      `sessionShardPath: invalid ${name} — must not contain '..', '/', '\\\\', ` +
+      `a leading dot, or NUL. Got: '${value}'`,
+    );
+  }
+}
+
 /**
  * Resolve the full squad state context: paths + state backend.
  *
