@@ -26,6 +26,8 @@ See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc re
 - **#478 (Polish REPL)** — squad:vox + squad:pao (shell UX readiness + README documentation gate)
 - **#476 (Guide v0.4.1 update)** — squad:handbook + squad:pao (SDK patterns + documentation)
 
+📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** 3 new docs pages updated for ADO enterprise deployment path (bootstrap-cross-repo.ps1 setup guide, publish-inbox.yml pipeline config, fold-squad-state.yml state management). All docs follow Microsoft Style Guide (sentence-case headings, active voice, scannability framework).
+
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. PAO owns GitHub auth docs (#488), REPL documentation gate (#478), and Guide v0.4.1 refresh (#476). High community value on Guide update. Ready to begin documentation work on next sprint.
 
 📌 **Team update (2026-06-02T21:16:49Z — Piece 29 Nit Revision Complete):** Your mandatory nits (N1 explore-spawn five-variable contract, N2 single-repo case callout) landed as M1 and M3 in Flight's revision. All 3 mandatory nits now resolved (SHA b7ff4f99). Spawn-template scannability improved: STATE_REMOTE/STATE_BRANCH/DEVELOPER_ALIAS now carry inline purpose notes. Tests: 223/223 green. Ready for Phase C.

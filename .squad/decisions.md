@@ -5,6 +5,73 @@
 
 ---
 
+### 2026-06-02: Piece 30 ADO Cross-Repo Templates — Implementation Complete
+
+**By:** Flight (Lead)  
+**Branch:** `squad/piece-30-ado-cross-repo-templates`  
+**Commit:** 10168051
+
+#### Templates Shipped
+
+Three canonical ADO pipeline assets added under `.squad-templates/ado/`:
+
+| Template | Role |
+|----------|------|
+| `bootstrap-cross-repo.ps1` | Developer workstation and pipeline agent bootstrap |
+| `publish-inbox.yml` | Inbox branch publisher (product repo) |
+| `fold-squad-state.yml` | State serializer (docs repo) — sole writer to squad-state |
+
+All three mirrored to `templates/ado/`, `packages/squad-cli/templates/ado/`, and `packages/squad-sdk/templates/ado/` via `sync-templates.mjs` (which handles subdirectories recursively — no script changes needed).
+
+#### Sole-Writer Invariant
+
+**Location:** `fold-squad-state.yml`, lines 4–9 (near top of file) — documents that this pipeline is the sole writer to squad-state. No other pipeline, script, or developer workflow may push commits or fast-forwards to the squad-state branch. Enforcement: pipeline repo-scoped identity + ADO branch policy (block direct pushes to squad-state except pipeline identity). Comment and reviewer gate in Phase C are the enforcement surfaces. Verified: no other template or script in `.squad-templates/` writes to `squad-state`.
+
+#### No-PR-Trigger Gate
+
+**File:** `publish-inbox.yml` — has no top-level `pr:` key. Machine-checkable test assertion in `test/cli/ado-templates.test.ts` confirms this gate is mandatory and runs in CI.
+
+#### Idempotency Guards in bootstrap-cross-repo.ps1
+
+Every mutation is guarded: sidecar clone (`Test-Path $TeamRoot`), `squad bind` (`Test-Path $SquadConfig`), remote add (check existing remotes), state-branch refspec (check existing config), inbox refspec (check existing config), exclude entries (pre-computed `$escapedEntry` variable — not `$([regex]::Escape(...))` subexpression to satisfy scrub gate 8).
+
+#### Scrub Gate Results
+
+- Gates 2, 5–9: PASS
+- Gates 3–4: WARN (`.squad/` state files only — Scribe responsibility, expected)
+- Gate 1: FAIL (pre-existing baseline, 32 paths — zero introduced by piece 30)
+- Gate 8: PASS (after fix: replaced PowerShell subexpression with pre-computed variable)
+
+Gate 1 baseline applies per team precedent since piece 08a.
+
+#### Test Coverage
+
+| Test file | Assertions |
+|-----------|-----------|
+| `test/cli/ado-templates.test.ts` (new) | 9 behavioral: YAML-parse, no-PR-trigger, trigger pattern, no broad OAuth, sole-writer comment, idempotency guards |
+| `test/template-sync.test.ts` (extended) | 12 new: 3 canonical existence + 9 mirror parity (3 templates × 3 mirrors) |
+
+All 190 tests pass (181 template-sync + 9 ado-templates). No defects recorded.
+
+---
+
+### 2026-06-02: Piece 30 Prompt Template Typo — Correction Applied
+
+**By:** Flight (Lead)  
+**Scope:** Replay prompt template authoring
+
+**Finding:** The piece-30 session prompt at `.squad/plans/prompts/piece-30-ado-cross-repo-templates.md` referenced `26-ado-cross-repo-templates.md` (no such file exists). Actual spec: `30-ado-cross-repo-templates.md` on `origin/akubly/upstream-specs`.
+
+**Root cause:** Copy-paste artifact from piece-26 prompt that was not updated when piece-30 prompt was authored.
+
+**Correction Applied:** Session coordinator (Brady) provided override in spawn manifest; piece-30 implementation used correct `30-ado-cross-repo-templates.md` spec.
+
+**Recommendation:** Phase B prompt templates should validate spec path before execution. When authoring prompt for piece N, use path `docs/proposals/upstream-bradygaster/N-<slug>.md` with piece number matching. If file does not exist, agent should stop and report rather than proceeding with incorrect spec.
+
+**Impact:** Low — correction prevented any implementation against wrong spec. No rework required.
+
+---
+
 ### 2026-06-02: Piece 29 adversarial-review nit revision complete
 
 **By:** Flight (revision author, per lockout protocol — Procedures locked out)

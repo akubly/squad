@@ -2,6 +2,10 @@
 
 > Booster Systems Engineer
 
+## Team Updates
+
+📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** CI/CD: ADO pipeline templates now canonical at `.squad-templates/ado/` — `publish-inbox.yml` is no-PR-trigger gate, `fold-squad-state.yml` is sole-writer to squad-state. All mirrored to templates/, CLI, SDK via sync-templates.mjs (recursive subdir support). 190 tests pass; scrub gates 2,5–9 pass.
+
 ## Learnings
 
 ### CI Workflow Audit & Preflight Patterns (2026-03-23 Release Incident)

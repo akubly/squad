@@ -10,6 +10,8 @@ Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPE
 
 📌 **Team update (2026-06-02T19:27:39Z — Piece 28 Revision R2 Complete):** Your FIDO adversarial findings (CRITICAL allowlist, atomic metadata, fail-closed behavior) were fully addressed in CONTROL R2 commit aff12874. Flight gate approved; all mutation guards confirmed live (28/28 tests pass in isolation).
 
+📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** test/template-sync.test.ts extended with 12 new ADO mirror assertions: 3 canonical existence checks + 9 mirror parity checks (3 templates × 3 mirrors). ado-templates.test.ts (new) validates YAML-parse gates, no-PR-trigger gate (publish-inbox.yml), trigger pattern, no broad OAuth, sole-writer comment, idempotency guards. All 190 tests pass.
+
 📌 **Team update (2026-06-02T21:16:49Z — Piece 29 Nit Revision Complete):** All 3 mandatory nits resolved (Flight, PAO identified M1+M3; Flight identified M2). Your mutation-test verification pass on baseline team-root-work-root-protocol.test.ts (+45 new assertions) gave confidence for revision. SHA b7ff4f99 pushed. Tests: 223/223 green. Scrub-gate zero new violations. Ready for Phase C.
 
 ## Learnings — Summary (see history-archive.md for full pre-2026-05-28 details)
