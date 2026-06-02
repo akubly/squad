@@ -140,3 +140,124 @@ describe('WORK_SQUAD_DIR write-permission guard', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 5. M1 — Five-variable contract in ALL spawn variants
+//    Every spawn pattern (full, lightweight, Scribe, explore) must carry
+//    the five mandatory variables with consistent underscore-colon format.
+// ---------------------------------------------------------------------------
+
+const FIVE_VARIABLES = ['TEAM_ROOT', 'WORK_ROOT', 'STATE_REMOTE', 'STATE_BRANCH', 'DEVELOPER_ALIAS'] as const;
+
+describe('M1: five-variable contract propagated to all spawn variants', () => {
+  for (const loc of SQUAD_AGENT_LOCATIONS) {
+    describe(loc, () => {
+      const content = readTemplate(loc);
+
+      it('full spawn template carries all five variables', () => {
+        // The full spawn template is the "Template for any agent" block
+        const fullSpawnMatch = content.match(/Template for any agent[\s\S]*?```([\s\S]*?)```/);
+        expect(fullSpawnMatch).not.toBeNull();
+        const fullSpawn = fullSpawnMatch![1];
+        for (const v of FIVE_VARIABLES) {
+          expect(fullSpawn).toContain(v);
+        }
+      });
+
+      it('lightweight spawn template carries all five variables', () => {
+        // The lightweight spawn template is the "Lightweight Spawn Template" block
+        const lightMatch = content.match(/Lightweight Spawn Template[\s\S]*?```([\s\S]*?)```/);
+        expect(lightMatch).not.toBeNull();
+        const lightSpawn = lightMatch![1];
+        for (const v of FIVE_VARIABLES) {
+          expect(lightSpawn).toContain(v);
+        }
+      });
+
+      it('Scribe spawn template carries all five variables', () => {
+        // The Scribe spawn template includes "You are the Scribe"
+        const scribeMatch = content.match(/You are the Scribe[\s\S]*?```/);
+        expect(scribeMatch).not.toBeNull();
+        const scribeSpawn = scribeMatch![0];
+        for (const v of FIVE_VARIABLES) {
+          expect(scribeSpawn).toContain(v);
+        }
+      });
+
+      it('explore agent spawn pattern carries all five variables', () => {
+        // The explore agent pattern line contains the prompt in the second backtick section
+        const exploreLine = content.split('\n').find(l => /[Ff]or read-only queries.*explore/.test(l));
+        expect(exploreLine).toBeDefined();
+        for (const v of FIVE_VARIABLES) {
+          expect(exploreLine).toContain(v);
+        }
+      });
+
+      it('explore agent uses underscored key format (no "TEAM ROOT" with space)', () => {
+        const exploreLine = content.split('\n').find(l => /[Ff]or read-only queries.*explore/.test(l));
+        expect(exploreLine).toBeDefined();
+        expect(exploreLine).not.toMatch(/TEAM ROOT[^_]/);
+      });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 6. M2 — WORK_ROOT resolution procedure documented
+//    The Working Directory Model section must contain resolution guidance
+//    referencing loadDirConfig, teamRoot field, and single-repo fallback.
+// ---------------------------------------------------------------------------
+
+describe('M2: WORK_ROOT resolution procedure documented', () => {
+  for (const loc of SQUAD_AGENT_LOCATIONS) {
+    describe(loc, () => {
+      const content = readTemplate(loc);
+
+      it('contains a WORK_ROOT resolution subsection or paragraph', () => {
+        expect(content).toMatch(/WORK_ROOT resolution|Resolution procedure/i);
+      });
+
+      it('references loadDirConfig as the resolution mechanism', () => {
+        expect(content).toContain('loadDirConfig');
+      });
+
+      it('references the teamRoot field in config.json', () => {
+        // The config.json field is teamRoot (not workRoot)
+        expect(content).toMatch(/teamRoot.*config\.json|config\.json.*teamRoot/s);
+      });
+
+      it('documents fallback to TEAM_ROOT == WORK_ROOT when config absent', () => {
+        expect(content).toMatch(/fall\s*back.*TEAM_ROOT\s*==?\s*WORK_ROOT|TEAM_ROOT\s*==?\s*WORK_ROOT.*fall\s*back|absent.*TEAM_ROOT.*equals.*WORK_ROOT/is);
+      });
+
+      it('states teamRoot is resolved relative to WORK_ROOT', () => {
+        expect(content).toMatch(/resolve[ds]?\s+(the\s+)?`?teamRoot`?\s+(field\s+)?relative to\s+`?WORK_ROOT`?/i);
+      });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7. M3 — Single-repo degenerate case documented
+//    A callout must explain the TEAM_ROOT == WORK_ROOT collapse case.
+// ---------------------------------------------------------------------------
+
+describe('M3: single-repo degenerate case documented', () => {
+  for (const loc of SQUAD_AGENT_LOCATIONS) {
+    describe(loc, () => {
+      const content = readTemplate(loc);
+
+      it('contains a single-repo case callout', () => {
+        expect(content).toMatch(/[Ss]ingle.repo case/);
+      });
+
+      it('mentions TEAM_ROOT == WORK_ROOT path collapse', () => {
+        expect(content).toMatch(/TEAM_ROOT\s*==\s*WORK_ROOT/);
+      });
+
+      it('states coordinator must still pass both variables even when equal', () => {
+        expect(content).toMatch(/[Mm][Uu][Ss][Tt]\s+still\s+pass\s+both/i);
+      });
+    });
+  }
+});

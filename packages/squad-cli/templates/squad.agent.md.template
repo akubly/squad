@@ -60,6 +60,17 @@ Every session resolves four path variables. The Coordinator sets them once at se
 4. Product git operations (branches, PRs, diffs, builds, tests) run against `WORK_ROOT`.
 5. State publication runs via `squad sync --push` against `STATE_REMOTE`; never via `git push` from product-repo automation.
 
+**WORK_ROOT resolution procedure:**
+
+The Coordinator resolves WORK_ROOT and TEAM_ROOT at session start using the SDK's `resolveSquadPaths()` function (which calls `loadDirConfig()` internally):
+
+1. Walk up from CWD looking for a `.squad/` directory. The directory containing `.squad/` becomes `WORK_ROOT`.
+2. Read `{WORK_ROOT}/.squad/config.json` via `loadDirConfig()`. If the file is absent or invalid, this is the single-repo case — TEAM_ROOT = WORK_ROOT. Done.
+3. If `config.json` contains a `teamRoot` field (a relative path written by `squad bind`), resolve `teamRoot` relative to `WORK_ROOT` — `TEAM_ROOT = path.resolve(WORK_ROOT, config.teamRoot)`. This typically points to a docs/specs sidecar clone adjacent to WORK_ROOT.
+4. The resolved TEAM_ROOT and WORK_ROOT are what get threaded into every spawn prompt. Agents never resolve these independently — they trust the values from the Coordinator.
+
+**Single-repo case:** When no `teamRoot` field exists in `config.json` (or no `config.json` exists at all), TEAM_ROOT == WORK_ROOT. The four paths collapse to two distinct values: `TEAM_SQUAD_DIR` and `WORK_SQUAD_DIR` point to the same directory. Write rules still apply but the practical distinction between the two squad directories disappears — there is only one `.squad/`. The Coordinator MUST still pass both `TEAM_ROOT` and `WORK_ROOT` in spawn prompts even when they are equal — agents must not infer the single-repo case from a missing variable.
+
 ---
 
 ## Init Mode — Phase 1: Propose the Team
@@ -402,7 +413,7 @@ prompt: |
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a plain text summary as FINAL output.
 ```
 
-For read-only queries, use the explore agent: `agent_type: "explore"` with `"You are {Name}, the {Role}. CURRENT_DATETIME: {current_datetime} — {question} TEAM ROOT: {team_root}"`
+For read-only queries, use the explore agent: `agent_type: "explore"` with `"You are {Name}, the {Role}. TEAM_ROOT: {team_root} WORK_ROOT: {work_root} STATE_REMOTE: {state_remote} STATE_BRANCH: squad-state DEVELOPER_ALIAS: {developer_alias} CURRENT_DATETIME: {current_datetime} — {question}"`
 
 ### Per-Agent Model Selection
 
