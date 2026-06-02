@@ -596,3 +596,54 @@ State stays local to your machine. Other team members won't see your latest deci
 ### Can the `squad-state` branch be deleted safely?
 
 **No.** Deleting it loses all permanent squad state (decisions, agent histories, logs). Treat it like your main branch — push it to the remote and don't delete it. You can recover from a local deletion by re-fetching from the remote: `git fetch origin squad-state:squad-state`.
+
+
+---
+
+## ADO-Hosted Squad State
+
+For enterprise deployments where a dedicated Azure DevOps repository holds squad state, the squad-state orphan branch lives in that repository (TEAM_ROOT) rather than in the product repository (WORK_ROOT).
+
+### Branch layout
+
+`
+TEAM_ROOT (docs/specs repo)
+  squad-state (orphan branch)
+    .squad/decisions.md
+    .squad/agents/*/history.md
+    .squad/publish-history.json
+    ...
+
+WORK_ROOT (product code repo)
+  product code (main, dev, feature branches)
+  squad/inbox/<alias>/<session> (inbox branches — pushed here, read by fold pipeline)
+`
+
+### Pipeline identity and branch policies
+
+The fold pipeline (old-squad-state.yml) runs as a repo-scoped pipeline identity in the docs repository. Recommended ADO branch policies for squad-state:
+
+- **Require a pull request** — off (the fold pipeline pushes directly; PRs would block the write).
+- **Limit merge types** — fast-forward only (preserves linear fold history).
+- **Block direct pushes** — on for all identities except the fold pipeline's service account.
+- **Minimum reviewer count** — not applicable (automated writes only).
+
+### Fold pipeline invariant
+
+The old-squad-state.yml template is the sole writer to squad-state. No developer workflow, no other pipeline, and no manual push should write to squad-state outside of this pipeline. The pipeline's OAuth token access is scoped to the fast-forward push step only — no broad pool-level OAuth grant is required or recommended.
+
+### First sync verification
+
+After running ootstrap-cross-repo.ps1 and a successful squad sync --pull, verify the state is hydrated:
+
+`ash
+# Confirm squad-state is reachable
+git -C <TEAM_ROOT> log --oneline squad-state | head -5
+
+# Confirm .squad/publish-history.json exists
+git -C <TEAM_ROOT> show squad-state:.squad/publish-history.json
+`
+
+If publish history is absent, the fold pipeline has not run yet — that is expected before the first inbox publish cycle completes.
+
+---

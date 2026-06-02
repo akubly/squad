@@ -388,3 +388,45 @@ describe('casting-policy.json content parity', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 8. ADO templates — existence at canonical location and all mirror targets
+// ---------------------------------------------------------------------------
+
+const ADO_TEMPLATES = [
+  'ado/bootstrap-cross-repo.ps1',
+  'ado/publish-inbox.yml',
+  'ado/fold-squad-state.yml',
+] as const;
+
+const ADO_MIRROR_TARGETS = [
+  'templates',
+  'packages/squad-cli/templates',
+  'packages/squad-sdk/templates',
+] as const;
+
+describe('ADO templates — canonical location', () => {
+  for (const relFile of ADO_TEMPLATES) {
+    const canonicalPath = `${SOURCE_DIR}/${relFile}`;
+    it(`${canonicalPath} exists at canonical source`, () => {
+      expect(fileExists(canonicalPath), `${canonicalPath} must exist in .squad-templates/ado/`).toBe(true);
+    });
+  }
+});
+
+describe('ADO templates — mirror parity (all three mirror targets)', () => {
+  for (const relFile of ADO_TEMPLATES) {
+    const canonicalPath = `${SOURCE_DIR}/${relFile}`;
+
+    for (const target of ADO_MIRROR_TARGETS) {
+      const mirrorPath = `${target}/${relFile}`;
+
+      it(`${mirrorPath} exists and is byte-for-byte identical to ${canonicalPath}`, () => {
+        expect(fileExists(mirrorPath), `${mirrorPath} must exist — run sync-templates to update mirrors`).toBe(true);
+        const src = readFileBytes(canonicalPath);
+        const dst = readFileBytes(mirrorPath);
+        expect(Buffer.compare(src, dst), `${mirrorPath} content mismatch with ${canonicalPath}`).toBe(0);
+      });
+    }
+  }
+});

@@ -1,6 +1,6 @@
 {
   "name": "@bradygaster/squad",
-  "version": "0.9.6",
+  "version": "0.9.6-build.1",
   "private": true,
   "description": "Squad — Programmable multi-agent runtime for GitHub Copilot, built on @github/copilot-sdk",
   "type": "module",
@@ -42,7 +42,8 @@
     "markdownlint-cli2": "^0.21.0",
     "playwright": "^1.58.2",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.9.0"
   },
   "keywords": [
     "copilot",

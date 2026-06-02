@@ -1,0 +1,58 @@
+# publish-inbox.yml
+#
+# Squad inbox-branch publish pipeline.
+#
+# Triggered by pushes to squad/inbox/<alias>/... branches only.
+# No PR trigger. No writes to the Squad state branch.
+#
+# This pipeline publishes a TEAM_ROOT snapshot to the inbox branch for the
+# current developer. The Squad fold pipeline (fold-squad-state.yml) is the
+# sole writer to squad-state — this pipeline never writes to squad-state.
+
+trigger:
+  branches:
+    include:
+      - squad/inbox/**
+    exclude:
+      - squad-state
+      - main
+      - dev
+
+# No pr: key — PR trigger is intentionally absent.
+# Adding a pr: trigger would cause this pipeline to run on pull requests,
+# which is incorrect: inbox publishing is a push-only operation.
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  nodeVersion: '20'
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    displayName: 'Checkout product repo'
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: $(nodeVersion)
+    displayName: 'Install Node.js'
+
+  - script: npm install --global @bradygaster/squad-cli
+    displayName: 'Install Squad CLI'
+
+  - script: |
+      if [ ! -f ".squad/config.json" ]; then
+        echo "No .squad/config.json found — running bootstrap"
+        pwsh -File "$(bootstrapScriptPath)" \
+          -DocsRepoUrl "$(docsRepoUrl)" \
+          -DeveloperAlias "$(developerAlias)"
+      else
+        echo ".squad/config.json present — skipping bootstrap"
+      fi
+    displayName: 'Bootstrap if needed'
+
+  - script: squad sync --push
+    displayName: 'Publish TEAM_ROOT snapshot to inbox branch'
+    env:
+      SQUAD_DEVELOPER_ALIAS: $(developerAlias)

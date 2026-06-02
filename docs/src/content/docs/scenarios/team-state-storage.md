@@ -327,3 +327,89 @@ Use these prompts with Squad to implement specific strategies:
 - **[Squad for Solo Developers](solo-dev.md)** — Building alone? Here's how Squad becomes your team.
 - **[Multiple Squads](multiple-squads.md)** — Managing more than one AI team.
 - **[Team Portability](team-portability.md)** — Moving your squad to a new repo or machine.
+
+
+---
+
+## Enterprise Cross-Repo Deployment
+
+For enterprise teams where product code and squad state live in separate repositories, the cross-repo layout separates concerns cleanly: developers work in WORK_ROOT (product code), while squad state accumulates in TEAM_ROOT (docs/specs).
+
+### Repository layout
+
+`
+TEAM_ROOT (docs repo — private, org-internal)
+  main
+    docs/
+    .squad/
+  squad-state (orphan branch — sole write target for fold pipeline)
+    .squad/decisions.md
+    .squad/publish-history.json
+    ...
+  squad/inbox/<alias>/<session> (transient inbox branches — folded and optionally pruned)
+
+WORK_ROOT (product repo — engineers clone this)
+  main / dev / feature branches
+    product source code
+  squad/inbox/<alias>/<session> (published by squad sync --push)
+`
+
+### First-time developer setup
+
+Run ootstrap-cross-repo.ps1 once per machine:
+
+`powershell
+# From inside your product repo clone
+.\.squad-templates\ado\bootstrap-cross-repo.ps1 
+  -DocsRepoUrl https://dev.azure.com/my-org/my-project/_git/docs 
+  -DeveloperAlias your-alias
+`
+
+The script is idempotent — re-running it on a configured machine is safe and produces no side effects.
+
+### Normal development loop
+
+1. **Work in WORK_ROOT** — branch, commit, push product code as usual.
+2. **Publish squad state** — run squad sync --push when your session produces decisions, agent history, or state updates worth sharing.
+3. **Fold pipeline runs** — old-squad-state.yml in the docs repo detects inbox pushes and serializes them into squad-state in deterministic order.
+4. **Other developers pull** — squad sync --pull hydrates their TEAM_ROOT from the latest squad-state.
+
+### Concurrent developer considerations
+
+Multiple developers can publish inbox branches simultaneously. The fold pipeline serializes them in deterministic order: lexicographic by publishedAt timestamp, then by developerAlias. This order is stable across concurrent pipelines runs and avoids merge conflicts on squad-state.
+
+No developer writes directly to squad-state. The only writer is old-squad-state.yml. This invariant is enforced by ADO branch policies (block direct pushes to squad-state except for the pipeline identity).
+
+### Inbox branch lifecycle
+
+`
+Developer pushes squad sync --push
+  → squad/inbox/alice/2026-06-02T14-00Z created in docs repo
+
+fold-squad-state.yml triggers
+  → enumerates new inbox refs since last fold
+  → folds in order: alice (publishedAt: 14:00Z), then bob (14:05Z)
+  → updates .squad/publish-history.json
+  → fast-forwards squad-state
+  → optionally prunes squad/inbox/alice/... refs (default: off)
+`
+
+### Pipeline deployment checklist
+
+- [ ] publish-inbox.yml created in the product-repo pipeline — triggers on squad/inbox/** branch pushes.
+- [ ] old-squad-state.yml created in the docs-repo pipeline — triggers on squad/inbox/** inbox pushes.
+- [ ] ADO branch policy on squad-state: fast-forward only, block direct pushes except pipeline identity.
+- [ ] Pipeline variable docsRepoUrl set to the docs repo URL.
+- [ ] Pipeline variable developerAlias set per developer or resolved from $(Build.RequestedForEmail).
+- [ ] ootstrapScriptPath variable points to the ootstrap-cross-repo.ps1 copy in the repo.
+
+---
+
+## See Also
+
+- **[Adding Squad to an Existing Repo](existing-repo.md)** — How to integrate Squad into a project with existing code.
+- **[Squad for Solo Developers](solo-dev.md)** — Building alone? Here's how Squad becomes your team.
+- **[Multiple Squads](multiple-squads.md)** — Managing more than one AI team.
+- **[Team Portability](team-portability.md)** — Moving your squad to a new repo or machine.
+- **[Shared Squads](../guide/shared-squad.md)** — Enterprise setup guide with bootstrap script walkthrough.
+- **[State Backends](../features/state-backends.md)** — ADO-hosted squad-state backend and fold pipeline invariant.

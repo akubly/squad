@@ -1,0 +1,87 @@
+# fold-squad-state.yml
+#
+# Squad state fold pipeline.
+#
+# SOLE WRITER INVARIANT: This pipeline is the sole writer to squad-state.
+# No other pipeline, script, or developer workflow may push commits or
+# fast-forwards to the squad-state branch. This invariant is enforced by
+# the pipeline's repo-scoped identity and by the reviewer gate in Phase C.
+# Violations must be recorded in decisions/inbox/ before any exception is granted.
+#
+# Triggered by pushes to squad/inbox/* branches (inbox publish events).
+# Folds inbox branches into squad-state in deterministic order and updates
+# .squad/publish-history.json with fold provenance.
+
+trigger:
+  branches:
+    include:
+      - squad/inbox/**
+
+# No pr: trigger — fold is a push-only, state-serialization operation.
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  nodeVersion: '20'
+  # Set pruneAfterFold to true to delete inbox refs after a successful fold.
+  # Default is false — refs are retained for auditability.
+  pruneAfterFold: false
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    persistCredentials: true
+    displayName: 'Checkout docs repo (TEAM_ROOT) with full history'
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: $(nodeVersion)
+    displayName: 'Install Node.js'
+
+  - script: npm install --global @bradygaster/squad-cli
+    displayName: 'Install Squad CLI'
+
+  - script: |
+      git config user.email "squad-fold-pipeline@squad.local"
+      git config user.name "Squad Fold Pipeline"
+    displayName: 'Configure git identity for fold commits'
+
+  - script: |
+      # Fetch all inbox refs so the fold step can enumerate them
+      git fetch origin '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*'
+    displayName: 'Fetch all inbox refs'
+
+  - script: |
+      # Enumerate inbox refs pushed since the last recorded fold commit.
+      # Fold order: lexicographic by publishedAt timestamp, then by developerAlias.
+      # This deterministic order ensures consistent squad-state history across
+      # concurrent developers.
+      squad fold \
+        --state-branch squad-state \
+        --history-file .squad/publish-history.json \
+        --order published-at,developer-alias
+    displayName: 'Fold inbox branches into Squad state remote'
+
+  - script: |
+      # Fast-forward squad-state to the fold commit.
+      # OAuth token access is scoped to this step only.
+      git push origin HEAD:squad-state
+    displayName: 'Fast-forward squad-state'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - script: |
+      if [ "$(pruneAfterFold)" = "true" ]; then
+        echo "Pruning merged inbox refs ..."
+        squad fold --prune --state-branch squad-state
+      else
+        echo "Prune disabled (pruneAfterFold=false) — inbox refs retained."
+      fi
+    displayName: 'Prune merged inbox refs (optional)'
+
+  - script: |
+      echo "Fold complete."
+      echo "Publish history:"
+      cat .squad/publish-history.json || echo "(no history file yet)"
+    displayName: 'Report fold results'

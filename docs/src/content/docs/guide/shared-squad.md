@@ -133,7 +133,66 @@ When you run `squad unassign`, Squad removes only those callsign-prefixed items.
 
 ---
 
+## Enterprise Setup with Azure DevOps
+
+For teams where product code lives in one repository and the squad docs/state live in a separate repository (a cross-repo setup), the `bootstrap-cross-repo.ps1` template handles first-time configuration on a developer workstation or pipeline agent.
+
+### What `bootstrap-cross-repo.ps1` does
+
+The script accepts two mandatory parameters: the docs-repo URL (`-DocsRepoUrl`) and the developer alias (`-DeveloperAlias`). It performs five idempotent steps:
+
+1. **Sidecar clone** — clones the docs repo to a sibling directory as TEAM_ROOT (skipped if already present).
+2. **`squad bind`** — links TEAM_ROOT and WORK_ROOT together (skipped if `.squad/config.json` already exists).
+3. **Remote configuration** — adds the docs remote and configures state-branch and inbox-branch refspecs (each guarded against duplication).
+4. **`.git/info/exclude`** — appends `.squad/` and `.github/agents/squad.agent.md` to the local exclude file without duplicating entries.
+5. **Initial sync** — runs `squad sync --pull` to hydrate the local TEAM_ROOT snapshot.
+
+### Running the bootstrap
+
+```powershell
+# From inside your product repo (WORK_ROOT)
+.\.squad-templates\ado\bootstrap-cross-repo.ps1 `
+  -DocsRepoUrl https://dev.azure.com/my-org/my-project/_git/docs `
+  -DeveloperAlias alice
+```
+
+Re-running the script on an already-configured machine is safe — every mutation is guarded.
+
+### Verify the setup
+
+After bootstrap, confirm the configuration:
+
+```bash
+squad status          # should show TEAM_ROOT and WORK_ROOT
+squad doctor          # validates the cross-repo binding
+git remote -v         # squad-docs remote should appear
+```
+
+### Normal development loop
+
+Once bootstrapped, the daily workflow is:
+
+1. Work in WORK_ROOT as normal — branch, commit, push product code.
+2. When ready to publish squad state: `squad sync --push` (the publish pipeline can also run this automatically on branch push).
+3. The fold pipeline (`fold-squad-state.yml`) serializes published inbox branches into `squad-state` on a schedule or on push events.
+
+### Pipeline deployment
+
+Copy the three templates from `.squad-templates/ado/` (or their mirrors under `templates/ado/`) to your ADO repository:
+
+| Template | Purpose |
+|----------|---------|
+| `bootstrap-cross-repo.ps1` | Developer and agent workstation setup |
+| `publish-inbox.yml` | Push inbox snapshots to the docs repo |
+| `fold-squad-state.yml` | Serialize inbox branches into `squad-state` |
+
+Create pipelines in Azure DevOps pointing at `publish-inbox.yml` (product repo) and `fold-squad-state.yml` (docs repo). See [Team State Storage](../scenarios/team-state-storage.md) for the full enterprise scenario walkthrough.
+
+---
+
 ## See also
 
 - [CLI reference](../reference/cli.md) — full flag reference for `init`, `assign`, `unassign`, and `doctor`
 - [Personal squad](./personal-squad.md) — use Squad across projects with a global squad directory
+- [Team State Storage](../scenarios/team-state-storage.md) — enterprise mono-repo scenario and fold pipeline walkthrough
+- [State Backends](../features/state-backends.md) — ADO-hosted `squad-state` backend details
