@@ -371,3 +371,144 @@ Two wiring test failures pre-date piece 27:
 - `commands/init-remote.ts is imported in cli-entry.ts` — FAIL (pre-existing)
 
 These are not piece 27 responsibility. `sync` now passes the wiring test (wire added in piece 27).
+
+
+### 2026-06-01: Piece 27 adversarial review — CONTROL verdict
+**By:** CONTROL (TypeScript Engineer)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- Type design is sound overall — `SyncOptions.direction` is a correctly-typed string literal union; `SyncGitOps` injection interface is clean; `ensureStateRemote()` signature is `Promise<void>` with process.exit semantics consistent with the rest of the codebase.
+- Remote resolution (`options.remote ?? readStateRemoteFromConfig(repoRoot) ?? 'squad-docs'`) is a pure, nullish-correct precedence chain — exactly right.
+- ESM correctness: all new imports use `.js` extensions; dynamic `await import('./cli/commands/sync.js')` in cli-entry.ts is correct.
+- Zero new tsc errors vs. parent (43 pre-existing on both). Piece-27 introduced no type regressions.
+- Zero new suppressions. Pre-existing `(err as any).stderr` in `syncPush` is untouched by this piece.
+- **Mandatory nit (N1):** `readStateRemoteFromConfig` and `readDeveloperAliasFromConfig` both hand-roll `JSON.parse(raw)` → `any` access, bypassing the SDK's typed `loadDirConfig(squadDir: string): SquadDirConfig | null` which already covers `stateRemote` and `developerAlias`. A rename of either field in `SquadDirConfig` would fail at runtime in sync.ts with no compile-time alert. The typed seam exists; sync.ts should use it.
+
+**Type nits (mandatory):**
+N1: `readStateRemoteFromConfig` and `readDeveloperAliasFromConfig` bypass `loadDirConfig()` and operate on `any` (JSON.parse result). Replace both with a single call to `loadDirConfig(path.join(repoRoot, '.squad'))` from `@bradygaster/squad-sdk`, then read `config?.stateRemote` and `config?.developerAlias` from the typed `SquadDirConfig | null` return. This makes field-name renames a compile-time catch instead of a runtime surprise. The SDK function is already exported from the barrel and handles missing/malformed files identically to the hand-rolled fallback.
+
+**Type nits (non-blocking):**
+N2: `SyncOptions.developer?: string` accepts `''` — the empty-alias guard (`if (!alias)`) is runtime-only. The type system does not enforce non-empty alias at the boundary. A JSDoc `@remarks` on the field documenting the non-empty contract, or a `NonEmptyString` brand, would make the contract explicit to callers. The spec question confirms this is the expected finding; runtime behavior is correct.
+
+N3: `REQUIRED_REFSPECS` is named in SCREAMING_SNAKE_CASE (convention = module-level constant) but is a factory function `(remote: string) => string[]`. Rename to `requiredRefspecs(remote)` or `getRequiredRefspecs(remote)` to signal that it is a function, not a frozen value.
+
+N4: `return config.stateRemote || undefined` in `readStateRemoteFromConfig` uses falsy-OR. If the field were ever an empty string, it would be treated as absent — which may be intentional, but `?? undefined` (nullish) is the correct nullish-coalescing form to pair with the `??` chain in `runSync`. Replace with `return config.stateRemote != null && config.stateRemote !== '' ? config.stateRemote : undefined` or, once N1 is adopted, this row disappears.
+
+N5: Direction flag parsing in cli-entry.ts uses sequential `if` without `else if` — last match wins silently. `squad sync --pull --push` resolves to `push` with no feedback. Not a type error, but the intent contract is undocumented; a comment noting "last-flag-wins" or an explicit conflict guard would prevent confusion.
+
+**Build/tsc status:** FAIL (pre-existing) — `tsc --noEmit -p packages/squad-cli/tsconfig.json` exits 2 with 43 errors on the parent commit (piece-26) and 43 errors on piece-27 commit `31177e72`. Zero new errors introduced. All 43 failures are baseline contamination from stale published SDK in `packages/squad-cli/node_modules/@bradygaster/squad-sdk` (stale `SquadDirConfig` missing recent fields, missing renamed exports). This is the pre-existing dependency skew documented by FIDO in the piece-25 review. Piece-27 is clean against baseline.
+
+**Suppressions introduced (`@ts-ignore`/`as any`/`eslint-disable`):** 0 — none introduced. `(err as any).stderr` in `syncPush` is pre-existing on the parent commit; confirmed by diffing `31177e72^`.
+
+**Public API surface drift:**
+- `SyncGitOps` interface — new export (additive)
+- `DEFAULT_SYNC_GIT_OPS` — new export (additive)
+- `SyncOptions.direction` union expanded from `'push'|'pull'|'both'` to `+'hydrate-only'|'publish-only'` — additive, no breakage
+- `SyncOptions.{developer?, gitOps?, workRoot?}` — new optional fields (additive)
+- `ensureStateRemote(repoRoot, remoteName, gitOps?)` — new export (additive; this is the piece-28–30 contract boundary)
+- No removals. All existing callers of `runSync` remain valid.
+
+**Cross-piece consistency:** `stateRemote` in `SquadDirConfig` is present and typed as `string | undefined` in the SDK's `resolution.ts` at this commit. Piece-27 reads it from `.squad/config.json` at runtime (via untyped hand-roll — see N1). The schema field aligns with piece-26's design. The TS2353 on `bind.ts(235,5)` is stale-modules contamination, not design drift.
+
+**If REJECT:** Not rejected. If N1 becomes blocking (post-merge regression risk increases as pieces 28–30 add more callers), recommend EECOM as revision author (piece-27 implementer locked out per team protocol).
+
+
+### 2026-06-01: Piece 27 adversarial review — FIDO verdict
+**By:** FIDO (Quality Owner)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- All 18 sync-command tests and 15 install-hooks tests GREEN on piece-27 tip (31177e72). Confirmed.
+- Recursion guard (SQUAD_SYNC_ACTIVE) present in all 4 hook templates AND in `runSync()` — PASS.
+- Core spec functionality (remote resolution, ensureStateRemote, CLI wiring) sound and tested.
+- Two functional defects found via adversarial probing: whitespace alias bypass and force-install duplication. Neither is a spec misread; both are implementation bugs with real user impact.
+- No new `eslint-disable`, `@ts-ignore`, or `as any` introduced by piece 27 (existing `(err as any).stderr` in syncPush predates this piece).
+- Lint/build failures identical on piece-26 and piece-27 tip — pre-existing baseline, not regressions.
+
+**Mandatory nits (must resolve before PR merge):**
+
+N1: **Whitespace-only alias bypasses the empty-alias guard.**
+`runSync()` checks `if (!alias)` — a falsy check. `developer: ' '` (space), `developer: '\t'` (tab), and `developer: '\n'` (newline) are all truthy in JavaScript and pass straight through to push operations. The resulting push would construct refs like `squad/inbox/ /session-id`, which fail in git with a cryptic ref-name error rather than the spec-required clean exit-1 with guidance. Fix: change the guard to `if (!alias || !alias.trim())`. Add tests: `developer: ' '`, `developer: '\t'`. These must fire BEFORE any git op (currently they would reach `syncPush()`).
+
+N2: **`installHook()` with `force: true` duplicates the squad section instead of replacing it.**
+The force branch computes `const cleaned = existing.split('\n').filter(...).join('\n')` but the variable is never used — it is dead code. Execution falls through to the chain block, which appends the new template on top of the already-marked hook. Each `squad install-hooks --force` invocation doubles the hook content. This can exceed shell script limits and cause silent double-invocations of the state fetch. Fix: use `content` directly (not chained on `existing`) when `force` is true and marker is found. Add a test: run `installHooks` twice with `force: true`; assert the marker appears exactly once and the hook length matches a fresh install.
+
+**Non-blocking nits:**
+
+N3: **No flag-combination-precedence tests.** Passing `--pull --push` to the CLI produces `direction = 'push'` (last-if-wins); `--hydrate-only --publish-only` produces `publish-only`. These precedence rules are not documented and not tested. No spec requirement to reject the combo, but tests verifying the winner (or a clear error) would prevent silent user confusion.
+
+N4: **`--remote ""` at CLI dispatch is silently ignored.** If a user types `squad sync --remote ""`, the CLI condition `args[remoteIdx + 1] ? { remote: ... } : {}` treats the empty string as falsy and falls through to config/default without any warning. Not harmful but surprising. Consider a non-empty validation guard or a short warning.
+
+N5: **No test for `stateRemote` absent + `--both` direction.** The existing remote-resolution tests cover each source independently for `--pull`. No test exercises `--both` with `stateRemote` absent from config (falls back to `squad-docs` default) — this path is untested through the combined pull+push flow.
+
+**Pre-existing baseline claim:** VALIDATED
+- Build: identical TS errors on assign.ts, doctor.ts, init.ts, unassign.ts on both piece-26 (b5fc0af3) and piece-27 (31177e72). Diffed `npm run build` output line-by-line — zero new errors introduced.
+- Wiring failures: `doctor-types.ts` and `init-remote.ts` both fail on piece-26 with the same assertion text. On piece-26, `sync.ts` passes as `KNOWN_UNWIRED`; on piece-27 it passes as wired. EECOM's baseline-contamination claim for Gates 1+2 is confirmed correct.
+- Lint: `npm run lint` failures on piece-27 are the same pre-existing errors (stale SDK exports in legacy commands). No piece-27 files appear in lint output.
+
+**Hook recursion guard:** PASS
+- All 4 templates (`pre-push`, `post-merge`, `post-checkout`, `post-rewrite`) contain `SQUAD_SYNC_ACTIVE`.
+- `runSync()` checks `process.env[SQUAD_SYNC_ENV]` at entry and sets it before any git call.
+- Install-hooks test `pre-push hook still has recursion guard after update` passes GREEN.
+- Post-merge, post-checkout, post-rewrite guard tests (3 × recursion) all pass GREEN.
+
+**Spec conformance:** 17/19 acceptance criteria pass (2 partial — empty-alias guard misses whitespace; force-reinstall not implemented correctly and untested).
+
+**If REJECT:** N/A — this is APPROVE-WITH-NITS. If N1 or N2 block after revision, recommended rev author: EECOM (implementer of this piece). Flight is locked out as original implementer.
+
+
+### 2026-06-01: Piece 27 adversarial security review — RETRO verdict
+**By:** RETRO (Security)
+**Verdict:** APPROVE-WITH-NITS
+**Why:**
+- All git subprocess calls use `execFileSync` with array argument forms throughout — no shell-string `exec` anywhere in the diff. This is the primary defense against shell and flag injection and it holds.
+- The `--remote` flag injection surface is closed: `ensureStateRemote()` validates the remote name via string comparison against `listRemotes()` output before any git invocation that takes the remote name as input. A hostile `--remote "--upload-pack=evil"` fails the `remotes.includes()` check and exits 1 with bind guidance — never reaches a git invocation with that value as a flag.
+- Hook templates use `"$REMOTE"` (double-quoted variable) throughout all four templates. Shell command substitution in `$REMOTE` cannot be executed — the value is already assigned as a string. No code injection path exists through a hostile `stateRemote` in config.
+- `SQUAD_SYNC_ACTIVE` recursion guard is present in all four hook templates and at the entry of `runSync()`, with proper `unset` on exit. Guard does not require cross-session persistence and is correctly scoped to the process environment.
+- All config reads (`git config --add`, `git config --get-all`) use local-repo scope — no `--global` flag anywhere.
+- One mandatory fix required (H1): the alias-empty guard does not reject whitespace-only values, violating the spec contract.
+
+**Critical findings (BLOCK PR):**
+None.
+
+**High findings (mandatory before PR):**
+H1: **Whitespace-only alias bypasses the alias-empty guard.**
+- In `runSync()`: `const alias = options.developer !== undefined ? options.developer : readDeveloperAliasFromConfig()`. For `options.developer = " "` (spaces/tabs), `alias = " "` is truthy — `if (!alias)` does not fire.
+- In `cli-entry.ts` dispatch: `...(developerIdx !== -1 ? { developer: args[developerIdx + 1] ?? '' } : {})`. A user running `squad sync --push --developer "   "` passes three spaces as the alias, which passes the guard.
+- Spec contract: "If `--developer <alias>` is provided but the value is empty, exit 1." Whitespace-only is functionally empty.
+- Fix: `if (!alias || !alias.trim())` in the push-direction guard in `runSync()`. One-line change.
+- Probe verified: `--developer ""` correctly exits 1; `--developer " "` incorrectly proceeds.
+
+**Medium / Low findings (non-blocking):**
+M1: **Push error messages may expose auth tokens embedded in git remote URLs.**
+- In `syncPush()`, the catch block: `const msg = err instanceof Error ? (err as any).stderr || err.message : String(err)`. Git push failure stderr can contain the remote URL; if the URL is `https://<token>@github.com/org/repo`, the token appears in the console output.
+- Mitigation: strip URL credentials from `msg` before printing (regex: replace `https?://[^@]+@` with `https://***@`).
+- Not a block — requires an already-misconfigured credential-in-URL, and console output is not persisted to committed files.
+
+M2: **`installHook()` force-reinstall logic is incomplete — double-appends on `--force`.**
+- When `force=true` and the hook already contains `SQUAD_HOOK_MARKER`, the code computes a `cleaned` variable but never uses it. Execution falls through to the chaining path, appending the new squad section without removing the old one. Repeated `squad install-hooks --force` compounds hook content indefinitely.
+- Not a security issue (the hook still guards correctly), but a correctness defect. Fix: complete the forced-overwrite path to remove the old squad section before appending.
+
+M3: **No charset allowlist on `--remote` or `stateRemote` values.**
+- All git subprocess calls use `execFileSync` array args (not shell), so shell metacharacters are inert. However, a remote name containing null bytes or newlines could cause confusing failures in refspec construction and hook template parsing without an informative error.
+- The piece 30.5 decision establishes alias format `[a-z][a-z0-9-]{0,38}` as the scrub-gate rule. Remote names should be held to a similar allowlist (`[a-zA-Z0-9_.-]{1,64}`) enforced at input validation time. Non-blocking because the actual injection path is closed; this is a defence-in-depth hardening.
+
+M4: **Developer alias accepted without charset validation — future injection surface.**
+- The alias is validated for presence (H1 aside) but not for character set or length. When `squad/inbox/<alias>/<session>` refspecs are implemented in later pieces, an alias containing `/`, `*`, `..`, or control characters will be interpolated directly into git refspecs.
+- The piece 30.5 decision (decision 2026-05-29) already specifies `[a-z][a-z0-9-]{0,38}` as the alias allowlist for the scrub gate. Apply the same allowlist in `runSync()` alias validation now, before the refspec interpolation lands.
+
+L1: **Hook templates lack `set -eu` strict mode.**
+- All four hook templates omit `set -e` (exit on error) and `set -u` (error on unset variable). Critical git calls use `|| true` or `2>/dev/null` as safety valves, which is intentional. But non-critical intermediate steps (e.g., `REPO_ROOT=$(git rev-parse ...)`) could fail silently under unusual conditions.
+- Low risk given the `|| true` coverage. Adding `set -e` at the top of each hook (after the shebang) with explicit `|| true` on the intentionally-fallible calls would improve error visibility without changing current behavior.
+
+L2: **`cli-entry.ts` dispatch is missing `--push` and `--both` direction handlers.**
+- Direction resolution: `--pull`, `--hydrate-only`, `--publish-only` are explicitly mapped. `--push` has no handler — it silently falls to the default of `'both'`. `--both` also falls to `'both'` (correct result, wrong path). Not a security issue; a correctness gap that makes `squad sync --push` behave as `--both`.
+
+**Attack surface assessed:**
+- `--developer` validation: **partial** — empty string `""` correctly exits 1; whitespace `" "` incorrectly passes. No charset check. Alias unused in git ops in this impl, so no injection reachable today, but H1 violates spec contract.
+- `--remote` injection: **pass** — `remotes.includes(remoteName)` check fires before any git invocation taking the remote name. `execFileSync` array args throughout. No `--` separator needed for config-key construction. Flag injection probe (e.g., `--remote "--upload-pack=evil"`) exits 1 at the includes check.
+- Config-driven attack (`stateRemote`): **pass** — hook templates quote `"$REMOTE"` throughout all four templates. No command substitution re-evaluation occurs. Hostile `stateRemote` causes git to reject an unknown remote, not to execute attacker code. JS code path uses `execFileSync` array args.
+- Refspec safety: **pass** — `+` force-update prefix is correctly scoped to remote-tracking refs (`refs/remotes/`), not local branches. Local branch updates in `syncPull()` are gated on `merge-base --is-ancestor` before `git update-ref`. Push refspecs have no `+` prefix.
+- Hook template safety: **partial** — recursion guard present and correct in all four templates. Variable quoting is correct (`"$REMOTE"` everywhere). `set -eu` absent (L1). Force-reinstall deduplication incomplete (M2). Missing-config silent-skip works correctly.
+- Secret/PII leakage: **partial** — no `.env` reads, no credential writes to committed files. Push error messages may surface git remote URLs including any embedded auth tokens (M1). No stack traces leak in non-debug paths. Hooks directory path printed at install time contains no credentials.
+
+**If REJECT:** Not rejected. If H1 fix is contested, recommended rev author: EECOM (implementer locked out per strict lockout protocol — assign to CONTROL or Sims, consistent with piece 10 revision precedent).

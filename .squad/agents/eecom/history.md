@@ -72,6 +72,9 @@ Module-level `_deprecationFired = { projectDir: false, teamDir: false }` (export
 
 Commit `185617e51e215dfbf59415a688ff9e1b9fd9a9af` folded the approved nits: CONTROL N1 typed the internal `resolveSquad` alias as `typeof resolveSquadDir`; FIDO N2 added the `@ts-expect-error` renderFinding exhaustiveness regression; FIDO N3 refreshed stale `resolveSquad` comments to `resolveSquadDir`. Gates: build/lint/SDK tsc/CLI tsc passed after controlling the known nested SDK dependency skew; `test/cli/doctor.test.ts` passed; full `npx vitest run` remained red with pre-existing failures (15 failed files / 225 passed / 1 skipped), matching the piece-25 review baseline. Revision complete; EECOM locked out by Flight.
 
+### Piece 27 Adversarial Review Lockout (2026-06-01T20:40:00Z)
+
+Piece 27 (explicit sync command) completed adversarial review with three independent reviewers (FIDO, CONTROL, RETRO) all verdicts APPROVE-WITH-NITS. All three converged on identical defects: whitespace-only alias bypasses the empty-alias guard (H1/N1 across reviewers), and force-reinstall duplication in `installHook()` (N2/M2). Three mandatory nits identified: (1) whitespace-alias guard fix, (2) force-reinstall deduplication, (3) untyped config reads bypass SDK typed interface. EECOM (implementer) is locked out from performing the revision per strict squad protocol (implementer may not revise own work). Recommended revision author: CONTROL (TypeScript expertise for config-read typing) or EECOM if override negotiated. No reviewer rejection lockout — all three reviewers APPROVE-WITH-NITS. Session log: `.squad/log/2026-06-01T2040-piece-27-adversarial-review.md`.
 
 ## Archive
 
