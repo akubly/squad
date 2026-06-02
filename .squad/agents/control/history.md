@@ -48,6 +48,10 @@ Key findings from commit `b1a710fd`:
 
 6. **Pre-existing suppressions in client.ts** (`!` at line 133, `as` at lines 485/562/598) — NOT piece-24 additions, not a violation of the spec §9 zero-suppression requirement.
 
+### Piece 27 Nit Revision Landed (2026-06-02T01:00Z)
+
+📌 **Team update:** Flight (Lead) completed amendment commit `5d8509f4` on `squad/piece-27-explicit-sync-command`. CONTROL N1 nit fully resolved: untyped `JSON.parse → any` config readers replaced with typed `loadDirConfig()` returning `Pick<SquadDirConfig, 'stateRemote' | 'developerAlias'>`. Module augmentation bridges installed SDK (0.9.4) with local source (0.9.6-build.2) that added these fields. Five config tests added; sync-command 33/33 PASS. Revision metadata synced to decisions.md.
+
 7. **CopilotSessionLike** deviates from spec §2.1 in two places: `send(): Promise<unknown>` (spec said `void`) and an added `destroy(): Promise<void>` (spec omitted it). Both divergences are CORRECT — the real SDK `send()` returns a value; the real session has `destroy()`. Flight correctly over-delivered on spec accuracy.
 
 8. **`options: unknown`** in `OTelTracerLike.startActiveSpan` overloads 2 and 3: intentional, per spec §2.2, to avoid importing OTel types. Slightly weaker than `SpanOptions` but correct for a locally-defined structural interface. This was explicit in the spec revision I reviewed.
@@ -92,6 +96,33 @@ Flight's proposed `OTelTracerLike` interface uses a variadic generic (`<T>(...ar
 **Recommendation:** Alt 1. Redesign `OTelTracerLike.startActiveSpan` from the variadic generic to 3 concrete overloads. This requires a spec revision in piece-24 §2.2 (update the interface definition + add the standalone function pattern). Net LOC impact: ~+8 LOC beyond baseline (well within the 149 LOC headroom). Zero suppression cost of any kind.
 
 **No-active-lint-rule insight:** Brady should know that `@typescript-eslint/no-explicit-any` is not in the ESLint config. Flight's concession in the spec is gesturing at a rule that would never fire. The motivation to avoid written `any` is purely about type-system discipline (which is still the right call), but the "acceptable suppression" framing is slightly misleading — the suppression is already dead code.
+
+---
+
+### Piece 27 adversarial review — type-system findings (2026-06-01)
+
+**Verdict: APPROVE-WITH-NITS** — Commit `31177e72`.
+
+**N1 (mandatory) — `loadDirConfig` bypass:**
+`readStateRemoteFromConfig` and `readDeveloperAliasFromConfig` both hand-roll `JSON.parse(raw)` → `any` instead of calling the SDK's typed `loadDirConfig(squadDir): SquadDirConfig | null`. The typed seam exists and already covers `stateRemote` and `developerAlias`. A field rename in `SquadDirConfig` would fail at runtime in sync.ts with no compile-time alert. Replace both with `loadDirConfig(path.join(repoRoot, '.squad'))` and read from the typed return value.
+
+**N2 (non-blocking) — empty alias not enforced at type boundary:**
+`SyncOptions.developer?: string` accepts `''`. The non-empty contract is runtime-only (`if (!alias)`). Type does not enforce it. A JSDoc `@remarks` or branded type would make the contract explicit.
+
+**N3 (non-blocking) — `REQUIRED_REFSPECS` naming:**
+`REQUIRED_REFSPECS` is SCREAMING_SNAKE_CASE but is a function `(remote: string) => string[]`. Convention signals constant; actual shape is factory. Rename to `requiredRefspecs` or `getRequiredRefspecs`.
+
+**tsc baseline:** 43 errors on piece-26 (parent), 43 errors on piece-27. Zero new errors introduced. All failures are stale-modules contamination (pre-existing).
+
+**Suppressions:** Zero new. `(err as any).stderr` in `syncPush` is pre-existing.
+
+**ESM:** All new `.js` extensions correct.
+
+**Remote resolution pattern:** `??` chain (`options.remote ?? readStateRemoteFromConfig() ?? 'squad-docs'`) is clean, nullish-correct, pure, and unit-testable. This is the canonical form for multi-tier precedence — adopt this pattern in future pieces.
+
+**`SyncGitOps` injection interface:** Well-typed, with typed production default and test seam. This is the right pattern for commands that shell out to git — injection over top-level stubs.
+
+**Meta-learning:** When a command reads from `.squad/config.json`, prefer `loadDirConfig` from the SDK over hand-rolled `JSON.parse`. It returns a typed `SquadDirConfig | null`, handles missing/malformed files, and propagates any future schema additions automatically. Hand-rolling creates a silently-unsafe parallel reader that diverges from the schema over time.
 
 ---
 

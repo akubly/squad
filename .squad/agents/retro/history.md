@@ -48,6 +48,10 @@ Commit ea655861 implements template sync for optional package-local `squad.agent
 
 **Scrub gate boundary discovery:** The pattern `/identity/`, `/casting/`, `orchestration-log` matches Squad's own product directories (not just MS-internal content). The `.squad/` directory should be excluded from both Gate 1 (path scan) and Gate 2 (content scan), as these are team infrastructure files destined for team record-keeping, not upstream-destined code.
 
+### Piece 27 Nit Revision Landed (2026-06-02T01:00Z)
+
+📌 **Team update:** Flight (Lead) completed amendment commit `5d8509f4` on `squad/piece-27-explicit-sync-command`. RETRO H1 nit (whitespace-alias security finding from piece-27 adversarial review) fully resolved: `!alias` guard upgraded to `!alias || !alias.trim()` in `sync.ts`. Blocks empty, single-space, multi-space, tab, newline, control chars before any git invocation. 10 whitespace test cases added; sync-command 33/33 PASS. Recursion guard remains active in all 4 hook templates. Decision merged; branch push confirmed.
+
 **Proposed remedies:** (A) Exclude `.squad/` from gates [recommended, low-risk]; (B) Rename `docs/_internal/` → `docs/design/` [medium-risk]; (C) Refine product directory pattern [requires coordinator decision].
 
 **Status:** No source commits made. Diagnostic decision drop filed for coordinator action.
@@ -78,3 +82,25 @@ Commit ea655861 implements template sync for optional package-local `squad.agent
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+### Piece 27 Adversarial Review — Security Findings (2026-06-01)
+
+**Verdict:** APPROVE-WITH-NITS (0 critical, 1 high, 4 medium/low)
+
+**Key attack patterns probed and resolved:**
+
+**Injection surface — CLOSED:** All git subprocess calls in `sync.ts` use `execFileSync` with array argument forms (`['git', 'config', '--add', key, value]`). No shell-string `exec` anywhere in the diff. This closes shell metacharacter and flag injection across all paths.
+
+**`--remote` flag injection — BLOCKED:** `ensureStateRemote()` validates remoteName via `remotes.includes(remoteName)` against the `listRemotes()` output before any git call that uses the name. Probes like `--remote "--upload-pack=evil"` and `--remote "-c core.sshCommand=evil"` exit 1 at the includes check, never reaching a git invocation. The `--` separator question does not apply here because the remote name is embedded in a config key string (not a positional argument), and the key is passed as a single array element.
+
+**Config-driven hook attack — NEUTRALIZED:** Hook templates assign `STATE_REMOTE` via `grep | tr -d '"'` then use `"$REMOTE"` (double-quoted) throughout all fetch invocations. Command substitution in `stateRemote` values cannot be re-executed once the variable is assigned. Refspec concatenation uses `'literal/'"$VAR"'/literal'` form — single-quote fragments bracket the variable, and double quotes prevent word splitting. No injection path exists through a hostile `stateRemote` in `.squad/config.json`.
+
+**H1 finding — whitespace alias bypass:** `if (!alias)` does not catch `alias = " "`. `" ".trim()` is `""` (falsy). Fix is `if (!alias || !alias.trim())`. The alias is currently unused in git ops (no inbox refspecs yet), so this is not presently exploitable — but the spec contract requires rejection and later pieces will interpolate the alias into refspecs.
+
+**Refspec force-update (`+`) — intentional and correctly scoped:** The `+` prefix in fetch refspecs only force-updates remote-tracking refs (`refs/remotes/`), not local branches. Local branch updates in `syncPull()` require `merge-base --is-ancestor` confirmation before `git update-ref`. Push has no `+`.
+
+**Recursion guard — correct:** `SQUAD_SYNC_ACTIVE` present in all 4 hook templates and `runSync()`. Unset in `finally` block. Environment-scoped only (not file-persisted), so no cross-session leak.
+
+**Privilege boundary — clean:** No `git config --global` anywhere. All config operations are repo-local.
+
+**Pattern to carry forward:** When a remote name or alias will later be interpolated into a git refspec, add a charset allowlist at the validation boundary BEFORE the feature that uses it lands. Piece 27 validates presence only; piece 28+ inbox refspecs will need `[a-z][a-z0-9-]{0,38}` enforcement at the alias guard site in `runSync()`.

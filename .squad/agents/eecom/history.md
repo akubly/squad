@@ -76,6 +76,10 @@ Commit `185617e51e215dfbf59415a688ff9e1b9fd9a9af` folded the approved nits: CONT
 
 Piece 27 (explicit sync command) completed adversarial review with three independent reviewers (FIDO, CONTROL, RETRO) all verdicts APPROVE-WITH-NITS. All three converged on identical defects: whitespace-only alias bypasses the empty-alias guard (H1/N1 across reviewers), and force-reinstall duplication in `installHook()` (N2/M2). Three mandatory nits identified: (1) whitespace-alias guard fix, (2) force-reinstall deduplication, (3) untyped config reads bypass SDK typed interface. EECOM (implementer) is locked out from performing the revision per strict squad protocol (implementer may not revise own work). Recommended revision author: CONTROL (TypeScript expertise for config-read typing) or EECOM if override negotiated. No reviewer rejection lockout — all three reviewers APPROVE-WITH-NITS. Session log: `.squad/log/2026-06-01T2040-piece-27-adversarial-review.md`.
 
+### Piece 27 Nit Revision — Complete (2026-06-01T17:31:41Z)
+
+📌 **Team update:** Flight (Lead) completed amendment commit `5d8509f4` addressing all three mandatory nits (N1/H1 whitespace-alias guard, N2 force-reinstall idempotency, N3 typed config loading via `loadDirConfig()`). EECOM locked out per reviewer protocol; Flight assigned as revision author. All tests PASS (sync-command 33/33, install-hooks 16/16, recursion guard PASS in all 4 hook templates). Branch `squad/piece-27-explicit-sync-command` push confirmed. Revision metadata synced to `.squad/decisions.md` and cross-agent histories.
+
 ## Archive
 
 Older context (pieces 1–14, Q1 2026) in `history-archive.md`: template sync patterns, cherry-pick conflicts, loop command refactors, pre-Phase B lifecycle.

@@ -48,8 +48,32 @@ pm ci lock skew).
 pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9.4 (stale published version), causing CLI tsc to resolve wrong declarations. For commit-to-parent gate comparison, record both raw clean-install failures and workspace-linked results; count blockers only when e67 introduces new failures after controlling for pre-existing skew.
 
 - 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.
+
+📌 **Piece 27 Nit Revision Landed (2026-06-02T01:00Z):** Flight (Lead) completed amendment commit `5d8509f4` on `squad/piece-27-explicit-sync-command`. FIDO N1 and N2 nits fully resolved: N1 whitespace-only `--developer " "` now rejected before git ops (10 test cases); N2 `installHook(force:true)` idempotent (1 new test, suite now 16/16). Both revisions verified; recursion guard PASS. Decision merged; branch push confirmed.
 - 2026-05-28: Piece-25 revision (commit 185617e) — EECOM folded all approved nits (N1+N2+N3); gates clean.
 
 ---
+
+---
+
+## Piece 27 Adversarial Review — Explicit Sync Command (2026-06-01T13:39:10.278-07:00)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS (2 mandatory, 3 non-blocking)
+
+**Commit reviewed:** 31177e72 on branch `squad/piece-27-explicit-sync-command`
+
+**Mandatory nits found:**
+- **N1 — Whitespace alias bypass:** `if (!alias)` is a falsy check; `' '`, `'\t'`, `'\n'` all pass. Must be `!alias || !alias.trim()`. No test for whitespace/control-char developer inputs.
+- **N2 — `--force` hook duplication bug:** `installHook()` force branch computes `cleaned` but never uses it (dead code). Falls through to chain block, doubling the squad section on each force reinstall.
+
+**Non-blocking nits:** Flag-combo precedence untested; `--remote ""` silently ignored; `--both` + no-stateRemote untested.
+
+**Learnings for future reviews:**
+- Always probe `!alias` with whitespace inputs — JS falsy check misses `' '`. Standard pattern: `!alias || !alias.trim()`.
+- Dead-code comments like `// simplified: just replace the file` are a red flag that a refactor was unfinished.
+- Force-reinstall path in installer-type code must have a dedicated test to catch duplication bugs.
+- `--pull --push` combined flags with last-if-wins precedence should be documented or tested; silent precedence is confusing UX.
+- Baseline validation approach: run targeted tests on piece N-1 tip and compare failure lists. Wiring failures on `doctor-types.ts` and `init-remote.ts` confirmed pre-existing on piece-26.
+- Build baseline validation: `npm run build` output on parent vs child — zero new errors is sufficient evidence for pre-existing claim.
 
 ## Archive — Older Learnings (see history-archive.md for pre-2026-05-28 full details)

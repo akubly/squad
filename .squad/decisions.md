@@ -512,3 +512,33 @@ L2: **`cli-entry.ts` dispatch is missing `--push` and `--both` direction handler
 - Secret/PII leakage: **partial** — no `.env` reads, no credential writes to committed files. Push error messages may surface git remote URLs including any embedded auth tokens (M1). No stack traces leak in non-debug paths. Hooks directory path printed at install time contains no credentials.
 
 **If REJECT:** Not rejected. If H1 fix is contested, recommended rev author: EECOM (implementer locked out per strict lockout protocol — assign to CONTROL or Sims, consistent with piece 10 revision precedent).
+
+### 2026-06-01: Piece 27 Nit Revision — Adversarial Review Complete
+
+**Status:** Resolved  
+**Revision Author:** Flight (Lead)  
+**Branch:** squad/piece-27-explicit-sync-command  
+**Commit:** 5d8509f4 (pushed)
+
+#### Nits Resolved
+
+- **N1/H1 (FIDO+RETRO):** Whitespace-only --developer " " rejected before git ops (!alias || !alias.trim()). 10 whitespace test cases added.
+- **N2 (FIDO):** installHook(force:true) now idempotent — single squad section after repeat calls. Idempotency test added (16 tests total in install-hooks.test.ts).
+- **N3 (CONTROL):** Hand-rolled JSON config readers replaced with typed loadDirConfig() + module augmentation to bridge SDK versions.
+
+#### Test Results Post-Revision
+
+| Test file | Status |
+|-----------|--------|
+| sync-command.test.ts | 33/33 PASS |
+| install-hooks.test.ts | 16/16 PASS |
+| cli-command-wiring.test.ts | 36/38 (2 pre-existing: doctor-types, init-remote) |
+
+#### Verification
+
+- Recursion guard (SQUAD_SYNC_ACTIVE) PASS in all 4 hook templates.
+- Scrub-gate delta: zero new failures vs baseline.
+
+#### Context
+
+EECOM locked out per reviewer protocol; Flight assigned as rev author. Revision produced independently.
