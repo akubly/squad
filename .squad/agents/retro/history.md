@@ -4,6 +4,23 @@
 
 ## Learnings
 
+### 2026-06-02: Piece 30 Adversarial Security Review
+
+**Agent:** RETRO  
+**Task:** Security-focused adversarial review of piece 30 ADO templates (commit 10168051)  
+**Verdict:** APPROVE-WITH-NITS  
+**Severity counts:** Critical: 0 | High: 1 | Medium: 2 | Low: 4  
+**Mandatory findings:** 3  
+
+Identified 3 mandatory findings that block merge:
+1. **M1 (High):** `bootstrap-cross-repo.ps1` echoes `$DocsRepoUrl` verbatim via `Write-Host` — PAT-embedded URL leak to pipeline/console logs; also exposed in ADO's command-line log when passed as argument to `pwsh -File`.
+2. **M2 (Medium):** Missing `--` separator before `$DocsRepoUrl` in `git clone` — violates team convention from piece 14; git-argument injection vector for URLs beginning with `--`.
+3. **M3 (Medium):** No URL scheme allowlist for `$DocsRepoUrl` — `file://` and arbitrary HTTPS origins accepted; `https://attacker.com/.git` blind-clone probe does NOT safe-fail.
+
+Additional 4 non-blocking observations on branch-policy enforcement, scope comments, error output, documentation. Recommendation: add callout in all three docs warning against embedding credentials in `$DocsRepoUrl`.
+
+Consolidated to REJECT verdict by Flight due to convergent mandatory findings across 5 reviewers.
+
 ### Early Pieces Summary (2026-03-22 through 2026-05-14)
 
 **Pieces 01–03 Foundation:** Established core security model — registry validation, callsign character-set restrictions, symlink defense via `lstatSync`. All git invocations injection-free (`execFileSync` array args, no shell).
@@ -117,3 +134,23 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 - Prompt-only write guards (WORK_SQUAD_DIR rule 3) are the current architectural norm. Flag for hook-based enforcement in a future governance piece, but do not block template changes that use the existing model.
 - DEVELOPER_ALIAS charset validation at the CLI boundary (`[a-z][a-z0-9-]{0,38}$`) is the definitive injection defence for the alias surface. Confirm it remains intact when reviewing any piece that threads the alias into new contexts.
 - Scribe orphan-push uses hardcoded `origin` — verify this remains true if STATE_REMOTE is ever generalized to Scribe's git operations.
+
+### Piece 30 Adversarial Review — Security Findings (2026-06-02)
+
+**Verdict:** APPROVE-WITH-NITS (0 critical, 1 high, 2 medium mandatory, 4 low/medium non-blocking)
+
+**Key attack patterns probed:**
+
+**M1 — Write-Host echoes DocsRepoUrl (HIGH, MANDATORY):** `bootstrap-cross-repo.ps1` line 108 echoes `$DocsRepoUrl` verbatim in a `Write-Host` message. PAT-embedded URLs (`https://user:PAT@dev.azure.com/...`) would appear in pipeline/console logs. Also compounded by `publish-inbox.yml` passing `$(docsRepoUrl)` as a command-line arg to `pwsh -File` — ADO logs all command arguments. Fix: remove URL from all `Write-Host` calls; add a parameter-block warning never to embed credentials.
+
+**M2 — Missing `--` separator before DocsRepoUrl in git clone (MEDIUM, MANDATORY):** `git clone "$DocsRepoUrl" "$TeamRoot"` violates the team's piece-14 convention (RETRO history 2026-05-18). A URL beginning with `--` would be parsed as a git option flag. Fix: `git clone -- "$DocsRepoUrl" "$TeamRoot"`.
+
+**M3 — No URL scheme validation (MEDIUM, MANDATORY):** `$DocsRepoUrl` accepts any scheme including `file://`. The `https://attacker.com/.git` probe does NOT safe-fail — git blindly clones. Fix: add a scheme allowlist (`https?://`, `git\+ssh://`, `ssh://`, `git@`) and reject `file://` before any clone.
+
+**SYSTEM_ACCESSTOKEN scoping — CORRECT:** Token injected via `env:` on the fast-forward step only. No pool-level `allowScripts`. The SYSTEM_ACCESSTOKEN scope is correctly implemented per spec. `persistCredentials: true` is job-wide (required for git push) — the inline comment claiming step-scoped OAuth is misleading but not exploitable.
+
+**Alias validation — CORRECT and inherited:** `'^[a-z][a-z0-9-]{0,38}$'` validated before any write. All hostile alias probes (`;rm -rf /`, `../../etc/passwd`) safe-fail at the guard. Charset validation consistent with piece-27 pattern.
+
+**Pipeline trust boundary:** Fold pipeline fetches and folds all inbox branches without content validation. Trust is implicit — any developer with docs repo push access is trusted. Not a bug (by design) but a future governance surface. Sole-writer invariant is documented but enforced by branch-policy recommendation only; no CI gate verifies the policy is set.
+
+**Portable lesson:** In any script or pipeline that accepts a repo URL as a parameter, (a) never echo the URL to console, (b) add a `--` separator before all URL-position git args, (c) validate URL scheme before cloning. Applies to any future bootstrap or pipeline template in the stack.

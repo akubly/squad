@@ -2,6 +2,8 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** CAPCOM conducted architecture-focused adversarial review of piece 30 ADO templates (commit 10168051); verdict: REJECT. Identified 2 mandatory findings: (1) `squad fold` CLI command missing — fold pipeline non-functional at runtime, (2) `publish-inbox.yml` trigger unreachable in product repo (inbox branches created in TEAM_ROOT, not WORK_ROOT). Additional 3 non-blocking observations on variable documentation and parameterization. Consolidated to REJECT verdict by Flight due to convergent mandatory findings across 5 reviewers.
+
 📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
 
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
@@ -96,3 +98,17 @@ The specific smell to watch for is writer/reader/doctor triple-divergence: once 
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+### 2026-06-02: Piece 30 Adversarial Review (Architecture/Contract angle)
+
+**Verdict:** REJECT — 2 mandatory, 3 non-blocking.
+
+**M1 — Missing CLI command:** Pipeline templates that call `squad <command>` must be validated against the actual registered command set in `cli-entry.ts`. `squad fold` does not exist. The SDK exports functions that future fold logic can consume (e.g., `publishTeamRootToInbox`, `hydrateTeamRootFromStateRef` in sync.ts) but the CLI entry point never registers the command. Template behavioral tests (YAML parse, structural assertions) do not catch this — a command-existence check must be added to the test surface when shipping pipeline templates. Pattern: add an assertion that verifies each CLI command the pipeline calls is registered in cli-entry.ts.
+
+**M2 — CI trigger/repo mismatch:** In a cross-repo architecture, each pipeline template must trigger on branches in the repo where the pipeline YAML lives. Inbox branches (`squad/inbox/**`) live in TEAM_ROOT (docs/specs repo); the publish pipeline lives in WORK_ROOT (product repo). Using `include: squad/inbox/**` in the product repo pipeline means the trigger can never fire. When reviewing cross-repo pipeline templates, always trace: (a) which repo hosts the pipeline, (b) which repo receives the branch pushes that should trigger it, and (c) whether those repos match. If they don't, the trigger is dead.
+
+**General pattern:** Template-only pieces (no `packages/*/src/` changes) skip the changeset gate and the build gate, which means the only verification is test assertions. Behavioral tests for pipeline templates must cover not just YAML structure but also CLI command existence and trigger-repo alignment.
+
+**Sync mirror story confirmed sound:** `sync-templates.mjs` `collectFiles()` recurses into subdirectories correctly. The `ado/` subdirectory mirror story required no script changes and produced byte-for-byte mirror parity at all three mirror targets. This is a stable pattern for future subdirectory additions under `.squad-templates/`.
+
+**Pipeline variable documentation debt:** ADO pipeline templates that reference `$(variable)` expressions not in the `variables:` block should include a comment block listing all required external variables. Without this, teams get silent substitution with empty strings in ADO, which surfaces as confusing runtime errors rather than clear "variable not set" messages. This is a template authoring convention to enforce for all future ADO templates.

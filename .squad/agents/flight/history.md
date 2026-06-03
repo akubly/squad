@@ -4,6 +4,29 @@
 
 ---
 
+## Recent Actions
+
+### 2026-06-02: Piece 30 Consolidated Verdict
+
+**Task:** Consolidate piece 30 adversarial review across 5 independent reviewers (CAPCOM, Booster, FIDO, RETRO, PAO)  
+**Consolidated Verdict:** REJECT  
+**Convergent mandatory themes:** 9  
+
+Reviewed all 5 reviewer outputs and consolidated 9 convergent mandatory findings that block merge:
+- CAPCOM: 2 findings (missing `squad fold` CLI command, unreachable publish trigger)
+- Booster: 2 findings (no concurrency serialization, OAuth token loss)
+- RETRO: 3 findings (1 High: PAT leak, 2 Medium: git-argument injection + no URL allowlist)
+- FIDO: 1 finding (no execution-based idempotency test)
+- PAO: 1 finding (docs-test sync broken)
+
+**Verified runtime defect:** `squad fold` command referenced in `fold-squad-state.yml` does not exist in `packages/squad-cli/src/cli-entry.ts`. The fold pipeline is non-functional as shipped.
+
+**Scope question for Brady:** Does fixing `squad fold` belong in piece 30 (expanding scope, requiring CONTROL) or as a separate prerequisite piece?
+
+**Author lockout:** Flight is locked out per strict reviewer rejection lockout. Candidate revision authors: CAPCOM findings (Booster for YAML/concurrency, RETRO for bootstrap hardening, PAO for docs-test sync, FIDO for idempotency test, CONTROL if `squad fold` in scope, EECOM for PowerShell/mirror).
+
+**Status:** Awaiting Brady scope decision on `squad fold` implementation location before revision dispatch.
+
 ## Archive
 
 See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots, crash recovery, dual-doctor unification, shared CLI conventions, OTel typing hardening).
@@ -137,3 +160,19 @@ The incident is captured in the orchestration log (`2026-05-28T0015-flight.md`) 
 1. When a template declares "these N variables are mandatory — never omit any," every spawn pattern in the file must be audited — including inline one-liners (explore agent) that predate the new rule. Stale patterns that escape the search-and-replace are the #1 source of silent-omission bugs.
 2. Introducing a new variable to spawn prompts is only half the contract. The other half is a resolution procedure telling the Coordinator how to COMPUTE the variable's value. TEAM_ROOT has a 6-step chain; WORK_ROOT has none — this is a real gap that will cause ambiguity in cross-repo bind sessions.
 3. Hardcoded defaults in spawn templates (e.g., `STATE_BRANCH: squad-state`) are fine today but should carry a comment noting they are defaults, to prevent future config-driven overrides from silently diverging from the template's baked-in value.
+
+**2026-06-02 Piece 30 Adversarial Review — Consolidated Verdict (REJECT):**
+5-reviewer panel (CAPCOM, Booster, FIDO, RETRO, PAO). Flight excluded as author of commit 10168051. 9 mandatory findings total; 2 REJECTs (CAPCOM, Booster) determine the consolidated verdict.
+
+Verified runtime defect: `squad fold` is called in `fold-squad-state.yml` but no `fold` command exists anywhere in `packages/squad-cli/src/`. The fold pipeline is non-functional as shipped. This was confirmed externally by Squad CLI scan — not a disputed finding.
+
+Key themes for future pieces:
+1. **CLI command existence must be verified before shipping a pipeline that calls it.** The test suite (`test/cli/ado-templates.test.ts`) validated YAML structure and parse cleanliness but did not verify that CLI commands referenced in templates exist in the CLI registry. Add a contract test that cross-checks template command invocations against registered commands in `cli-entry.ts`.
+2. **`persistCredentials: true` is required on any ADO checkout where subsequent steps do authenticated git pushes.** The fold pipeline set it; the publish pipeline did not. The asymmetry was invisible until adversarial review.
+3. **`batch: true` is the correct ADO serialization primitive for pipelines that write to a shared branch.** Sole-writer invariant (pipeline identity) prevents cross-pipeline corruption, but does not prevent concurrent instances of the same pipeline from racing on `git push`.
+4. **Bootstrap scripts must not echo URL parameters to console or logs.** PAT-in-URL is an enterprise ADO pattern; Write-Host with the URL is a High-severity credential leak path.
+5. **Docs-test sync (`EXPECTED_FEATURES`) must be updated in the same commit as any new docs page.** This was a stated hard rule (PAO charter, 2026-05-14); piece 30 missed it for `state-backends.md`.
+
+Scope question for Brady (unanswered as of 2026-06-02): Does the `squad fold` CLI command fix belong in piece 30 (expands scope significantly) or a separate piece (piece 30 revised to use existing CLI surfaces only)? Flight is excluded from pre-answering.
+
+Full consolidated verdict: `.squad/reviews/piece-30-consolidated.md`. Inbox drop: `.squad/decisions/inbox/flight-piece-30-consolidated-verdict.md`.

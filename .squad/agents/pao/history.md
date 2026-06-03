@@ -6,6 +6,10 @@
 
 Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, features/, scenarios/ sections. Blog tests use filesystem discovery (dynamic); other sections use hardcoded expected arrays. Microsoft Style Guide enforced: sentence-case headings, active voice, second person, present tense. Docs format: plain markdown, H1 title, experimental warning, "Try this" code blocks, overview, HR, H2 content sections. Scannability framework: paragraphs for narrative, bullets for scannable items, tables for comparisons.
 
+## Team Update
+
+📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** PAO conducted documentation and developer-experience review of piece 30 ADO templates (commit 10168051); verdict: APPROVE-WITH-NITS. Identified 1 mandatory finding: test/docs-build.test.ts missing `'state-backends'` in EXPECTED_FEATURES array — docs-test sync hard rule violated. Additional 8 non-blocking observations on terminology drift (4 instances of `old-squad-state.yml`), typos (2), clarity gaps (3 on `$DocsRepoUrl` format, `squad bind` prerequisite, single-repo case, credentials warning), deep-linking issues. Piece is well-structured; documentation gaps are fixable. Consolidated to REJECT verdict by Flight.
+
 ## Archive
 
 See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc research, API reference PRD, release playbook, v0.9.0 blog, community triage, npx purge, provider discovery, JSDoc patterns, etc.).
@@ -26,7 +30,11 @@ See history-archive.md for learnings prior to 2026-05-14 (docs audit, TypeDoc re
 - **#478 (Polish REPL)** — squad:vox + squad:pao (shell UX readiness + README documentation gate)
 - **#476 (Guide v0.4.1 update)** — squad:handbook + squad:pao (SDK patterns + documentation)
 
-📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** 3 new docs pages updated for ADO enterprise deployment path (bootstrap-cross-repo.ps1 setup guide, publish-inbox.yml pipeline config, fold-squad-state.yml state management). All docs follow Microsoft Style Guide (sentence-case headings, active voice, scannability framework).
+📌 **Piece 30 Adversarial Review — 2026-06-02**
+
+**Verdict:** APPROVE-WITH-NITS (1 mandatory, 8 non-blocking)
+
+Enterprise ADO docs are high-quality and scannably formatted. **Blocker: M1** — `test/docs-build.test.ts` missing `'state-backends'` in EXPECTED_FEATURES (docs-test sync hard rule). **Non-blocking:** Terminology drift (old-squad-state.yml vs. fold-squad-state.yml, 4 instances), typos (ootstrap-cross-repo.ps1, ootstrapScriptPath), code block language (ash→bash), missing URL format clarity ($DocsRepoUrl), no guidance for missing Squad CLI, single-repo case unaddressed, credential security callout absent, deep linking incomplete. All doc claims verified against templates. Scannability strong (tables, bullets, nested structure); style guide compliant. See `.squad/reviews/piece-30-pao.md` for full cross-checks and detailed nits.
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. PAO owns GitHub auth docs (#488), REPL documentation gate (#478), and Guide v0.4.1 refresh (#476). High community value on Guide update. Ready to begin documentation work on next sprint.
 

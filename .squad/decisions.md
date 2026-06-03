@@ -718,7 +718,165 @@ The cross-repo handoff defines five implementation pieces mapped to local piece 
 
 **By:** Adam (decision), Flight (recorded)  
 **What:** Piece 29 ships as a coordinator-protocol change only. Restart-enforcement tooling is NOT in scope. The piece-29 commit body and PR description must carry a prominent restart banner: "🔄 squad.agent.md updated — restart sessions to pick up new path semantics (TEAM_ROOT/WORK_ROOT split). Pre-29 sessions will silently route writes to wrong roots."  
-**Why:** Piece 29 is a coordinator-protocol change, not a tooling change. The current single-developer replay arc is adequately protected by the existing self-development rule + a louder banner. Version-check tooling (Option B from the deliberation) is a generic Squad-platform concern that belongs in its own piece after the arc ships and multi-developer scenarios become real.  
+**Why:** Piece 29 is a coordinator-protocol change, not a tooling change. The current single-developer replay arc is adequately protected by the existing self-development rule + a louder banner. Version-check tooling (Option B from the deliberation) is a generic Squad-platform concern that belongs in its own piece after the arc ships and multi-developer scenarios become real.
+
+---
+
+### 2026-06-02: Piece 30 Adversarial Review — CAPCOM Verdict
+
+**Date:** 2026-06-02  
+**Reviewer:** CAPCOM (SDK Expert / Architecture angle)  
+**Commit:** 10168051  
+**Verdict:** REJECT  
+**Mandatory findings:** 2  
+**Non-blocking findings:** 3  
+
+#### Mandatory themes
+
+**M1 — `squad fold` command does not exist.**  
+`fold-squad-state.yml` calls `squad fold` at pipeline step 4. No `fold` command is registered in `cli-entry.ts`. The fold pipeline is non-functional at runtime. Piece 28 did not ship this command; piece 30 is the first piece to depend on it in executable form. Resolution requires either a new `squad fold` command or a redesign of the fold step using existing CLI surfaces.
+
+**M2 — `publish-inbox.yml` CI trigger is unreachable.**  
+The pipeline is spec'd for the product repo (WORK_ROOT), but its trigger is `squad/inbox/**`. Inbox branches are created in TEAM_ROOT (docs repo) by `squad sync --push` — the product repo never receives pushes to that namespace. The pipeline's CI automation is permanently dead. The associated test enforces the wrong trigger pattern and must be corrected alongside the fix. Correct trigger: exclude `squad-state`, `main`, `dev`; no `include:` clause.
+
+#### Non-blocking themes (summary)
+
+**N1** — `publish-inbox.yml` references three required ADO pipeline variables (`bootstrapScriptPath`, `docsRepoUrl`, `developerAlias`) with no declaration or documentation in the YAML. Failure is loud but confusing for first-time teams.
+
+**N2** — `fold-squad-state.yml` hardcodes `squad-state` with no pipeline variable override; inconsistent with bootstrap's `$StateBranch` parameterization.
+
+**N3** — Bootstrap script ignores `SQUAD_TEAM_ROOT` env var when computing sidecar path; creates a second clone if the env var is already set.
+
+---
+
+### 2026-06-02: Piece 30 Adversarial Review — Booster Verdict
+
+**Date:** 2026-06-02  
+**Reviewer:** Booster (CI/CD Engineer)  
+**Commit:** 10168051  
+**Verdict:** REJECT  
+**Mandatory findings:** 2  
+**Non-blocking findings:** 5  
+
+#### Mandatory themes
+
+**M1 — fold-squad-state.yml: No concurrency serialization control.**  
+No `batch: true` (or equivalent) in the trigger block. Two simultaneous inbox pushes trigger two concurrent fold runs; the losing run fails the `git push origin HEAD:squad-state` step with a non-fast-forward rejection. Data stays intact but pipeline reliability breaks in any real multi-developer scenario. Fix: add `batch: true` to the fold trigger.
+
+**M2 — publish-inbox.yml: `persistCredentials: true` absent from checkout.**  
+ADO strips the OAuth token after checkout when `persistCredentials` is omitted (the default). The subsequent `squad sync --push` step cannot authenticate git push operations in standard ADO configurations. The fold pipeline sets `persistCredentials: true` — the publish pipeline must match. Fix: add `persistCredentials: true` to the `checkout: self` step in publish-inbox.yml.
+
+---
+
+### 2026-06-02: Piece 30 Adversarial Review — FIDO Verdict
+
+**Date:** 2026-06-02  
+**Reviewer:** FIDO (Quality Owner)  
+**Commit:** 10168051  
+**Verdict:** APPROVE-WITH-NITS  
+**Mandatory findings:** 1  
+**Non-blocking findings:** 4  
+
+#### Mandatory themes
+
+**M1 — No execution-based idempotency test for `bootstrap-cross-repo.ps1`.**  
+The spec requires idempotent behavior (no duplicate remotes, no duplicate exclude entries on re-run). The two bootstrap tests are regex scans of the raw PS1 source only — no test runs the script. Idempotency logic bugs (e.g., the exclude-file regex mishandling `\r\n` line endings) would not be caught.
+
+#### Non-blocking themes
+
+**N1** — Guard-ordering is text-presence-only. Test confirms the guard exists in the file but not that it precedes the first write. Current implementation is correctly ordered; gap is future-mutation risk.
+
+**N2** — Trigger structural fidelity gap. `JSON.stringify(trigger).toContain('squad/inbox')` misses YAML key-name mutations (e.g., `include:` → `Include:`). Value-presence check, not structure check.
+
+**N3** — No assertion that `publish-inbox.yml` steps do not write to `squad-state`. Spec says "Does not write to `squad-state` at any step." No test enforces this step-content invariant.
+
+**N4** — `$DocsRepoUrl` URL format unvalidated. Non-empty check only; `file://` and malformed URLs reach `git clone`. Script halts on failure — no silent damage — but error is opaque.
+
+---
+
+### 2026-06-02: Piece 30 Adversarial Review — RETRO Verdict
+
+**Date:** 2026-06-02  
+**Reviewer:** RETRO (Security)  
+**Commit:** 10168051  
+**Verdict:** APPROVE-WITH-NITS  
+**Severity counts:** Critical: 0 | High: 1 | Medium: 2 | Low: 4  
+**Mandatory findings:** 3  
+**Non-blocking findings:** 4  
+
+#### Mandatory themes (blocks merge)
+
+- **M1 (High):** `bootstrap-cross-repo.ps1` echoes `$DocsRepoUrl` verbatim via `Write-Host` — PAT-embedded URL leak to pipeline/console logs; also exposed in ADO's command-line log when `publish-inbox.yml` passes `$(docsRepoUrl)` as an argument to `pwsh -File`.
+- **M2 (Medium):** Missing `--` separator before `$DocsRepoUrl` in `git clone` — violates team convention established in piece 14; git-argument injection vector for URLs beginning with `--`.
+- **M3 (Medium):** No URL scheme allowlist for `$DocsRepoUrl`; `file://` and arbitrary HTTPS origins are accepted; `https://attacker.com/.git` blind-clone probe does NOT safe-fail.
+
+#### Non-blocking themes
+
+- **N1 (Medium):** Sole-writer invariant enforced by branch-policy recommendation only — no CI preflight gate validates the policy is set.
+- **N2–N4 (Low):** Misleading `persistCredentials` scope comment; unconditional `cat publish-history.json` in fold report step; `.git/info/exclude` masking `.squad/` from `git status` warrants an inline documentation note.
+
+#### Documentation gap
+
+No doc warns that `DocsRepoUrl` must never contain embedded credentials. Recommend a callout box in all three docs: "Never embed PATs in `DocsRepoUrl`. Use SSH keys or ADO service connections."
+
+---
+
+### 2026-06-02: Piece 30 Adversarial Review — PAO Verdict
+
+**Date:** 2026-06-02  
+**Reviewer:** PAO (DevRel)  
+**Commit:** 10168051  
+**Verdict:** APPROVE-WITH-NITS  
+**Mandatory findings:** 1  
+**Non-blocking findings:** 8  
+
+#### Mandatory themes
+
+**M1 (BLOCKER):** `test/docs-build.test.ts` missing `'state-backends'` in EXPECTED_FEATURES array — docs-test sync hard rule violated.
+
+#### Non-blocking themes
+
+**N1:** Terminology drift — docs reference `old-squad-state.yml` instead of spec's `fold-squad-state.yml` (4 instances across 2 files).
+
+**N2:** Typos — `ootstrap-cross-repo.ps1` and `ootstrapScriptPath` (missing leading 'B').
+
+**N3:** Code block language typo — `ash` should be `bash` (state-backends.md line 639).
+
+**N4:** Missing clarity — `$DocsRepoUrl` format (with/without `.git`?) not documented.
+
+**N5:** Missing clarity — docs don't explain what to do if `squad bind` not installed.
+
+**N6:** Single-repo case not addressed — assumes cross-repo only (per piece 29 concern).
+
+**N7:** Security callout missing — no warning against embedding credentials in `$DocsRepoUrl`.
+
+**N8:** Deep linking — cross-references use page URLs only, no section anchors.
+
+---
+
+### 2026-06-02: Piece 30 Consolidated Verdict — Flight (Lead)
+
+**Date:** 2026-06-02  
+**From:** Flight (Lead — consolidation role only; excluded from review panel as author of commit 10168051)  
+**Commit:** 10168051  
+**Verdict:** REJECT  
+**Convergent mandatory themes:** 9  
+
+#### Summary
+
+Consolidated verdict: **REJECT.** 9 mandatory findings across 5 reviewers: 2 from CAPCOM, 2 from Booster, 3 from RETRO (including 1 High), 1 from FIDO, 1 from PAO. Author Flight is locked out of the revision under strict reviewer rejection lockout.
+
+#### Verified runtime defect
+
+`squad fold` appears only in the new templates (`fold-squad-state.yml`); no corresponding handler exists in `packages/squad-cli/src/`. The fold pipeline is non-functional as shipped.
+
+#### Scope question for Brady
+
+Does fixing the missing `squad fold` CLI command belong in piece 30 (substantially expanding its scope, requiring CONTROL authorship of the command) or in a separate piece that piece 30 depends on (with piece 30 revised to use only existing CLI surfaces)? Flight is excluded from pre-answering this.
+
+#### Candidate revision authors
+
+Booster (YAML fixes), RETRO (bootstrap hardening), PAO (docs-test sync + terminology), FIDO (idempotency test), CONTROL (if `squad fold` command is in scope), EECOM (PowerShell/mirror).  
 **Follow-up piece (future, separate arc):** Coordinator version enforcement — implement on-disk-vs-session version comparison at session start, with cross-surface support (CLI / VS Code / GitHub.com). Out of scope for this arc.
 
 ---

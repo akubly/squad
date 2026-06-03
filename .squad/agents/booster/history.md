@@ -4,6 +4,8 @@
 
 ## Team Updates
 
+📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** Booster conducted CI/CD-focused adversarial review of piece 30 ADO templates (commit 10168051); verdict: REJECT. Identified 2 mandatory findings: (1) no `batch: true` on fold trigger — concurrent inbox pushes cause race condition with non-fast-forward rejection, (2) missing `persistCredentials: true` in publish checkout — OAuth token lost before `squad sync --push`. Additional 5 non-blocking observations on documentation, test isolation, error handling. Consolidated to REJECT verdict by Flight.
+
 📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** CI/CD: ADO pipeline templates now canonical at `.squad-templates/ado/` — `publish-inbox.yml` is no-PR-trigger gate, `fold-squad-state.yml` is sole-writer to squad-state. All mirrored to templates/, CLI, SDK via sync-templates.mjs (recursive subdir support). 190 tests pass; scrub gates 2,5–9 pass.
 
 ## Learnings
@@ -182,3 +184,21 @@ Updated both release-process skill files (`.squad/skills/release-process/SKILL.m
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+### Piece 30 ADO Pipeline Adversarial Review — 2026-06-02
+
+**Context:** Reviewed commit `10168051` on `squad/piece-30-ado-cross-repo-templates` — three ADO pipeline templates (`publish-inbox.yml`, `fold-squad-state.yml`, `bootstrap-cross-repo.ps1`) plus mirrors, docs, and tests.
+
+**Verdict:** REJECT — 2 mandatory findings, 5 non-blocking.
+
+**Key findings:**
+
+1. **ADO fold serialization requires `batch: true`, not just identity scoping.** The "sole writer" invariant is enforced by pipeline identity (only one pipeline has permission), but ADO will still run multiple *instances* of that pipeline concurrently if triggered simultaneously. The correct ADO primitive is `batch: true` in the trigger block — this coalesces concurrent trigger events and ensures at most one pending run queues behind an active run. There is no ADO YAML equivalent of GitHub Actions' `concurrency:` at the top level; `batch: true` under `trigger:` is the authoritative pattern.
+
+2. **ADO `checkout: self` defaults to `persistCredentials: false`.** Any pipeline step that calls `git push` (or a CLI tool wrapping it) after checkout requires `persistCredentials: true` in the checkout block. This is not inferrable from GitHub Actions experience — GHA's `actions/checkout` defaults to persisting the token. ADO does not. Always check both pipelines in a pair (publish + fold) for this setting; they frequently diverge.
+
+3. **Git blob SHA is the reliable mirror-identity check.** String-level `diff` via `git show | PowerShell comparison` can report false "DIFFER" due to line-ending normalization in the PowerShell pipeline. `git rev-parse <commit>:<path>` returns the actual stored blob SHA — identical SHAs guarantee byte-for-byte identity regardless of OS or shell encoding.
+
+4. **YAML parser object-key presence is the correct no-PR-trigger assertion.** Checking `not.toHaveProperty('pr')` on the parsed object correctly catches `pr: none`, `pr: false`, `pr: { branches: [...] }`, and `pr: ~` — all ADO forms of PR trigger, including the "disable" forms. A regex on raw text would miss `pr: none` semantically but the key-presence check is unambiguous.
+
+5. **Sole-writer assertions need line-position enforcement, not just presence.** `toContain('SOLE WRITER INVARIANT')` passes if the comment drifts to line 80. Add a slice of the first N lines before the assertion to enforce the "near top" constraint specified in the architecture.
