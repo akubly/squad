@@ -2,17 +2,16 @@
 #
 # Squad inbox-branch publish pipeline.
 #
-# Triggered by pushes to squad/inbox/<alias>/... branches only.
-# No PR trigger. No writes to the Squad state branch.
+# Runs in the product repo (WORK_ROOT). Triggered by any feature-branch push
+# except squad-state, main, and dev. Inbox branches (squad/inbox/<alias>/...)
+# live in TEAM_ROOT (docs repo); this pipeline publishes state TO them via
+# squad sync --push. No PR trigger. No writes to the Squad state branch.
 #
-# This pipeline publishes a TEAM_ROOT snapshot to the inbox branch for the
-# current developer. The Squad fold pipeline (fold-squad-state.yml) is the
+# The Squad fold pipeline (fold-squad-state.yml) in the docs repo is the
 # sole writer to squad-state — this pipeline never writes to squad-state.
 
 trigger:
   branches:
-    include:
-      - squad/inbox/**
     exclude:
       - squad-state
       - main
@@ -31,6 +30,7 @@ variables:
 steps:
   - checkout: self
     fetchDepth: 0
+    persistCredentials: true
     displayName: 'Checkout product repo'
 
   - task: NodeTool@0

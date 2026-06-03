@@ -81,6 +81,7 @@ const EXPECTED_FEATURES = [
   'skills',
   'storage-provider',
   'squad-rc',
+  'state-backends',
   'streams',
   'team-setup',
   'upstream-inheritance',

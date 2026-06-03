@@ -356,7 +356,7 @@ WORK_ROOT (product repo — engineers clone this)
 
 ### First-time developer setup
 
-Run ootstrap-cross-repo.ps1 once per machine:
+Run bootstrap-cross-repo.ps1 once per machine:
 
 `powershell
 # From inside your product repo clone
@@ -371,14 +371,14 @@ The script is idempotent — re-running it on a configured machine is safe and p
 
 1. **Work in WORK_ROOT** — branch, commit, push product code as usual.
 2. **Publish squad state** — run squad sync --push when your session produces decisions, agent history, or state updates worth sharing.
-3. **Fold pipeline runs** — old-squad-state.yml in the docs repo detects inbox pushes and serializes them into squad-state in deterministic order.
+3. **Fold pipeline runs** — fold-squad-state.yml in the docs repo detects inbox pushes and serializes them into squad-state in deterministic order.
 4. **Other developers pull** — squad sync --pull hydrates their TEAM_ROOT from the latest squad-state.
 
 ### Concurrent developer considerations
 
 Multiple developers can publish inbox branches simultaneously. The fold pipeline serializes them in deterministic order: lexicographic by publishedAt timestamp, then by developerAlias. This order is stable across concurrent pipelines runs and avoids merge conflicts on squad-state.
 
-No developer writes directly to squad-state. The only writer is old-squad-state.yml. This invariant is enforced by ADO branch policies (block direct pushes to squad-state except for the pipeline identity).
+No developer writes directly to squad-state. The only writer is fold-squad-state.yml. This invariant is enforced by ADO branch policies (block direct pushes to squad-state except for the pipeline identity).
 
 ### Inbox branch lifecycle
 
@@ -397,11 +397,11 @@ fold-squad-state.yml triggers
 ### Pipeline deployment checklist
 
 - [ ] publish-inbox.yml created in the product-repo pipeline — triggers on squad/inbox/** branch pushes.
-- [ ] old-squad-state.yml created in the docs-repo pipeline — triggers on squad/inbox/** inbox pushes.
+- [ ] fold-squad-state.yml created in the docs-repo pipeline — triggers on squad/inbox/** inbox pushes.
 - [ ] ADO branch policy on squad-state: fast-forward only, block direct pushes except pipeline identity.
 - [ ] Pipeline variable docsRepoUrl set to the docs repo URL.
 - [ ] Pipeline variable developerAlias set per developer or resolved from $(Build.RequestedForEmail).
-- [ ] ootstrapScriptPath variable points to the ootstrap-cross-repo.ps1 copy in the repo.
+- [ ] bootstrapScriptPath variable points to the bootstrap-cross-repo.ps1 copy in the repo.
 
 ---
 

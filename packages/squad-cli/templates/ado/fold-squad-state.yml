@@ -2,17 +2,17 @@
 #
 # Squad state fold pipeline.
 #
-# SOLE WRITER INVARIANT: This pipeline is the sole writer to squad-state.
-# No other pipeline, script, or developer workflow may push commits or
-# fast-forwards to the squad-state branch. This invariant is enforced by
-# the pipeline's repo-scoped identity and by the reviewer gate in Phase C.
-# Violations must be recorded in decisions/inbox/ before any exception is granted.
+# INVARIANT: This pipeline is the SOLE writer to refs/heads/squad-state. No other
+# pipeline, script, or workflow may push to squad-state. Direct developer pushes
+# must be blocked by branch policy. Exceptions require a decision record in
+# .squad/decisions/inbox/ and explicit user adjudication.
 #
 # Triggered by pushes to squad/inbox/* branches (inbox publish events).
 # Folds inbox branches into squad-state in deterministic order and updates
 # .squad/publish-history.json with fold provenance.
 
 trigger:
+  batch: true          # serialize fold runs — at most one active, then one queued
   branches:
     include:
       - squad/inbox/**
@@ -34,39 +34,155 @@ steps:
     persistCredentials: true
     displayName: 'Checkout docs repo (TEAM_ROOT) with full history'
 
-  - task: NodeTool@0
-    inputs:
-      versionSpec: $(nodeVersion)
-    displayName: 'Install Node.js'
-
-  - script: npm install --global @bradygaster/squad-cli
-    displayName: 'Install Squad CLI'
-
   - script: |
       git config user.email "squad-fold-pipeline@squad.local"
       git config user.name "Squad Fold Pipeline"
     displayName: 'Configure git identity for fold commits'
 
   - script: |
-      # Fetch all inbox refs so the fold step can enumerate them
+      # Fetch all inbox refs and squad-state
       git fetch origin '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*'
-    displayName: 'Fetch all inbox refs'
+      git fetch origin '+refs/heads/squad-state:refs/remotes/origin/squad-state' 2>/dev/null || true
+    displayName: 'Fetch inbox refs'
 
   - script: |
-      # Enumerate inbox refs pushed since the last recorded fold commit.
-      # Fold order: lexicographic by publishedAt timestamp, then by developerAlias.
-      # This deterministic order ensures consistent squad-state history across
-      # concurrent developers.
-      squad fold \
-        --state-branch squad-state \
-        --history-file .squad/publish-history.json \
-        --order published-at,developer-alias
-    displayName: 'Fold inbox branches into Squad state remote'
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      # -----------------------------------------------------------------------
+      # Inline fold logic — pipeline-resident operation per piece 28 + 30 spec.
+      # The fold pipeline does NOT invoke any squad CLI subcommand. All fold
+      # steps use pure git plumbing (git checkout, git commit, jq).
+      #
+      # Step 1: Switch to squad-state (initialize as orphan if first fold ever).
+      # Step 2: Enumerate squad/inbox/<alias>/<session> refs not yet recorded in
+      #         .squad/publish-history.json.
+      # Step 3: Sort by publishedAt (from publish-metadata.json), then ref name.
+      # Step 4: For each ref: merge .squad/ tree, append to publish-history.json,
+      #         commit to squad-state.
+      # -----------------------------------------------------------------------
+
+      HISTORY_FILE=".squad/publish-history.json"
+
+      # jq is pre-installed on ubuntu-latest; fail fast if missing.
+      if ! command -v jq &>/dev/null; then
+        echo "::error::jq is required but not found. Use ubuntu-latest or install jq."
+        exit 1
+      fi
+
+      # Step 1: Switch to squad-state
+      if git ls-remote --exit-code origin refs/heads/squad-state &>/dev/null; then
+        git fetch origin squad-state:refs/heads/squad-state 2>/dev/null || true
+        git checkout squad-state
+      else
+        # First fold ever — initialize squad-state as an orphan branch
+        echo "squad-state does not exist on origin — initializing."
+        git checkout --orphan squad-state
+        git rm -rf . 2>/dev/null || true
+        mkdir -p .squad
+        echo '[]' > "$HISTORY_FILE"
+        git add "$HISTORY_FILE"
+        git commit -m "chore: initialize squad-state branch"
+      fi
+
+      # Step 2: Determine last-folded publishedAt from history
+      LAST_PUBLISHED_AT=""
+      if [ -f "$HISTORY_FILE" ]; then
+        LAST_PUBLISHED_AT=$(jq -r '.[-1].publishedAt // empty' "$HISTORY_FILE" 2>/dev/null || true)
+      fi
+      echo "Last folded publishedAt: ${LAST_PUBLISHED_AT:-(none — first fold)}"
+
+      # Collect all remote inbox refs
+      mapfile -t ALL_REFS < <(
+        git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/squad/inbox/'
+      )
+
+      if [ "${#ALL_REFS[@]}" -eq 0 ]; then
+        echo "No inbox refs found. Nothing to fold."
+        exit 0
+      fi
+      echo "Found ${#ALL_REFS[@]} inbox ref(s)."
+
+      # Step 3: Build sort list (skip already-folded refs)
+      SORT_LIST=()
+      for REF in "${ALL_REFS[@]}"; do
+        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || echo '{}')
+        REF_PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty' 2>/dev/null || true)
+
+        # Skip refs whose publishedAt is on-or-before the last fold timestamp
+        if [ -n "$LAST_PUBLISHED_AT" ] && [ -n "$REF_PUB_AT" ]; then
+          if [[ "$REF_PUB_AT" < "$LAST_PUBLISHED_AT" ]] || [[ "$REF_PUB_AT" == "$LAST_PUBLISHED_AT" ]]; then
+            echo "  Skipping $REF (publishedAt=$REF_PUB_AT <= last=$LAST_PUBLISHED_AT)"
+            continue
+          fi
+        fi
+
+        # Sort key: publishedAt if available, else ref name for deterministic ordering
+        SORT_KEY="${REF_PUB_AT:-$REF}"
+        SORT_LIST+=("${SORT_KEY}"$'\t'"${REF}")
+      done
+
+      if [ "${#SORT_LIST[@]}" -eq 0 ]; then
+        echo "No new inbox refs to fold (all already recorded)."
+        exit 0
+      fi
+
+      # Sort by key, extract ref names in deterministic order
+      mapfile -t SORTED_REFS < <(printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f2)
+
+      echo "Folding ${#SORTED_REFS[@]} ref(s) in order:"
+      for R in "${SORTED_REFS[@]}"; do echo "  $R"; done
+
+      # Ensure .squad/ directory exists on squad-state
+      mkdir -p .squad
+      if [ ! -f "$HISTORY_FILE" ]; then
+        echo '[]' > "$HISTORY_FILE"
+      fi
+
+      # Step 4: Fold each ref in sorted order
+      for REF in "${SORTED_REFS[@]}"; do
+        echo ""
+        echo "--- Folding: $REF ---"
+
+        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || echo '{}')
+        ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // "unknown"')
+        PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty')
+        SESSION=$(echo "$META_JSON" | jq -r '.sessionId // "unknown"')
+        COMMIT=$(git rev-parse "$REF")
+
+        # Save current publish-history.json before tree merge
+        SAVED_HISTORY=$(cat "$HISTORY_FILE")
+
+        # Merge .squad/ tree from inbox ref into working tree
+        git checkout "$REF" -- .squad/ 2>/dev/null || true
+
+        # Restore publish-history.json (inbox ref must not overwrite fold history)
+        echo "$SAVED_HISTORY" > "$HISTORY_FILE"
+
+        # Append fold entry to publish-history.json
+        FOLDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        ENTRY=$(jq -n \
+          --arg alias "$ALIAS" \
+          --arg publishedAt "$PUB_AT" \
+          --arg sessionId "$SESSION" \
+          --arg inboxRef "$REF" \
+          --arg foldCommit "$COMMIT" \
+          --arg foldedAt "$FOLDED_AT" \
+          '{developerAlias:$alias,publishedAt:$publishedAt,sessionId:$sessionId,inboxRef:$inboxRef,foldCommit:$foldCommit,foldedAt:$foldedAt}')
+        echo "$SAVED_HISTORY" | jq ". + [$ENTRY]" > "$HISTORY_FILE"
+
+        git add .squad/
+        git commit -m "fold: $ALIAS / $SESSION (${PUB_AT:-$REF})"
+        echo "  Committed fold for $ALIAS (session=$SESSION)"
+      done
+    displayName: 'Fold inbox branches into squad-state (inline git plumbing)'
 
   - script: |
-      # Fast-forward squad-state to the fold commit.
-      # OAuth token access is scoped to this step only.
-      git push origin HEAD:squad-state
+      # Fast-forward squad-state to the new fold tip.
+      # SYSTEM_ACCESSTOKEN env var is scoped to this step only.
+      # Note: persistCredentials (from checkout) makes the git credential helper
+      # available job-wide — this is required for git push to succeed.
+      git push --ff-only origin HEAD:squad-state
     displayName: 'Fast-forward squad-state'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
@@ -74,14 +190,26 @@ steps:
   - script: |
       if [ "$(pruneAfterFold)" = "true" ]; then
         echo "Pruning merged inbox refs ..."
-        squad fold --prune --state-branch squad-state
+        while IFS= read -r REF; do
+          REMOTE_REF="${REF#origin/}"
+          git push origin --delete "$REMOTE_REF" 2>/dev/null \
+            || echo "  Could not delete $REMOTE_REF (may already be deleted — continuing)"
+        done < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/squad/inbox/')
+        echo "Prune complete."
       else
-        echo "Prune disabled (pruneAfterFold=false) — inbox refs retained."
+        echo "Prune disabled (pruneAfterFold=false) — inbox refs retained for auditability."
       fi
     displayName: 'Prune merged inbox refs (optional)'
 
   - script: |
       echo "Fold complete."
-      echo "Publish history:"
-      cat .squad/publish-history.json || echo "(no history file yet)"
+      HISTORY_FILE=".squad/publish-history.json"
+      if [ -f "$HISTORY_FILE" ]; then
+        COUNT=$(jq 'length' "$HISTORY_FILE")
+        echo "Publish history: $COUNT total entries."
+        echo "Last 5 entries:"
+        jq '.[-5:]' "$HISTORY_FILE"
+      else
+        echo "(no history file — fold produced no commits)"
+      fi
     displayName: 'Report fold results'

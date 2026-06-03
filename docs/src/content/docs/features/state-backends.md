@@ -621,7 +621,7 @@ WORK_ROOT (product code repo)
 
 ### Pipeline identity and branch policies
 
-The fold pipeline (old-squad-state.yml) runs as a repo-scoped pipeline identity in the docs repository. Recommended ADO branch policies for squad-state:
+The fold pipeline (fold-squad-state.yml) runs as a repo-scoped pipeline identity in the docs repository. Recommended ADO branch policies for squad-state:
 
 - **Require a pull request** — off (the fold pipeline pushes directly; PRs would block the write).
 - **Limit merge types** — fast-forward only (preserves linear fold history).
@@ -630,11 +630,11 @@ The fold pipeline (old-squad-state.yml) runs as a repo-scoped pipeline identity
 
 ### Fold pipeline invariant
 
-The old-squad-state.yml template is the sole writer to squad-state. No developer workflow, no other pipeline, and no manual push should write to squad-state outside of this pipeline. The pipeline's OAuth token access is scoped to the fast-forward push step only — no broad pool-level OAuth grant is required or recommended.
+The fold-squad-state.yml template is the sole writer to squad-state. No developer workflow, no other pipeline, and no manual push should write to squad-state outside of this pipeline. The pipeline's OAuth token access is scoped to the fast-forward push step only — no broad pool-level OAuth grant is required or recommended.
 
 ### First sync verification
 
-After running ootstrap-cross-repo.ps1 and a successful squad sync --pull, verify the state is hydrated:
+After running bootstrap-cross-repo.ps1 and a successful squad sync --pull, verify the state is hydrated:
 
 `ash
 # Confirm squad-state is reachable

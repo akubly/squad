@@ -12,6 +12,11 @@
 
 .PARAMETER DocsRepoUrl
     Git URL of the docs/specs repository that acts as TEAM_ROOT.
+    Use HTTPS (https://dev.azure.com/...) or SSH (git@dev.azure.com:...) only.
+    # IMPORTANT: Never embed credentials (PATs, passwords) in DocsRepoUrl.
+    # Use SSH keys or ADO service connections for authentication instead.
+    Accepted schemes: https://, http://, ssh://, git+ssh://, git@
+    Rejected schemes: file://, ftp://, and all others.
 
 .PARAMETER DeveloperAlias
     Short lowercase identifier for this developer (letters, digits, hyphens; starts with
@@ -64,6 +69,13 @@ if ([string]::IsNullOrWhiteSpace($DocsRepoUrl)) {
     exit 1
 }
 
+# Validate URL scheme allowlist: only HTTPS or SSH are accepted.
+# Rejects file://, ftp://, and other unsafe schemes.
+if ($DocsRepoUrl -notmatch '^(https?://|git\+ssh://|ssh://|git@)') {
+    Write-Error "DocsRepoUrl scheme not allowed. Use HTTPS or SSH. Got scheme: '$($DocsRepoUrl.Split('//')[0])://...'"
+    exit 1
+}
+
 # Validate alias format: lowercase letters, digits, hyphens; starts with letter; max 39 chars
 if ($DeveloperAlias -notmatch '^[a-z][a-z0-9-]{0,38}$') {
     Write-Error "DeveloperAlias must match ^[a-z][a-z0-9-]{0,38}$. Got: '$DeveloperAlias'"
@@ -86,7 +98,7 @@ if (Test-Path $TeamRoot) {
     Write-Host "[1/5] TEAM_ROOT sidecar clone already exists at $TeamRoot — skipping clone."
 } else {
     Write-Host "[1/5] Cloning docs repo to TEAM_ROOT sidecar at $TeamRoot ..."
-    git clone "$DocsRepoUrl" "$TeamRoot"
+    git clone -- "$DocsRepoUrl" "$TeamRoot"
     Write-Host "      Clone complete."
 }
 
@@ -105,7 +117,7 @@ $existingRemotes = git -C "$WorkRoot" remote
 if ($existingRemotes -contains $DocsRemoteName) {
     Write-Host "[3/5] Remote '$DocsRemoteName' already configured — skipping remote add."
 } else {
-    Write-Host "[3/5] Adding remote '$DocsRemoteName' → $DocsRepoUrl ..."
+    Write-Host "[3/5] Adding remote '$DocsRemoteName' → $($DocsRepoUrl -replace '://[^@/]+@', '://***@') ..."
     git -C "$WorkRoot" remote add "$DocsRemoteName" "$DocsRepoUrl"
     Write-Host '      Remote added.'
 }
