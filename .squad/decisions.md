@@ -5,6 +5,78 @@
 
 ---
 
+### 2026-06-02: Piece 30 Follow-On Revision — EECOM Implementation Complete
+
+**Date:** 2026-06-02  
+**Author:** EECOM (Core Dev)  
+**Branch:** `squad/piece-30-ado-cross-repo-templates`  
+**Commit:** `3c6c9edf`  
+**Push status:** Pushed to `origin/squad/piece-30-ado-cross-repo-templates`
+
+## Summary
+
+Shipped both mandatory findings from the 3-reviewer follow-on adversarial panel
+(CAPCOM REJECT + RETRO Medium APPROVE-WITH-NITS; FIDO clean APPROVE).
+Author lockout respected: Flight (10168051) and Booster (a9da5453) both excluded.
+Revision authored by EECOM under cross-trained scope (YAML pipeline + PowerShell
+hardening, per expanded scope grant in task prompt).
+
+## Fix 1 — CAPCOM M_NEW_1 (fold timestamp bug → ref-name membership)
+
+**File:** `.squad-templates/ado/fold-squad-state.yml` + 3 mirrors  
+**Change:** Replaced `LAST_PUBLISHED_AT` scalar timestamp comparison with
+`FOLDED_REFS` set-membership check against `.[].inboxRef` in `publish-history.json`.
+
+Key properties of the new implementation:
+- Naturally idempotent: re-running against any already-folded ref is a no-op.
+- Immune to clock skew and same-second ties.
+- Malformed JSON guard: aborts with `exit 1` if `publish-history.json` is not valid JSON.
+- Missing metadata: skip-with-warning (chosen over abort so one bad ref doesn't block others).
+- Sort key updated to `publishedAt\tdeveloperAlias\tref` (spec §3 tie-breaker); `cut -f3` for extraction.
+
+## Fix 2 — RETRO M_NEW_1 (git clone stderr PAT leak)
+
+**File:** `.squad-templates/ado/bootstrap-cross-repo.ps1` + 3 mirrors  
+**Change:** Wrapped `git clone` and `git remote add` (both accept `$DocsRepoUrl`)
+with `2>&1` stderr capture, `$LASTEXITCODE` check, dual redaction
+(`://[^@/\s]+@` regex + `[regex]::Escape($DocsRepoUrl)` literal), and
+`Write-Error` with sanitized output on failure.
+
+Redaction verified to handle:
+- `https://user:PAT@host.com/repo.git` ✓
+- `https://PAT@host.com/repo.git` ✓
+- `https://user%40org:PAT@host.com/repo.git` ✓ (`[^@/]` matches URL-encoded segment)
+
+## Tests
+
+**New assertions:** 4 regression guards added to `test/cli/ado-templates.test.ts`
+(assertions 15–18):
+- 15: `fold-squad-state.yml` does NOT contain `LAST_PUBLISHED_AT`
+- 16: `fold-squad-state.yml` contains `.[].inboxRef`
+- 17: `bootstrap-cross-repo.ps1` has `git clone ... 2>&1`
+- 18: `bootstrap-cross-repo.ps1` has `$cloneOutput` and `$redactedOutput`
+
+**Test count delta:** 196 → 200 (three ADO-specific suites: 18 + 181 + 1).
+Docs-build pre-existing Astro failure unchanged. Grand total passing: 212.
+
+## Scrub Gate
+
+Gates 1 and 8 have pre-existing baseline violations:
+- Gate 1: 32 strip-listed paths (unchanged from baseline; Squad's `/casting/`,
+  `/identity/`, `/orchestration-log` match Wi-Fi Aware strip pattern incidentally).
+- Gate 8: bash `$()` subexpressions in YAML script blocks (pre-existing pattern;
+  my revision adds 2 new same-type entries in fold step 3, net baseline +2).
+- Gates 2, 5, 7, 9: PASS.
+- Gates 3, 4: WARN (akubly refs and internal mentions in `.squad/` state files, expected).
+- Gate 6: PASS (11 files changed, under 30-file limit).
+
+## Mirror propagation
+
+`node scripts/sync-templates.mjs --sync` propagated both changed files to 3 mirrors each.
+Byte-identity verified: 1 unique SHA-256 hash across all 4 locations for both files. ✓
+
+---
+
 ### 2026-06-02: Piece 30 Revision Follow-On Adversarial Review — 3-Reviewer Verdict
 
 **Date:** 2026-06-02  

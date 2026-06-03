@@ -8,6 +8,8 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active (Summary)
 
+📌 **Team update (2026-06-03 — Piece 30 Follow-On Revision):** Led piece-30 follow-on revision after Flight + Booster lockout; addressed CAPCOM M_NEW_1 (fold timestamp→ref-membership) + RETRO M_NEW_1 (clone stderr redaction); commit 3c6c9edf pushed to origin/squad/piece-30-ado-cross-repo-templates; 196→200 tests; Gate 8 net +2 (bash `$()` in fold script); mirrors byte-identical across 4 locations.
+
 📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** bootstrap-cross-repo.ps1 idempotency pattern: every mutation guarded with existence check (Test-Path, git config --get-all -contains, pre-computed $escapedEntry). sync-templates.mjs auto-picks up ado/ subdir recursively — no script changes needed. Gate 8 fixed in session: pre-computed variable instead of PowerShell subexpression.
 
 📌 **Team update (2026-06-02T20:51:32Z — Piece 29 Adversarial Review Complete):** Piece 29 adversarial review (4 parallel reviewers: Flight, FIDO, RETRO, PAO) verdict APPROVE-WITH-NITS. Three convergent mandatory themes: (1) Explore agent spawn omits WORK_ROOT; (2) WORK_ROOT resolution undocumented at session start; (3) Single-repo degenerate case unaddressed. Procedures locked out. Candidate revision authors: EECOM, Flight, or CONTROL. Awaiting user decision on revision dispatch.
@@ -28,6 +30,43 @@ Piece 09: moved `resolveWatchStartupSquadDir` to startup.ts. Piece 10: addressed
 📌 **Piece 21 Ship Gate Cleared (2026-05-22):** Post-stack-review all five required fixes shipped. Follow-up (FIX-6/7/8) deferred to piece 22.
 
 ## Learnings
+
+### Piece 30 Follow-On Revision — 2 Mandatory Fixes (2026-06-02)
+
+**Ref-membership idempotency for fold pipelines:**
+The correct idempotency key for a fold pipeline is the *ref name* recorded in the history file (`.[].inboxRef`), not a scalar timestamp. Timestamp-based cutoffs (`publishedAt > lastFoldedAt`) cause permanent silent data loss on clock skew and same-second ties — a realistic failure mode in multi-developer teams. The ref-name membership approach (`grep -qxF "$REF"`) is immune to all timing artifacts: re-running against an already-folded ref is a provable no-op. Pattern:
+
+```bash
+FOLDED_REFS=$(jq -r '.[].inboxRef // empty' "$HISTORY_FILE" 2>/dev/null || true)
+if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
+  echo "  Skipping $REF (already recorded in publish-history.json)"
+  continue
+fi
+```
+
+Malformed JSON guard is required alongside this pattern: if `$HISTORY_FILE` is corrupt, abort before any fold work to prevent data loss or partial states.
+
+**git stderr redaction in PowerShell:**
+When a git subprocess takes a URL with embedded credentials, `$ErrorActionPreference = 'Stop'` does NOT capture native command stderr — the raw URL leaks to pipeline logs on failure. Fix: capture `2>&1` into a variable, check `$LASTEXITCODE`, apply redaction before any `Write-Error`:
+
+```powershell
+$cloneOutput = & git clone -- $DocsRepoUrl $TeamRoot 2>&1
+$cloneExitCode = $LASTEXITCODE
+if ($cloneExitCode -ne 0) {
+    $redactedOutput = ($cloneOutput | Out-String) -replace '://[^@/\s]+@', '://***@'
+    $redactedOutput = $redactedOutput -replace [regex]::Escape($DocsRepoUrl), ($DocsRepoUrl -replace '://[^@/]+@', '://***@')
+    Write-Error "git clone failed (exit $cloneExitCode). Sanitized output: $redactedOutput"
+    exit 1
+}
+```
+
+Apply to EVERY git invocation that accepts a `$DocsRepoUrl` parameter (clone, remote add, fetch). Defense-in-depth: both regex redaction AND literal URL replacement.
+
+**Cross-trained fixes outside core CLI domain:**
+Piece 30 follow-on required YAML pipeline editing (ADO fold logic) and PowerShell hardening — both outside the core CLI/SDK runtime domain that EECOM normally owns. These are small, well-specified surgical fixes. The key discipline: read the reviewer's exact suggested fix carefully before implementing; both CAPCOM and RETRO provided near-complete code samples that only needed minor adaptation to the actual script context.
+
+**Scrub gate pre-existing baseline (piece 30):**
+Gate 1: 32 strip-listed paths (pre-existing baseline; Squad's own `/casting/`, `/identity/`, `/orchestration-log` match the Wi-Fi Aware strip pattern incidentally). Gate 8: bash `$()` subexpressions in YAML script blocks trigger the ADO variable syntax check (pre-existing; all inline bash uses `$(...)` syntax that Gate 8 can't distinguish from ADO `$(Variable)` expressions). My revision added 2 new Gate 8 matches in fold-squad-state.yml step 3 (same type as pre-existing). No new Gate 1 paths introduced.
 
 ### Piece 27 — Explicit sync command (2026-05-29T16:30:14.652-07:00)
 

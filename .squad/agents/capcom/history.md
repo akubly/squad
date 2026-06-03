@@ -2,35 +2,43 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+## Summary
+
+This history tracks SDK architecture review, contract validation, and cross-repo patterns for pieces 19–30 and Phase B foundational work. Key learnings: template-only pieces need behavioral test assertions for CLI command existence and trigger-repo alignment; fold pipeline pattern requires set-membership for idempotent enumeration, not timestamp comparison; canonical callsign validation must be shared through SDK barrel, not copied inline.
+
+For historical archive (Phase A, pieces 1–18): see `.squad/agents/capcom/history-archive.md`.
+
+## Recent Team Updates
+
+📌 **Team update (2026-06-03 — Piece 30 Follow-On Revision):** Piece-30 follow-on findings addressed in commit 3c6c9edf by EECOM. M_NEW_1 (fold timestamp→ref-membership) fixed; ref-name membership now checks `.[].inboxRef` in publish-history.json, eliminating drop-on-tie defect.
+
 📌 **Team update (2026-06-02 — Piece 30 Revision Follow-On Review):** CAPCOM participated in 3-reviewer follow-on adversarial review of Booster's revision (commit a9da5453). Verdict: REJECT. 1 new mandatory finding: inline fold script uses timestamp-based skip logic that silently drops inbox refs on clock skew or same-second ties — fix requires ref-name membership check against publish-history.json instead of timestamp comparison. Prior M1 + M2 fully RESOLVED. 3 new non-blocking findings noted.
 
 📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (revision implementer) addressed all 9 mandatory findings from 5-reviewer panel, including CAPCOM's 2 findings on missing `squad fold` CLI and unreachable publish trigger. Both fixed: fold logic inlined (150-line bash+jq) in fold-squad-state.yml, publish trigger corrected (removed erroneous `include:` clause). 196 tests pass; scrub Gate 1 pre-existing baseline; ready for merge.
 
 📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** CAPCOM conducted architecture-focused adversarial review of piece 30 ADO templates (commit 10168051); verdict: REJECT. Identified 2 mandatory findings: (1) `squad fold` CLI command missing — fold pipeline non-functional at runtime, (2) `publish-inbox.yml` trigger unreachable in product repo (inbox branches created in TEAM_ROOT, not WORK_ROOT). Additional 3 non-blocking observations on variable documentation and parameterization. Consolidated to REJECT verdict by Flight due to convergent mandatory findings across 5 reviewers.
 
-📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
+## Learnings — Phase B (Pieces 19–30)
 
-📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
+### Piece 30: Cross-Repo Pipeline Patterns (2026-06-02+)
 
-## Learnings
-
-### 2026-06-02: Piece 30 Revision Follow-on Review (commit a9da5453)
-
-**Context:** Focused re-review of Booster's revision to piece 30, scoped to CAPCOM's two prior mandatory findings (M1: nonexistent `squad fold` CLI; M2: unreachable publish-inbox trigger). Both were resolved. One new mandatory finding surfaced in the inline fold logic.
-
-**M1 and M2: both resolved cleanly.** The `squad fold` CLI call (and all CLI installation steps) were removed from fold-squad-state.yml. Fold logic is now self-contained bash+jq — no squad subcommands invoked at all. The publish-inbox trigger's erroneous `include: squad/inbox/**` was removed; the pipeline now correctly triggers on all feature-branch pushes to WORK_ROOT.
-
-**New M1: Timestamp-based skip logic is a data loss bug.** The inline fold script reads `LAST_PUBLISHED_AT = jq '.[-1].publishedAt'` from publish-history.json and skips any inbox ref whose publishedAt is ≤ that value. This is fragile in two ways: (1) developer machine clock skew causes a ref with an older timestamp to be permanently skipped even though it was never folded; (2) same-second tie between two inbox refs, where the second arrives in a subsequent pipeline run, gets silently dropped because its timestamp equals the last-folded entry. The correct fix is set-membership by `inboxRef` name in history, not timestamp comparison.
+**Timestamp-based skip logic is a data loss bug.** The inline fold script reads `LAST_PUBLISHED_AT = jq '.[-1].publishedAt'` from publish-history.json and skips any inbox ref whose publishedAt is ≤ that value. This is fragile: developer machine clock skew causes a ref with an older timestamp to be permanently skipped even though it was never folded; same-second ties get silently dropped. The correct fix is set-membership by `inboxRef` name in history, not timestamp comparison.
 
 **Fold pipeline pattern learned:** When implementing idempotent enumeration over a set of refs, the skip predicate must use a stable, unique identifier for each item (ref name, commit SHA) — never a shared mutable scalar like a timestamp. Timestamps are correct for sort ORDER, but wrong for skip MEMBERSHIP.
 
-**`foldCommit` field naming trap:** The history entry's `foldCommit` field should store the commit SHA produced on `squad-state` (captured after `git commit`), not the source inbox ref's commit SHA (captured before). The two are different objects. Capturing `git rev-parse "$REF"` before the fold commit is made gives the wrong SHA. Always capture `git rev-parse HEAD` AFTER the fold commit to get the correct fold provenance.
+**`foldCommit` field naming trap:** The history entry's `foldCommit` field should store the commit SHA produced on `squad-state` (captured after `git commit`), not the source inbox ref's commit SHA (captured before). Always capture `git rev-parse HEAD` AFTER the fold commit to get the correct fold provenance.
 
-**`batch: true` + comment language:** The revision added `batch: true` to the fold pipeline trigger with an inline comment explaining serialization semantics. The sole-writer invariant comment was also strengthened. Both are good patterns for any pipeline that must serialize access to a shared ref.
+**Template-only pieces need command-existence assertions.** Pipeline templates that call `squad <command>` must be validated against the actual registered command set in `cli-entry.ts`. `squad fold` did not exist; template behavioral tests do not catch missing-command defects. Pattern: add an assertion verifying each CLI command the pipeline calls is registered in cli-entry.ts.
 
-**Verdict on revision:** REJECT — 1 new mandatory finding (timestamp skip), 3 new non-blocking. Prior M1 and M2 resolved.
+**CI trigger/repo mismatch is a common template defect.** In a cross-repo architecture, each pipeline template must trigger on branches in the repo where the pipeline YAML lives. Inbox branches live in TEAM_ROOT; the publish pipeline lives in WORK_ROOT. Using `include: squad/inbox/**` in the product repo pipeline means the trigger can never fire. When reviewing cross-repo pipeline templates, trace: (a) which repo hosts the pipeline, (b) which repo receives the branch pushes that should trigger it, (c) whether those repos match.
 
-### 2026-03-14: WSL Transient API Error Investigation (Issue #363)
+### Piece 19: SDK Contract Error Handling
+
+CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
+
+### Canonical Callsign Validation Convergence (2026-05-21)
+
+When the same validation rule spans SDK reader paths, payload namespace code, and CLI maintenance commands, extract a shared helper in the SDK and make downstream packages import it through the barrel instead of copying regexes inline. The specific smell to watch for is writer/reader/doctor triple-divergence: once those three paths disagree, users get inconsistent acceptance rules and tests stop guarding the real contract.
 
 **Context:** User reported "Request failed due to a transient API error" on Ubuntu WSL with Copilot CLI v1.0.4, eventually hitting rate limits.
 

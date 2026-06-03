@@ -6,6 +6,10 @@
 
 ## Recent Actions
 
+### 2026-06-03: Piece 30 Follow-On Revision Shipped (EECOM Author)
+
+**Status:** Piece 30 follow-on revision session complete. Flight's original commit (10168051) followed by Booster's revision (a9da5453); both locked out per strict reviewer rejection lockout protocol. EECOM assigned as third-pass implementer for follow-on revision (CAPCOM M_NEW_1 + RETRO M_NEW_1). Revision commit: 3c6c9edf. Test coverage: 196 → 200. Scrub-gate: Gate 8 net +2 (pre-existing pattern). Ready for lead gate, merge, promotion.
+
 ### 2026-06-02: Piece 30 Revision Follow-On Review Complete
 
 **Status:** Follow-on adversarial review closed. Booster's revision (a9da5453) reviewed by 3 independent reviewers in parallel (CAPCOM, RETRO, FIDO). Verdict: MIXED — CAPCOM REJECT (fold timestamp logic bug), RETRO APPROVE-WITH-NITS (clone stderr security), FIDO APPROVE (zero new mandatory). Booster locked out per protocol. Flight locked out since original commit. No PR opens until CAPCOM REJECT resolved. Candidate authors: EECOM, Procedures, PAO (all available).

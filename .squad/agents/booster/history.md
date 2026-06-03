@@ -4,6 +4,8 @@
 
 ## Team Updates
 
+📌 **Team update (2026-06-03 — Piece 30 Follow-On Revision):** Piece-30 follow-on revision authored by EECOM (Booster remained locked out); commit 3c6c9edf. CAPCOM M_NEW_1 + RETRO M_NEW_1 addressed. Mirrors: byte-identical across 4 locations. Gate 8 net +2 (bash `$()` in YAML). 196→200 tests.
+
 📌 **Team update (2026-06-02 — Piece 30 Revision Follow-On Verdict):** Piece 30 revision follow-on adversarial review complete (3 reviewers: CAPCOM, RETRO, FIDO). Overall verdict: MIXED — CAPCOM REJECT (1 new mandatory: fold timestamp-skip bug), RETRO APPROVE-WITH-NITS (1 new mandatory: clone stderr leak), FIDO APPROVE (0 new mandatory). Booster now locked out alongside Flight per strict reviewer rejection lockout protocol. Next revision author TBD.
 
 📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (as implementer) completed full revision addressing all 9 mandatory findings from 5-reviewer adversarial panel. Key deliverables: (1) fold-squad-state.yml completely rewritten — `squad fold` replaced with 150-line inline bash+jq plumbing (subcommand doesn't exist); (2) publish-inbox.yml trigger fixed — removed erroneous `include: squad/inbox/**` clause; (3) persistCredentials/batch added; (4) bootstrap-cross-repo.ps1 hardened with URL scheme allowlist, `--` clone separator, PAT redaction; (5) new ado-bootstrap-idempotency.test.ts (execution-based, pwsh-guarded); (6) ado-templates.test.ts expanded 9→14 assertions; (7) docs typos and terminology fixed. 196 tests pass; scrub Gate 1 pre-existing baseline (no new violations).
