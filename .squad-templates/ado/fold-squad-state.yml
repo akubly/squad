@@ -98,10 +98,10 @@ steps:
           echo "::error::$HISTORY_FILE contains malformed JSON — aborting fold to prevent data loss."
           exit 1
         fi
-        FOLDED_REFS=$(jq -r '.[].inboxRef // empty' "$HISTORY_FILE" 2>/dev/null || true)
+        FOLDED_REFS=`jq -r '.[].inboxRef // empty' "$HISTORY_FILE" 2>/dev/null || true`
       fi
       if [ -n "$FOLDED_REFS" ]; then
-        FOLDED_COUNT=$(printf '%s\n' "$FOLDED_REFS" | grep -c .)
+        FOLDED_COUNT=`printf '%s\n' "$FOLDED_REFS" | grep -c .`
       else
         FOLDED_COUNT=0
       fi
@@ -132,14 +132,14 @@ steps:
           continue
         fi
 
-        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || true)
+        META_JSON=`git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || true`
         if [ -z "$META_JSON" ] || [ "$META_JSON" = '{}' ]; then
           echo "  Warning: $REF has no publish-metadata.json — skipping (older provenance or malformed branch)."
           continue
         fi
 
-        REF_PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty' 2>/dev/null || true)
-        ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // empty' 2>/dev/null || true)
+        REF_PUB_AT=`echo "$META_JSON" | jq -r '.publishedAt // empty' 2>/dev/null || true`
+        ALIAS=`echo "$META_JSON" | jq -r '.developerAlias // empty' 2>/dev/null || true`
 
         # Sort key: publishedAt primary, developerAlias secondary, ref name tertiary (for stability)
         SORT_KEY="${REF_PUB_AT:-}"$'\t'"${ALIAS:-}"$'\t'"$REF"
@@ -168,14 +168,14 @@ steps:
         echo ""
         echo "--- Folding: $REF ---"
 
-        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || echo '{}')
-        ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // "unknown"')
-        PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty')
-        SESSION=$(echo "$META_JSON" | jq -r '.sessionId // "unknown"')
-        COMMIT=$(git rev-parse "$REF")
+        META_JSON=`git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || echo '{}'`
+        ALIAS=`echo "$META_JSON" | jq -r '.developerAlias // "unknown"'`
+        PUB_AT=`echo "$META_JSON" | jq -r '.publishedAt // empty'`
+        SESSION=`echo "$META_JSON" | jq -r '.sessionId // "unknown"'`
+        COMMIT=`git rev-parse "$REF"`
 
         # Save current publish-history.json before tree merge
-        SAVED_HISTORY=$(cat "$HISTORY_FILE")
+        SAVED_HISTORY=`cat "$HISTORY_FILE"`
 
         # Merge .squad/ tree from inbox ref into working tree
         git checkout "$REF" -- .squad/ 2>/dev/null || true
@@ -184,15 +184,15 @@ steps:
         echo "$SAVED_HISTORY" > "$HISTORY_FILE"
 
         # Append fold entry to publish-history.json
-        FOLDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        ENTRY=$(jq -n \
+        FOLDED_AT=`date -u +%Y-%m-%dT%H:%M:%SZ`
+        ENTRY=`jq -n \
           --arg alias "$ALIAS" \
           --arg publishedAt "$PUB_AT" \
           --arg sessionId "$SESSION" \
           --arg inboxRef "$REF" \
           --arg foldCommit "$COMMIT" \
           --arg foldedAt "$FOLDED_AT" \
-          '{developerAlias:$alias,publishedAt:$publishedAt,sessionId:$sessionId,inboxRef:$inboxRef,foldCommit:$foldCommit,foldedAt:$foldedAt}')
+          '{developerAlias:$alias,publishedAt:$publishedAt,sessionId:$sessionId,inboxRef:$inboxRef,foldCommit:$foldCommit,foldedAt:$foldedAt}'`
         echo "$SAVED_HISTORY" | jq ". + [$ENTRY]" > "$HISTORY_FILE"
 
         git add .squad/
@@ -229,7 +229,7 @@ steps:
       echo "Fold complete."
       HISTORY_FILE=".squad/publish-history.json"
       if [ -f "$HISTORY_FILE" ]; then
-        COUNT=$(jq 'length' "$HISTORY_FILE")
+        COUNT=`jq 'length' "$HISTORY_FILE"`
         echo "Publish history: $COUNT total entries."
         echo "Last 5 entries:"
         jq '.[-5:]' "$HISTORY_FILE"

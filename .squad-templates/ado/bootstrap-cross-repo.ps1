@@ -72,7 +72,8 @@ if ([string]::IsNullOrWhiteSpace($DocsRepoUrl)) {
 # Validate URL scheme allowlist: only HTTPS or SSH are accepted.
 # Rejects file://, ftp://, and other unsafe schemes.
 if ($DocsRepoUrl -notmatch '^(https?://|git\+ssh://|ssh://|git@)') {
-    Write-Error "DocsRepoUrl scheme not allowed. Use HTTPS or SSH. Got scheme: '$($DocsRepoUrl.Split('//')[0])://...'"
+    $rejectedScheme = $DocsRepoUrl.Split('//')[0]
+    Write-Error "DocsRepoUrl scheme not allowed. Use HTTPS or SSH. Got scheme: '${rejectedScheme}://...'"
     exit 1
 }
 
@@ -125,7 +126,8 @@ $existingRemotes = git -C "$WorkRoot" remote
 if ($existingRemotes -contains $DocsRemoteName) {
     Write-Host "[3/5] Remote '$DocsRemoteName' already configured — skipping remote add."
 } else {
-    Write-Host "[3/5] Adding remote '$DocsRemoteName' → $($DocsRepoUrl -replace '://[^@/]+@', '://***@') ..."
+    $redactedDocsUrl = $DocsRepoUrl -replace '://[^@/]+@', '://***@'
+    Write-Host "[3/5] Adding remote '$DocsRemoteName' → $redactedDocsUrl ..."
     $remoteAddOutput = & git -C $WorkRoot remote add $DocsRemoteName $DocsRepoUrl 2>&1
     $remoteAddExitCode = $LASTEXITCODE
     if ($remoteAddExitCode -ne 0) {
