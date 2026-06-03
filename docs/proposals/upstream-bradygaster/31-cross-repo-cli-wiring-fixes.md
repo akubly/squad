@@ -6,6 +6,24 @@ Post-implementation review of the cross-repo arc (pieces 26–30) found that sev
 
 Stack position: Part 31 of the cross-repo transport arc. Branches off piece 30.5 (`squad/piece-30.5-scrub-gate-audit`). Depends on 30.5 — the scrub-gate rule additions from that piece must be present before this piece is committed.
 
+## Verify-first probe
+
+Run this probe before implementing sub-proposal A. Confirm all three values match expectations before writing any code. If line numbers have shifted significantly or `called from runSync` is already `true`, update anchors in triage notes before proceeding.
+
+```
+node -e "
+const s = require('fs').readFileSync('packages/squad-cli/src/cli/commands/sync.ts', 'utf8');
+const lineIdx = s.split('\n').findIndex(l => l.includes('export async function publishTeamRootToInbox'));
+console.log('publishTeamRootToInbox at line:', lineIdx + 1);
+const runSyncStart = s.split('\n').findIndex(l => l.includes('export async function runSync'));
+console.log('runSync at line:', runSyncStart + 1);
+const hasCall = s.split('\n').slice(runSyncStart, runSyncStart + 80).some(l => l.includes('publishTeamRootToInbox'));
+console.log('publishTeamRootToInbox called from runSync:', hasCall);
+"
+```
+
+Expected: `publishTeamRootToInbox` at ~line 812, `runSync` at ~line 425, `called from runSync: false`.
+
 ## Problem
 
 Static analysis of the shipped CLI dispatch surface identified five surfaces that are implemented as library code but are not yet reachable from, or not yet enforced at, the correct CLI boundary.
@@ -68,6 +86,13 @@ if (isPush) {
 | `test/cli/cross-repo-sync.test.ts` | `runSync --push snapshot payload matches piece-28 allowlist` | Fails before fix; passes after |
 | `test/cli/cross-repo-sync.test.ts` | `runSync --push single-repo config falls back to syncPush (no inbox ref created)` | Passes before and after (regression guard) |
 
+**Acceptance criteria:**
+
+- `runSync` with `direction: 'push'` or `'both'` dispatches to `publishTeamRootToInbox` when `config.teamRoot` is present; dispatches to `syncPush` when `teamRoot` is absent.
+- Session ID sourced from `COPILOT_SESSION_ID` env var when set; `crypto.randomUUID()` when not.
+- Single-repo regression guard test remains green.
+- Triage decision: A is S0, accept-only. No defer/reject decision required.
+
 ---
 
 ### B. Persist `stateBackend: 'orphan'` in config.json from `runBind`
@@ -104,6 +129,13 @@ Remove the temporary write/restore pattern at lines 272–278 — it is no longe
 | `test/cli/bind.test.ts` | `temporary write/restore of stateBackend is no longer present` | Structural assertion |
 | `test/cli/sync-command.test.ts` | `runSync does not bail with 'no remote sync needed' after cross-repo bind` | Fails before fix; passes after |
 
+**Acceptance criteria:**
+
+- config.json written by `runBind` contains `stateBackend: 'orphan'`.
+- config.json is written exactly once during a bind operation (no temporary write/restore cycle).
+- The workaround block at bind.ts lines 272–278 is removed from production code.
+- `installGitHooks` is still called with the correct work root.
+
 ---
 
 ### C. Wire `hydrateTeamRootFromStateRef` into the `runSync` pull path
@@ -134,6 +166,12 @@ if (isPull) {
 | `test/cli/cross-repo-sync.test.ts` | `runSync --pull populates TEAM_ROOT .squad/ files after fetch` | Fails before fix (sidecar empty); passes after |
 | `test/cli/cross-repo-sync.test.ts` | `hydrateTeamRootFromStateRef is idempotent — second pull is a no-op` | New assertion |
 
+**Acceptance criteria:**
+
+- `runSync` with `direction: 'pull'` or `'both'` calls `hydrateTeamRootFromStateRef` when `config.teamRoot` is present.
+- `stateBranch` defaults to `'squad-state'` when absent from config.
+- Single-repo pull behavior is unchanged (no sidecar hydration attempted).
+
 ---
 
 ### D. Add `SQUAD_DEVELOPER_ALIAS` env var fallback in `runSync`
@@ -163,6 +201,12 @@ The env var is placed second (before persisted config) because it is more specif
 | `test/cli/sync-command.test.ts` | `SQUAD_DEVELOPER_ALIAS env var used when --developer flag absent` | Fails before fix; passes after |
 | `test/cli/sync-command.test.ts` | `config.json developerAlias used when neither flag nor env var present` | Regression guard |
 | `test/cli/sync-command.test.ts` | `runSync exits with error when no alias source available` | Regression guard |
+
+**Acceptance criteria:**
+
+- Alias resolution chain: `--developer` flag → `SQUAD_DEVELOPER_ALIAS` env var → `config.developerAlias`.
+- Env-var name is exactly `SQUAD_DEVELOPER_ALIAS`.
+- All three priority levels covered by passing tests.
 
 ---
 
@@ -197,6 +241,13 @@ The error message names `--developer-alias` — the flag as shipped in cli-entry
 | `test/cli/bind.test.ts` | `runBind rejects underscore alias with clear error` | Fails before fix; passes after |
 | `test/cli/bind.test.ts` | `runBind rejects leading-digit alias with clear error` | Fails before fix; passes after |
 | `test/cli/bind.test.ts` | `runBind accepts valid lowercase-hyphen alias` | Regression guard |
+
+**Acceptance criteria:**
+
+- `runBind` rejects aliases not matching `DEVELOPER_ALIAS_RE` before writing config.json.
+- Error message names `--developer-alias` (not the internal property name).
+- `DEVELOPER_ALIAS_RE` is exported from sync.ts (or a shared utility) — not duplicated.
+- Alias-absent bind continues to succeed without a validation error.
 
 ---
 
