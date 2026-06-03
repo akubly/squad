@@ -508,37 +508,62 @@ describe('SQUAD_DEVELOPER_ALIAS env var fallback (piece 31-D)', () => {
 
   it('CLI --developer flag wins over env var and config (piece 31-D regression guard)', async () => {
     const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
-    seedWorkRoot({ developerAlias: 'config-alias' });
-    process.env['SQUAD_DEVELOPER_ALIAS'] = 'env-alias';
+    // Non-winning sources carry whitespace-only aliases — they fail the alias guard if selected.
+    // Only the --developer flag value 'flag-alias' is a valid non-whitespace string.
+    seedWorkRoot({ developerAlias: '  ' });
+    process.env['SQUAD_DEVELOPER_ALIAS'] = '  ';
     const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => {
+      throw new Error(`process.exit(${_code})`);
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // The flag value should win — runSync should not exit (all three sources present)
+    // flag-alias is the only valid source; if env or config won, validation would fire
     await expect(
       runSync({ direction: 'push', developer: 'flag-alias', workRoot: WORK_ROOT, quiet: true, gitOps }),
     ).resolves.not.toThrow();
+    // Alias guard must not have fired — proves flag-alias was the resolved value
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('SQUAD_DEVELOPER_ALIAS env var used when --developer flag absent (piece 31-D)', async () => {
     const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
-    seedWorkRoot(); // no developerAlias in config
+    // Config carries a whitespace-only alias — it fails the guard if the code picks config over env.
+    seedWorkRoot({ developerAlias: '  ' });
     process.env['SQUAD_DEVELOPER_ALIAS'] = 'env-alias';
     const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => {
+      throw new Error(`process.exit(${_code})`);
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Must not exit 1 — env var provides the alias
+    // env-alias is the only valid source; if config (whitespace) won, validation would fire
     await expect(
       runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true, gitOps }),
     ).resolves.not.toThrow();
+    // Alias guard must not have fired — proves env-alias was the resolved value
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('config.json developerAlias used when neither flag nor env var present (piece 31-D regression guard)', async () => {
     const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
     seedWorkRoot({ developerAlias: 'config-alias' });
-    // no SQUAD_DEVELOPER_ALIAS env var, no --developer flag
+    // no SQUAD_DEVELOPER_ALIAS env var, no --developer flag — config is the only source
     const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => {
+      throw new Error(`process.exit(${_code})`);
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+    // config-alias is the only source; absent flag/env would yield undefined → validation fires
     await expect(
       runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true, gitOps }),
     ).resolves.not.toThrow();
+    // Alias guard must not have fired — proves config-alias was the resolved value
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('runSync exits with error when no alias source available (piece 31-D regression guard)', async () => {

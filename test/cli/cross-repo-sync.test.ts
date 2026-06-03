@@ -8,7 +8,7 @@
  * TDD: written RED before implementation.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -626,27 +626,36 @@ describe('runSync --push cross-repo dispatch (piece 31-A)', () => {
       addFetchRefspec: (_cwd: string, _remote: string, _refspec: string) => {},
     };
 
-    // syncPush will fail on the fake git dir (no real branches) — that's expected
     const refsBefore = execFileSync(
       'git', ['ls-remote', BARE_REMOTE, 'refs/heads/squad/inbox/singleonly/*'],
       { cwd: SUITE_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
 
-    try {
-      await runSync({
+    // Spy on console.log to detect syncPush's own log; quiet: false so syncPush
+    // emits "No local squad-state branches to push." when the empty fake dir yields no branches.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Must resolve without throwing — no exception swallowing
+    await expect(
+      runSync({
         direction: 'push',
         developer: 'singleonly',
         workRoot: SINGLE_WORK,
-        quiet: true,
+        quiet: false,
         gitOps,
-      });
-    } catch { /* expected — syncPush on fake git dir may throw */ }
+      }),
+    ).resolves.not.toThrow();
 
+    // syncPush was invoked: it logs this message when no branches exist in the fake repo
+    const allLogs = logSpy.mock.calls.flat().join('\n');
+    expect(allLogs).toContain('No local squad-state branches to push');
+    logSpy.mockRestore();
+
+    // No inbox ref should have been created for single-repo config
     const refsAfter = execFileSync(
       'git', ['ls-remote', BARE_REMOTE, 'refs/heads/squad/inbox/singleonly/*'],
       { cwd: SUITE_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
-    // No inbox ref should have been created for single-repo config
     expect(refsAfter).toBe(refsBefore);
   }, 15_000);
 });
