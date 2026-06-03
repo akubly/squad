@@ -5,6 +5,78 @@
 
 ---
 
+### 2026-06-02: Piece 30 Revision Follow-On Adversarial Review — 3-Reviewer Verdict
+
+**Date:** 2026-06-02  
+**Session type:** Follow-on adversarial review of piece-30 revision (commit a9da5453)  
+**Reviewers (parallel background):** CAPCOM, RETRO, FIDO  
+**Locked-out authors:** Flight (original 10168051), Booster (revision a9da5453)
+
+## CAPCOM — REJECT (1 new mandatory finding)
+
+**Verdict:** REJECT
+
+**Prior findings status:**
+- M1 (nonexistent `squad fold`): RESOLVED — CLI call replaced with inline bash+jq
+- M2 (unreachable publish-inbox trigger): RESOLVED — `include:` removed; trigger now exclude-only
+
+**New mandatory findings: 1**
+- **New M1:** Timestamp-based skip logic in inline fold script causes data loss for inbox refs when `publishedAt` ≤ last-folded entry timestamp (clock skew, same-second ties). Fix: check ref-name membership in `publish-history.json` instead of timestamp comparison.
+
+**New non-blocking findings: 3**
+- N1: `foldCommit` stores inbox SHA not squad-state fold SHA
+- N2: sort tie-breaker uses full ref name instead of `developerAlias`
+- N3: prune deletes all inbox refs not just folded ones
+
+Full review: `.squad/reviews/piece-30-revision-capcom.md`
+
+## RETRO — APPROVE-WITH-NITS (1 new mandatory, 1 new Low)
+
+**Verdict:** APPROVE-WITH-NITS
+
+**Prior findings status:**
+- M1 (PAT leak via Write-Host): PARTIALLY-RESOLVED — Write-Host redaction correct; residual gap in `git clone` stderr failure
+- M2 (missing `--` on git clone): RESOLVED
+- M3 (no URL scheme allowlist): RESOLVED
+
+**New mandatory findings: 1**
+- **M_NEW_1 (Medium):** `git clone` failure paths emit unredacted URL with embedded PAT to stderr. Redirect with `2>&1` and emit sanitized error message instead.
+
+**New non-blocking findings: 1**
+- **N_NEW_1 (Low):** `$DocsRemoteName` and `$StateBranch` parameters unvalidated; used in git config keys and refspecs. Add charset allowlist per piece-27 convention.
+
+**Disposition:** Safe to merge as-is. M_NEW_1 is conditional leak (failure case), not always-emit. Can be addressed in follow-on patch.
+
+## FIDO — APPROVE (0 new mandatory, 2 non-blocking)
+
+**Verdict:** APPROVE
+
+**Prior findings status:**
+- M1 (no execution-based idempotency test): RESOLVED — `test/cli/ado-bootstrap-idempotency.test.ts` added; real `pwsh -File` execution confirmed green
+- PAO M1 (docs-test sync — state-backends): RESOLVED — `'state-backends'` confirmed in EXPECTED_FEATURES
+
+**New mandatory findings:** 0
+
+**New non-blocking findings: 2**
+- NB1: Remote-add guard mutation not detectable at runtime (native command silent under `$ErrorActionPreference = 'Stop'`)
+- NB2: Fixture TEAM_ROOT path mismatch; clone idempotency guard not exercised
+
+**Mirror byte-identity:** PASS — all 3 canonical files byte-identical across all 4 locations
+
+**Test count:** 196 verified (14 ado-templates + 181 template-sync + 1 idempotency)
+
+**Disposition:** Ready to merge.
+
+## Summary
+
+| Reviewer | Verdict | New Mandatory | New Nits |
+|----------|---------|---------------|----------|
+| CAPCOM | REJECT | 1 (fold timestamp bug) | 3 non-blocking |
+| RETRO | APPROVE-WITH-NITS | 1 (clone stderr leak) | 1 non-blocking |
+| FIDO | APPROVE | 0 | 2 non-blocking |
+
+---
+
 ### 2026-06-03: Piece 30 Revision — Booster Integration (a9da5453)
 
 **Date:** 2026-06-03  

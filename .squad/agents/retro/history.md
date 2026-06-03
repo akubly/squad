@@ -4,7 +4,9 @@
 
 ## Team Updates
 
-📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (revision implementer) addressed all 3 mandatory security findings from RETRO's adversarial review: (1) PAT-in-URL leak redacted via `://***@` pattern before Write-Host emission, (2) git clone now protected with `--` separator (injection defense per piece 14 convention), (3) URL scheme allowlist implemented (https, http, git+ssh, ssh, git@; rejects file, ftp, others). 196 tests pass; security hardening complete. Ready for merge.
+📌 **Team update (2026-06-02 — Piece 30 Revision Follow-On Review):** RETRO participated in 3-reviewer follow-on adversarial review of Booster's revision (commit a9da5453). Verdict: APPROVE-WITH-NITS. 1 new mandatory finding (Medium): `git clone` failure paths emit unredacted URL with embedded PAT to stderr without `2>&1` suppression. 1 new Low finding: `$DocsRemoteName` and `$StateBranch` parameters unvalidated. Prior M1 PARTIALLY-RESOLVED (Write-Host redaction correct; stderr gap remains); M2 + M3 RESOLVED. Safe to merge; follow-on patch recommended.
+
+📌 **Team update (2026-06-02 — Piece 30 Revision follow-on, commit a9da5453):** RETRO conducted focused re-review of bootstrap-cross-repo.ps1. M2 (-- separator) and M3 (scheme allowlist) are fully resolved. M1 (PAT leak) is PARTIALLY-RESOLVED: Write-Host is correctly redacted; residual gap is git clone stderr on failure — git may emit the raw URL (with embedded PAT) to stderr which propagates through ErrorActionPreference=Stop into pipeline logs. Suppress with `2>&1` redirect and sanitized error message. New findings: M_NEW_1 (Medium) — git clone error path not redacted; N_NEW_1 (Low) — DocsRemoteName/StateBranch parameters unvalidated, could corrupt .git/config. Overall verdict: APPROVE-WITH-NITS. Safe to merge; follow-on patch recommended for M_NEW_1.
 
 ## Current Security Learnings
 

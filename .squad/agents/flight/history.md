@@ -6,6 +6,10 @@
 
 ## Recent Actions
 
+### 2026-06-02: Piece 30 Revision Follow-On Review Complete
+
+**Status:** Follow-on adversarial review closed. Booster's revision (a9da5453) reviewed by 3 independent reviewers in parallel (CAPCOM, RETRO, FIDO). Verdict: MIXED — CAPCOM REJECT (fold timestamp logic bug), RETRO APPROVE-WITH-NITS (clone stderr security), FIDO APPROVE (zero new mandatory). Booster locked out per protocol. Flight locked out since original commit. No PR opens until CAPCOM REJECT resolved. Candidate authors: EECOM, Procedures, PAO (all available).
+
 ### 2026-06-03: Piece 30 Revision Shipped (Booster, Locked-Out Author)
 
 **Status:** Revision session complete. Flight's original commit (10168051) rejected by 5-reviewer panel with 9 mandatory findings. Booster assigned as sole revision integrator per strict reviewer rejection lockout; Flight remained locked out throughout. Booster completed all 9 findings across all domains (CI/CD, security, testing, docs). Revision commit: a9da5453. Test coverage: 190 → 196. Scrub-gate: 8 of 8 pass (Gate 1 pre-existing baseline). Ready for lead gate, merge, promotion to origin/dev. Flight will review final merge as part of standard lead-gate process.
