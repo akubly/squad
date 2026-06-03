@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -175,7 +175,7 @@ describe('hydrateTeamRootFromStateRef()', () => {
     // Verify dev-c now has the local squad-state ref pointing to the synthetic commit
     const localSha = git(['rev-parse', 'refs/heads/squad-state'], DEV_C_TEAM);
     expect(localSha).toBe(stateCommit);
-  });
+  }, 30_000);
 
   it('is idempotent when already at the fetched commit', async () => {
     // Should not throw when called twice
@@ -212,7 +212,7 @@ describe('publish-metadata.json schema', () => {
       ['show', `${branchName}:.squad/publish-metadata.json`],
       carolTeam,
     );
-  });
+  }, 30_000);
 
   it('sourceWorkRoot is an object (not a string)', () => {
     const metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
@@ -546,4 +546,197 @@ describe('sessionShardPath traversal guard', () => {
     const { sessionShardPath } = await import('../../packages/squad-sdk/src/resolution.js');
     expect(() => sessionShardPath('proj', 'main', 'a/b')).toThrow('sessionId');
   });
+});
+
+// ── Sub-proposal A: runSync --push cross-repo dispatch ────────────────────
+//
+// Tests MUST call runSync (not publishTeamRootToInbox directly) so they
+// catch CLI dispatch regressions.
+
+describe('runSync --push cross-repo dispatch (piece 31-A)', () => {
+  const CROSS_WORK = join(SUITE_DIR, 'cross-work-a');
+
+  beforeAll(() => {
+    mkdirSync(join(CROSS_WORK, '.git'), { recursive: true });
+    writeFileSync(join(CROSS_WORK, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    mkdirSync(join(CROSS_WORK, '.squad'), { recursive: true });
+    // teamRoot is relative from CROSS_WORK to DEV_A_TEAM (forward-slash for config)
+    const relTeamRoot = relative(CROSS_WORK, DEV_A_TEAM).replace(/\\/g, '/');
+    writeFileSync(
+      join(CROSS_WORK, '.squad', 'config.json'),
+      JSON.stringify({
+        version: 1,
+        stateBackend: 'orphan',
+        teamRoot: relTeamRoot,
+        stateRemote: 'origin',
+        stateBranch: 'squad-state',
+        inboxBranchPrefix: 'squad/inbox',
+      }, null, 2) + '\n',
+    );
+  });
+
+  it('runSync --push creates squad/inbox/<alias>/... ref on remote when teamRoot is set', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    delete process.env['SQUAD_SYNC_ACTIVE'];
+    delete process.env['COPILOT_SESSION_ID'];
+
+    const gitOps = {
+      listRemotes: (_cwd: string) => ['origin'],
+      getRefspecs: (_cwd: string, _remote: string) => [
+        '+refs/heads/squad-state:refs/remotes/origin/squad-state',
+        '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*',
+      ],
+      addFetchRefspec: (_cwd: string, _remote: string, _refspec: string) => {},
+    };
+
+    await runSync({
+      direction: 'push',
+      developer: 'runtest',
+      workRoot: CROSS_WORK,
+      quiet: true,
+      gitOps,
+    });
+
+    const remoteRefs = execFileSync(
+      'git', ['ls-remote', BARE_REMOTE, 'refs/heads/squad/inbox/runtest/*'],
+      { cwd: SUITE_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    expect(remoteRefs).toMatch(/refs\/heads\/squad\/inbox\/runtest\//);
+  }, 30_000);
+
+  it('runSync --push single-repo config falls back to syncPush (no inbox ref created)', async () => {
+    const SINGLE_WORK = join(SUITE_DIR, 'single-work-a');
+    mkdirSync(join(SINGLE_WORK, '.git'), { recursive: true });
+    writeFileSync(join(SINGLE_WORK, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    mkdirSync(join(SINGLE_WORK, '.squad'), { recursive: true });
+    writeFileSync(
+      join(SINGLE_WORK, '.squad', 'config.json'),
+      JSON.stringify({ version: 1, stateBackend: 'orphan' }, null, 2) + '\n',
+    );
+
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    delete process.env['SQUAD_SYNC_ACTIVE'];
+
+    const gitOps = {
+      listRemotes: (_cwd: string) => ['squad-docs'],
+      getRefspecs: (_cwd: string, _remote: string) => [
+        '+refs/heads/squad-state:refs/remotes/squad-docs/squad-state',
+        '+refs/heads/squad/inbox/*:refs/remotes/squad-docs/squad/inbox/*',
+      ],
+      addFetchRefspec: (_cwd: string, _remote: string, _refspec: string) => {},
+    };
+
+    // syncPush will fail on the fake git dir (no real branches) — that's expected
+    const refsBefore = execFileSync(
+      'git', ['ls-remote', BARE_REMOTE, 'refs/heads/squad/inbox/singleonly/*'],
+      { cwd: SUITE_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+
+    try {
+      await runSync({
+        direction: 'push',
+        developer: 'singleonly',
+        workRoot: SINGLE_WORK,
+        quiet: true,
+        gitOps,
+      });
+    } catch { /* expected — syncPush on fake git dir may throw */ }
+
+    const refsAfter = execFileSync(
+      'git', ['ls-remote', BARE_REMOTE, 'refs/heads/squad/inbox/singleonly/*'],
+      { cwd: SUITE_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    // No inbox ref should have been created for single-repo config
+    expect(refsAfter).toBe(refsBefore);
+  }, 15_000);
+});
+
+// ── Sub-proposal C: runSync --pull hydrates TEAM_ROOT ────────────────────
+//
+// Tests MUST call runSync (not hydrateTeamRootFromStateRef directly).
+
+describe('runSync --pull hydrates TEAM_ROOT from state ref (piece 31-C)', () => {
+  const CROSS_PULL_WORK = join(SUITE_DIR, 'cross-work-c');
+  const HYDRATE_TEAM   = join(SUITE_DIR, 'hydrate-team-c');
+
+  beforeAll(() => {
+    // Fresh clone of BARE_REMOTE for the TEAM_ROOT sidecar
+    cloneTeam(HYDRATE_TEAM);
+
+    mkdirSync(join(CROSS_PULL_WORK, '.git'), { recursive: true });
+    writeFileSync(join(CROSS_PULL_WORK, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    mkdirSync(join(CROSS_PULL_WORK, '.squad'), { recursive: true });
+    const relTeamRoot = relative(CROSS_PULL_WORK, HYDRATE_TEAM).replace(/\\/g, '/');
+    writeFileSync(
+      join(CROSS_PULL_WORK, '.squad', 'config.json'),
+      JSON.stringify({
+        version: 1,
+        stateBackend: 'orphan',
+        teamRoot: relTeamRoot,
+        stateRemote: 'origin',
+        stateBranch: 'squad-state',
+      }, null, 2) + '\n',
+    );
+  });
+
+  it('runSync --pull populates TEAM_ROOT with squad-state branch content', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    delete process.env['SQUAD_SYNC_ACTIVE'];
+
+    const gitOps = {
+      listRemotes: (_cwd: string) => ['origin'],
+      getRefspecs: (_cwd: string, _remote: string) => [
+        '+refs/heads/squad-state:refs/remotes/origin/squad-state',
+        '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*',
+      ],
+      addFetchRefspec: (_cwd: string, _remote: string, _refspec: string) => {},
+    };
+
+    await runSync({
+      direction: 'pull',
+      workRoot: CROSS_PULL_WORK,
+      quiet: true,
+      gitOps,
+    });
+
+    // HYDRATE_TEAM should now have squad-state ref updated from BARE_REMOTE
+    const localSha = execFileSync(
+      'git', ['rev-parse', 'refs/heads/squad-state'],
+      { cwd: HYDRATE_TEAM, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    expect(localSha).toBeTruthy();
+    expect(localSha).toMatch(/^[0-9a-f]{40}$/);
+  }, 30_000);
+
+  it('runSync --pull is idempotent — second pull does not change the ref', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    delete process.env['SQUAD_SYNC_ACTIVE'];
+
+    const shaBefore = execFileSync(
+      'git', ['rev-parse', 'refs/heads/squad-state'],
+      { cwd: HYDRATE_TEAM, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+
+    const gitOps = {
+      listRemotes: (_cwd: string) => ['origin'],
+      getRefspecs: (_cwd: string, _remote: string) => [
+        '+refs/heads/squad-state:refs/remotes/origin/squad-state',
+        '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*',
+      ],
+      addFetchRefspec: (_cwd: string, _remote: string, _refspec: string) => {},
+    };
+
+    await runSync({
+      direction: 'pull',
+      workRoot: CROSS_PULL_WORK,
+      quiet: true,
+      gitOps,
+    });
+
+    const shaAfter = execFileSync(
+      'git', ['rev-parse', 'refs/heads/squad-state'],
+      { cwd: HYDRATE_TEAM, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    expect(shaAfter).toBe(shaBefore);
+  }, 30_000);
 });

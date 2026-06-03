@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import type { SquadDirConfig } from '@bradygaster/squad-sdk';
+import { DEVELOPER_ALIAS_RE } from './sync.js';
 
 const storage = new FSStorageProvider();
 
@@ -217,6 +218,18 @@ export async function runBind(opts: BindOptions): Promise<void> {
     gitOps = DEFAULT_GIT_OPS,
   } = opts;
 
+  // Sub-proposal E: validate alias format before any writes
+  if (developerAlias !== undefined) {
+    if (!DEVELOPER_ALIAS_RE.test(developerAlias)) {
+      console.error(
+        `squad bind: --developer-alias '${developerAlias}' is invalid.\n` +
+        `  Must match ^[a-z][a-z0-9-]{0,38}$ (lowercase letters, digits, hyphens; ` +
+        `starts with a letter; max 39 chars).`,
+      );
+      process.exit(1);
+    }
+  }
+
   const teamCachePath = opts.teamCachePath ?? defaultTeamCachePath(workRoot);
 
   // Step 1: Clone or fetch the sidecar
@@ -235,6 +248,7 @@ export async function runBind(opts: BindOptions): Promise<void> {
     stateRemote,
     stateBranch,
     inboxBranchPrefix,
+    stateBackend: 'orphan',           // Sub-proposal B: persist permanently
     ...(developerAlias !== undefined ? { developerAlias } : {}),
     ...(opts.teamCachePath !== undefined ? { teamCachePath: opts.teamCachePath } : {}),
     ...(hydrateWorkRoot ? { hydrateWorkRoot: true } : {}),
@@ -265,17 +279,11 @@ export async function runBind(opts: BindOptions): Promise<void> {
   appendExcludeEntry(excludePath, '.squad/');
   appendExcludeEntry(excludePath, '.github/agents/*');
 
-  // Step 6: Install or update sync hook templates
+  // Step 6: Install or update sync hook templates.
+  // installGitHooks reads stateBackend from the on-disk config.json written in Step 2.
+  // stateBackend: 'orphan' is now in the canonical config, so no intermediate flush needed.
   const { installGitHooks } = await import('./install-hooks.js');
-  // Temporarily set the stateBackend in the environment so installGitHooks
-  // recognizes that hooks are needed for cross-repo mode.
-  const configPath = path.join(squadDir, 'config.json');
-  const tempConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  tempConfig.stateBackend = 'orphan';
-  fs.writeFileSync(configPath, JSON.stringify(tempConfig, null, 2) + '\n');
   installGitHooks(workRoot, { force: false });
-  // Restore config without stateBackend override
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 
   // Step 7: Initial sync pull (best-effort)
   gitOps.syncPull(workRoot);

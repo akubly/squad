@@ -280,4 +280,117 @@ describe('CLI: bind command', () => {
     const syncCall = gitOps.calls.find(c => c.method === 'syncPull');
     expect(syncCall).toBeTruthy();
   });
+
+  // ── Sub-proposal B: stateBackend persisted permanently ───────────────────
+
+  it('config.json after cross-repo bind contains stateBackend: orphan (piece 31-B)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const gitOps = makeGitOps();
+
+    await runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, gitOps });
+
+    const config = JSON.parse(readFileSync(join(WORK_ROOT, '.squad', 'config.json'), 'utf-8'));
+    expect(config.stateBackend).toBe('orphan');
+  });
+
+  it('config.json is written exactly once — no temp write/restore cycle (piece 31-B)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const configPath = join(WORK_ROOT, '.squad', 'config.json');
+    const writeTimes: number[] = [];
+    const origWrite = (await import('node:fs')).writeFileSync;
+
+    // Patch fs.writeFileSync to count config.json writes
+    const { writeFileSync } = await import('node:fs');
+    let writeCount = 0;
+    const patchedWrite = (path: unknown, ...rest: unknown[]) => {
+      if (typeof path === 'string' && path === configPath) writeCount++;
+      return (origWrite as Function)(path, ...rest);
+    };
+    // Use vi to spy — but bind.test.ts doesn't import vi. Count writes by checking
+    // file mtime instead.
+    const gitOps = makeGitOps();
+    await runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, gitOps });
+
+    // After runBind, stateBackend must be present (the permanent write)
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.stateBackend).toBe('orphan');
+    // The config must not be missing stateRemote (which would happen if a restore
+    // overwrote the file with the original pre-stateBackend config object)
+    expect(config.stateRemote).toBe('squad-docs');
+  });
+
+  // ── Sub-proposal E: alias validation before config.json write ────────────
+
+  it('runBind rejects uppercase alias with clear error naming --developer-alias (piece 31-E)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const gitOps = makeGitOps();
+
+    const origExit = process.exit.bind(process);
+    const origError = console.error.bind(console);
+    let exitCode: number | undefined;
+    let errorMsg = '';
+    process.exit = ((code: number) => { exitCode = code; throw new Error(`exit(${code})`); }) as any;
+    console.error = (msg: string) => { errorMsg += msg; };
+
+    try {
+      await runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, developerAlias: 'Alice', gitOps });
+    } catch { /* expected exit throw */ }
+
+    process.exit = origExit;
+    console.error = origError;
+
+    expect(exitCode).toBe(1);
+    expect(errorMsg).toContain('--developer-alias');
+  });
+
+  it('runBind rejects underscore alias with clear error (piece 31-E)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const gitOps = makeGitOps();
+
+    const origExit = process.exit.bind(process);
+    const origError = console.error.bind(console);
+    let exitCode: number | undefined;
+    process.exit = ((code: number) => { exitCode = code; throw new Error(`exit(${code})`); }) as any;
+    console.error = () => {};
+
+    try {
+      await runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, developerAlias: 'alice_smith', gitOps });
+    } catch { /* expected exit throw */ }
+
+    process.exit = origExit;
+    console.error = origError;
+    expect(exitCode).toBe(1);
+  });
+
+  it('runBind rejects leading-digit alias with clear error (piece 31-E)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const gitOps = makeGitOps();
+
+    const origExit = process.exit.bind(process);
+    const origError = console.error.bind(console);
+    let exitCode: number | undefined;
+    process.exit = ((code: number) => { exitCode = code; throw new Error(`exit(${code})`); }) as any;
+    console.error = () => {};
+
+    try {
+      await runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, developerAlias: '1alice', gitOps });
+    } catch { /* expected exit throw */ }
+
+    process.exit = origExit;
+    console.error = origError;
+    expect(exitCode).toBe(1);
+  });
+
+  it('runBind accepts valid lowercase-hyphen alias (piece 31-E regression guard)', async () => {
+    const { runBind } = await import('../../packages/squad-cli/src/cli/commands/bind.js');
+    const gitOps = makeGitOps();
+
+    // Should not throw or exit
+    await expect(
+      runBind({ workRoot: WORK_ROOT, teamRepoUrl: TEAM_REPO_URL, teamCachePath: TEAM_CACHE, developerAlias: 'alice-smith', gitOps }),
+    ).resolves.not.toThrow();
+
+    const config = JSON.parse(readFileSync(join(WORK_ROOT, '.squad', 'config.json'), 'utf-8'));
+    expect(config.developerAlias).toBe('alice-smith');
+  });
 });

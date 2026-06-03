@@ -368,7 +368,10 @@ function syncPush(cwd: string, remote: string, backend: string | null, quiet: bo
  * Typed subset of .squad/config.json fields used by sync.
  * Typed against SquadDirConfig so field renames in the SDK schema produce tsc errors.
  */
-type SyncConfig = Pick<SquadDirConfig, 'stateRemote' | 'developerAlias'>;
+type SyncConfig = Pick<SquadDirConfig, 'stateRemote' | 'developerAlias'> &
+  Partial<Pick<SquadDirConfig, 'stateBranch'>> & {
+    teamRoot?: string;
+  };
 
 /**
  * Read sync-relevant fields from .squad/config.json with full type safety.
@@ -382,6 +385,8 @@ function readSyncConfig(repoRoot: string): SyncConfig | null {
     return {
       stateRemote: typeof parsed.stateRemote === 'string' ? parsed.stateRemote : undefined,
       developerAlias: typeof parsed.developerAlias === 'string' ? parsed.developerAlias : undefined,
+      teamRoot: typeof parsed.teamRoot === 'string' ? parsed.teamRoot : undefined,
+      stateBranch: typeof parsed.stateBranch === 'string' ? parsed.stateBranch : undefined,
     };
   } catch {
     return null;
@@ -450,13 +455,15 @@ export async function runSync(options: SyncOptions): Promise<void> {
       options.direction === 'both' ||
       options.direction === 'publish-only';
 
+    // Resolve alias to outer scope — needed by both the guard and push dispatch
+    let resolvedAlias: string | undefined;
     if (isPushDirection) {
-      const alias =
+      resolvedAlias =
         options.developer !== undefined
           ? options.developer
-          : syncConfig?.developerAlias;
+          : process.env['SQUAD_DEVELOPER_ALIAS'] ?? syncConfig?.developerAlias;
 
-      if (!alias || !alias.trim()) {
+      if (!resolvedAlias || !resolvedAlias.trim()) {
         console.error(
           `squad sync: --developer <alias> is required for push operations.\n` +
           `  Provide it via: squad sync --push --developer <alias>\n` +
@@ -487,9 +494,27 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     if (isPull) {
       syncPull(repoRoot, remote, backend, quiet);
+      // Sub-proposal C: hydrate TEAM_ROOT sidecar from the fetched state branch
+      if (syncConfig?.teamRoot) {
+        const absTeamRoot = path.resolve(repoRoot, syncConfig.teamRoot);
+        const stateBranch = syncConfig.stateBranch ?? 'squad-state';
+        await hydrateTeamRootFromStateRef(absTeamRoot, remote, stateBranch);
+      }
     }
     if (isPush) {
-      syncPush(repoRoot, remote, backend, quiet);
+      if (syncConfig?.teamRoot) {
+        // Sub-proposal A: cross-repo — publish per-developer inbox branch
+        const sessionId = process.env['COPILOT_SESSION_ID'] ?? crypto.randomUUID();
+        const inboxBranch = computeInboxBranchName(resolvedAlias!, sessionId);
+        const absTeamRoot = path.resolve(repoRoot, syncConfig.teamRoot);
+        await publishTeamRootToInbox(absTeamRoot, remote, inboxBranch, {
+          developerAlias: resolvedAlias!,
+          sessionId,
+          workRoot: repoRoot,
+        });
+      } else {
+        syncPush(repoRoot, remote, backend, quiet);
+      }
     }
   } finally {
     delete process.env[SQUAD_SYNC_ENV];
@@ -501,7 +526,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
 // ============================================================================
 
 /** developerAlias must be lowercase letters, digits, and hyphens; starts with a letter; max 39 chars */
-const DEVELOPER_ALIAS_RE = /^[a-z][a-z0-9-]{0,38}$/;
+export const DEVELOPER_ALIAS_RE = /^[a-z][a-z0-9-]{0,38}$/;
 
 /**
  * sessionId must be a UUID v4 or a lowercase hex-dash string of 8–64 chars.

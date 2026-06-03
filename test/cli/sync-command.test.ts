@@ -496,3 +496,84 @@ describe('typed config resolution', () => {
     expect(listCalls.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sub-proposal D — SQUAD_DEVELOPER_ALIAS env var fallback
+// ---------------------------------------------------------------------------
+
+describe('SQUAD_DEVELOPER_ALIAS env var fallback (piece 31-D)', () => {
+  afterEach(() => {
+    delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  });
+
+  it('CLI --developer flag wins over env var and config (piece 31-D regression guard)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ developerAlias: 'config-alias' });
+    process.env['SQUAD_DEVELOPER_ALIAS'] = 'env-alias';
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+
+    // The flag value should win — runSync should not exit (all three sources present)
+    await expect(
+      runSync({ direction: 'push', developer: 'flag-alias', workRoot: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('SQUAD_DEVELOPER_ALIAS env var used when --developer flag absent (piece 31-D)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot(); // no developerAlias in config
+    process.env['SQUAD_DEVELOPER_ALIAS'] = 'env-alias';
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+
+    // Must not exit 1 — env var provides the alias
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('config.json developerAlias used when neither flag nor env var present (piece 31-D regression guard)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot({ developerAlias: 'config-alias' });
+    // no SQUAD_DEVELOPER_ALIAS env var, no --developer flag
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true, gitOps }),
+    ).resolves.not.toThrow();
+  });
+
+  it('runSync exits with error when no alias source available (piece 31-D regression guard)', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    seedWorkRoot(); // no developerAlias in config
+    // no SQUAD_DEVELOPER_ALIAS env var, no --developer flag
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string) => {
+      throw new Error(`process.exit(${_code})`);
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: true }),
+    ).rejects.toThrow('process.exit(1)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sub-proposal B (secondary) — runSync does not bail after cross-repo bind
+// ---------------------------------------------------------------------------
+
+describe('runSync cross-repo backend check (piece 31-B secondary)', () => {
+  it('runSync does not bail with no-remote-sync when stateBackend is orphan', async () => {
+    const { runSync } = await import('../../packages/squad-cli/src/cli/commands/sync.js');
+    // Seed with stateBackend: 'orphan' (the persisted field from sub-proposal B)
+    seedWorkRoot({ stateBackend: 'orphan', developerAlias: 'alice' });
+    const gitOps = makeGitOps({ remotes: ['squad-docs'] });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runSync({ direction: 'push', workRoot: WORK_ROOT, quiet: false, gitOps });
+
+    // Must not have printed the bail message
+    const bailCall = logSpy.mock.calls.find(c =>
+      String(c[0]).includes('no remote sync needed'),
+    );
+    expect(bailCall).toBeUndefined();
+  });
+});
