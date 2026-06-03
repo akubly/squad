@@ -4,11 +4,13 @@
 
 ## Summary
 
-This history tracks SDK architecture review, contract validation, and cross-repo patterns for pieces 25–30 of the current sprint. Full historical record (phases A and earlier pieces) archived in `history-archive.md`.
+This history tracks SDK architecture review, contract validation, and cross-repo patterns for pieces 25–31 of the current sprint. Full historical record (phases A and earlier pieces) archived in `history-archive.md`.
 
-**Key learnings this sprint:** Timestamp-based skip logic causes data loss on clock skew; use set-membership by stable identifier instead. Template-only pieces need command-existence assertions (test that CLI commands the pipeline calls are registered). Cross-repo pipeline triggers must match repo boundaries (inbox branches in TEAM_ROOT, but publish pipeline in WORK_ROOT). Ref-membership pattern using `jq empty` + `grep -qxF` is the correct idempotent fold enumeration strategy. Tab-separated sort keys must update `cut -f` index when adding fields, or results fail silently.
+**Key learnings this sprint:** Timestamp-based skip logic causes data loss on clock skew; use set-membership by stable identifier instead. Template-only pieces need command-existence assertions (test that CLI commands the pipeline calls are registered). Cross-repo pipeline triggers must match repo boundaries (inbox branches in TEAM_ROOT, but publish pipeline in WORK_ROOT). Ref-membership pattern using `jq empty` + `grep -qxF` is the correct idempotent fold enumeration strategy. Tab-separated sort keys must update `cut -f` index when adding fields, or results fail silently. Piece 31 design targets five critical dogfood findings from piece 30 code verification.
 
 ## Recent Team Updates
+
+📌 **Team update (2026-06-03 — Piece 31 Spec & Prompt Authored):** Procedures completed spec authorship for piece 31 (cross-repo CLI wiring fixes). Spec captures five shipping defects found during piece-30 code verification: (1) publishTeamRootToInbox unreachable from sync CLI, (2) stateBackend not written by bind, (3) hydrateTeamRootFromStateRef unreachable from pull path, (4) SQUAD_DEVELOPER_ALIAS env var ignored, (5) developerAlias unvalidated at bind time. All five findings verified accurate at shipped code lines. Implementation prerequisite identified: SyncConfig must be extended to include teamRoot and stateBranch fields (currently typed with Pick<...,'stateRemote'|'developerAlias'>). Spec file (242 lines) committed + pushed to akubly/upstream-specs; prompt (85 lines) staged at .squad/plans/prompts/piece-31-cross-repo-cli-wiring-fixes.md. Arc ready for next-session execution.
 
 📌 **Team update (2026-06-02 — Piece 30 Revision-3 Review):** CAPCOM reviewed EECOM's revision (commit 3c6c9edf). Verdict: APPROVE-WITH-NITS. M_NEW_1 fully resolved. Prior N2 (sort tie-breaker) also resolved as a side-effect. Prior N1 (foldCommit wrong SHA) and N3 (prune-all-refs scope) persist as non-blocking carry-forward; not re-escalated. Zero new mandatory findings. See `.squad/reviews/piece-30-revision3-capcom.md`.
 

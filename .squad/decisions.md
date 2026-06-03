@@ -5,6 +5,56 @@
 
 ---
 
+### 2026-06-03: Piece 31 Spec and Prompt Authorship — Procedures Complete
+
+**Date:** 2026-06-03  
+**Author:** Procedures (Spec & Prompt Authorship)  
+**Artifacts:** Two deliverables on akubly/upstream-specs + prompt staged to .squad/plans/prompts/
+
+#### Spec Delivered
+
+**File:** `31-cross-repo-cli-wiring-fixes.md` (242 lines)  
+**Branch:** akubly/upstream-specs (committed + pushed)  
+
+Piece 31 spec captures five dogfood findings verified during piece-30 code read:
+
+1. **`publishTeamRootToInbox` unreachable from CLI** — `runSync` never calls publish; ADO publish-inbox.yml runs `squad sync --push` which only performs state push, not inbox publish
+2. **`stateBackend` unwritten by `runBind`** — config.json missing stateBackend field; `detectBackend()` returns null and bails with "no remote sync needed"
+3. **`hydrateTeamRootFromStateRef` unreachable from CLI pull path** — sidecar not populated after `squad sync --pull`
+4. **`SQUAD_DEVELOPER_ALIAS` env var ignored** — `runSync` alias resolution misses environment fallback; ADO pipeline cannot inject alias
+5. **`developerAlias` unvalidated at bind time** — `runBind` writes any alias to config.json without charset validation; validation error surfaces only at `publishTeamRootToInbox` call time
+
+#### Prompt Delivered
+
+**File:** `piece-31-cross-repo-cli-wiring-fixes.md` (85 lines, 6942 bytes)  
+**Location:** `.squad/plans/prompts/`
+
+Prompt staged for next session. Kickoff ready.
+
+#### Code Verification
+
+All five line-number references in spec verified accurate against shipped code at HEAD of `squad/piece-30-ado-cross-repo-templates`:
+
+| Finding | Cited lines | Status |
+|---------|-------------|--------|
+| 1 — publishTeamRootToInbox not called from runSync | sync.ts 425–497, 812–926 | ✅ Verified |
+| 2 — stateBackend not written by runBind | bind.ts 231–246, sync.ts 169–177 | ✅ Verified |
+| 3 — hydrateTeamRootFromStateRef not called | sync.ts 477–490, 708–748 | ✅ Verified |
+| 4 — SQUAD_DEVELOPER_ALIAS ignored | sync.ts 453–466 | ✅ Verified |
+| 5 — developerAlias unvalidated at bind | bind.ts (no validation), sync.ts 504 | ✅ Verified |
+
+#### Implementation Note
+
+Code read identified that `SyncConfig` (sync.ts line 371) is typed as `Pick<SquadDirConfig, 'stateRemote' | 'developerAlias'>` and does not include `teamRoot` or `stateBranch`. Sub-proposals A and C in piece-31 spec require both fields from config.json. The implementer must extend `SyncConfig` and `readSyncConfig()` to include these fields as part of piece-31 work. Both fields exist on `SquadDirConfig` in SDK at resolution.ts lines 36 and 55 respectively.
+
+This is an implementation prerequisite, not an additional defect — falls within scope of sub-proposals A and C.
+
+#### Identifier Scrub
+
+CLEAN — no usernames, emails, secrets, or first-party identifiers in spec or prompt.
+
+---
+
 ### 2026-06-02: Piece 30 Follow-On Revision — EECOM Implementation Complete
 
 **Date:** 2026-06-02  
