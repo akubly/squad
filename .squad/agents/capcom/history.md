@@ -2,6 +2,8 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (revision implementer) addressed all 9 mandatory findings from 5-reviewer panel, including CAPCOM's 2 findings on missing `squad fold` CLI and unreachable publish trigger. Both fixed: fold logic inlined (150-line bash+jq) in fold-squad-state.yml, publish trigger corrected (removed erroneous `include:` clause). 196 tests pass; scrub Gate 1 pre-existing baseline; ready for merge.
+
 📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** CAPCOM conducted architecture-focused adversarial review of piece 30 ADO templates (commit 10168051); verdict: REJECT. Identified 2 mandatory findings: (1) `squad fold` CLI command missing — fold pipeline non-functional at runtime, (2) `publish-inbox.yml` trigger unreachable in product repo (inbox branches created in TEAM_ROOT, not WORK_ROOT). Additional 3 non-blocking observations on variable documentation and parameterization. Consolidated to REJECT verdict by Flight due to convergent mandatory findings across 5 reviewers.
 
 📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.

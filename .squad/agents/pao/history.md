@@ -6,6 +6,10 @@
 
 Docs live in docs/ with blog/, concepts/, cookbook/, getting-started/, guide/, features/, scenarios/ sections. Blog tests use filesystem discovery (dynamic); other sections use hardcoded expected arrays. Microsoft Style Guide enforced: sentence-case headings, active voice, second person, present tense. Docs format: plain markdown, H1 title, experimental warning, "Try this" code blocks, overview, HR, H2 content sections. Scannability framework: paragraphs for narrative, bullets for scannable items, tables for comparisons.
 
+## Team Updates
+
+📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (revision implementer) addressed all documentation and testing findings: (1) EXPECTED_FEATURES sync gate fixed (added 'state-backends' to test/docs-build.test.ts), (2) terminology corrected (old-squad-state.yml → fold-squad-state.yml), (3) typos fixed (ootstrap → bootstrap, ootstrapScriptPath → bootstrapScriptPath), (4) code block language fixed (ash → bash), (5) security callout added (never embed credentials in DocsRepoUrl). Docs-test sync hard rule now enforced by CI. 196 tests pass. Ready for merge.
+
 ## Team Update
 
 📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** PAO conducted documentation and developer-experience review of piece 30 ADO templates (commit 10168051); verdict: APPROVE-WITH-NITS. Identified 1 mandatory finding: test/docs-build.test.ts missing `'state-backends'` in EXPECTED_FEATURES array — docs-test sync hard rule violated. Additional 8 non-blocking observations on terminology drift (4 instances of `old-squad-state.yml`), typos (2), clarity gaps (3 on `$DocsRepoUrl` format, `squad bind` prerequisite, single-repo case, credentials warning), deep-linking issues. Piece is well-structured; documentation gaps are fixable. Consolidated to REJECT verdict by Flight.

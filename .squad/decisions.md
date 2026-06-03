@@ -5,6 +5,88 @@
 
 ---
 
+### 2026-06-03: Piece 30 Revision — Booster Integration (a9da5453)
+
+**Date:** 2026-06-03  
+**By:** Booster (CI/CD Engineer) — sole revision integrator  
+**Original Flight commit:** 10168051  
+**Revision commit:** a9da5453  
+**Test coverage:** 190 → 196 tests pass  
+**Scrub-gate disposition:** Gates 2,5–9 pass; Gate 1 pre-existing baseline (zero new violations)  
+
+## Context
+
+Five-reviewer adversarial panel (CAPCOM, Booster, FIDO, RETRO, PAO) issued consolidated REJECT verdict on piece 30 (ADO cross-repo pipeline templates) with 9 mandatory findings. Booster was assigned as sole revision implementer across all domains (CI/CD, security, testing, docs).
+
+## Mandatory Findings Addressed
+
+### M1: CAPCOM — `squad fold` does not exist — inline the fold logic
+
+**Decision:** The original `fold-squad-state.yml` called `squad fold` which is not a real CLI subcommand. Per coordinator adjudication, the fold logic must be inlined as bash+jq plumbing. No new `fold` subcommand will be added to the CLI. The template is self-contained.
+
+**Implementation:** `fold-squad-state.yml` rewritten with 150-line inline bash+jq fold logic (lines 5–154). Verified functional; replaces nonexistent CLI call entirely.
+
+### M2: CAPCOM — `publish-inbox.yml` trigger correction — no include clause
+
+**Decision:** The original `include: squad/inbox/**` trigger was incorrect: inbox branches live in TEAM_ROOT (docs repo), not WORK_ROOT (the product repo where the pipeline runs). Fix: remove `include:` entirely; keep only `exclude:` (squad-state, main, dev). Pipeline now triggers on all WORK_ROOT feature branch pushes.
+
+**Implementation:** Removed `include:` line; retained `exclude:` with documented rationale in template comments. Test `test/cli/ado-templates.test.ts` updated to enforce no `include:` clause (assertion 5).
+
+### M3: Booster — `fold-squad-state.yml` lacks concurrency serialization
+
+**Decision:** No `batch: true` in the trigger block. Two simultaneous inbox pushes trigger two concurrent fold runs; the losing run fails with non-fast-forward rejection. Fix: add `batch: true` to the fold trigger.
+
+**Implementation:** Added `batch: true` to `fold-squad-state.yml` trigger block (inside `trigger:`, line 3). Booster note: `batch: true` goes inside `trigger:` block (ADO-specific), not top-level.
+
+### M4: Booster — `publish-inbox.yml` missing `persistCredentials: true`
+
+**Decision:** ADO checkout defaults to `persistCredentials: false` (strips OAuth token). Any pipeline step that runs `git push` after checkout must explicitly set `persistCredentials: true`. This differs from GitHub Actions where the token persists by default.
+
+**Implementation:** Added `persistCredentials: true` to `publish-inbox.yml` checkout step (line 10). Fold template already had this; publish now matches.
+
+### M5: RETRO — PAT-in-URL leak via Write-Host
+
+**Decision:** `bootstrap-cross-repo.ps1` echoes `$DocsRepoUrl` verbatim via `Write-Host` — PAT-embedded URL leak to pipeline/console logs. Also exposed in ADO's command-line log when the pipeline passes `$(docsRepoUrl)` as an argument.
+
+**Implementation:** Redacted PAT in URL before Write-Host emission: changed `Write-Host "Cloning from $DocsRepoUrl"` to redacted form using `://***@` pattern. Error messages also redacted.
+
+### M6: RETRO — Missing `--` separator in git clone
+
+**Decision:** Missing `--` separator before `$DocsRepoUrl` in `git clone` — violates team convention established in piece 14; git-argument injection vector for URLs beginning with `--`.
+
+**Implementation:** Added `--` separator: `git clone -- "$DocsRepoUrl" <path>`. Verified in bootstrap-cross-repo.ps1 line 47.
+
+### M7: RETRO — No URL scheme allowlist for `$DocsRepoUrl`
+
+**Decision:** No URL scheme allowlist for `$DocsRepoUrl`; `file://` and arbitrary HTTPS origins are accepted; `https://attacker.com/.git` blind-clone probe does NOT safe-fail.
+
+**Implementation:** Added URL scheme allowlist: `https://`, `http://`, `git+ssh://`, `ssh://`, `git@`. Rejected schemes: `file://`, `ftp://`, and all others. Error message deliberately omits the full URL value (PAT-redaction principle).
+
+### M8: FIDO — No execution-based idempotency test for `bootstrap-cross-repo.ps1`
+
+**Decision:** The spec requires idempotent behavior (no duplicate remotes, no duplicate exclude entries on re-run). The two bootstrap tests are regex scans only — no test runs the script. Idempotency logic bugs would not be caught.
+
+**Implementation:** New test file `test/cli/ado-bootstrap-idempotency.test.ts` with execution-based assertions. Runs `pwsh -File bootstrap-cross-repo.ps1` twice on a fixture; verifies second run is idempotent (no remotes added, no exclude entries duplicated). Uses `120_000ms` Vitest timeout for PowerShell process startup.
+
+### M9: PAO — `test/docs-build.test.ts` missing `state-backends` in EXPECTED_FEATURES
+
+**Decision:** `test/docs-build.test.ts` missing `'state-backends'` in EXPECTED_FEATURES array — docs-test sync hard rule violated.
+
+**Implementation:** Added `'state-backends'` to EXPECTED_FEATURES array in test/docs-build.test.ts. Docs-test sync hard rule now passes.
+
+## Learnings & Decisions
+
+1. **ADO `batch: true` is inside `trigger:`** — not a top-level pipeline key.
+2. **ADO `persistCredentials` defaults false** — must be explicit for push pipelines.
+3. **Mirror pattern amplifies file counts 4×** — factor into Gate 6 planning.
+4. **Inline fold pattern** — when a CLI subcommand doesn't exist and can't be added, inline the logic in YAML using bash+jq. The fold template is now a useful reference.
+5. **Vitest timeout for pwsh tests** — default 5000ms insufficient for PowerShell process startup × 2. Use `120_000` for execution-based idempotency tests.
+6. **PAT redaction is a write-path concern** — any Write-Host or error message that names a URL must check the URL for embedded credentials before emission.
+7. **URL scheme allowlist is a positive-assertion gate** — define accepted schemes, reject all others. Avoids future injection vectors.
+8. **Docs-test sync is a hard rule** — any new template or state surface requires a corresponding EXPECTED_FEATURES entry. Enforced by CI.
+
+---
+
 ### 2026-06-02: Piece 30 ADO Cross-Repo Templates — Implementation Complete
 
 **By:** Flight (Lead)  
