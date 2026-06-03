@@ -5,6 +5,172 @@
 
 ---
 
+### 2026-06-03: Piece 31 sub-proposal A — publishTeamRootToInbox wiring
+
+**Date:** 2026-06-03  
+**Author:** Flight (Lead)  
+**Verdict:** Accept
+
+**Rationale:** `publishTeamRootToInbox` is exported at sync.ts line 812 and never invoked from `runSync` (confirmed: called from runSync: false). The piece-28 inbox publish contract is entirely unreachable through the CLI for cross-repo configuration. This is S0 — the push dispatch gap is the primary wiring failure that sub-proposals B and C depend on being present to be testable end-to-end. No deferral path is available.
+
+**Code anchors:** `packages/squad-cli/src/cli/commands/sync.ts:812` (publishTeamRootToInbox definition), `packages/squad-cli/src/cli/commands/sync.ts:425` (runSync, isPush block — dispatch target absent)
+
+**Test anchor:** `test/cli/cross-repo-sync.test.ts` — extend with integration assertions calling `runSync`, not `publishTeamRootToInbox` directly
+
+---
+
+### 2026-06-03: Piece 31 sub-proposal B — stateBackend write at bind
+
+**Date:** 2026-06-03  
+**Author:** Flight (Lead)  
+**Verdict:** Accept
+
+**Rationale:** bind.ts lines 272–278 confirm the temporary write/restore pattern: `stateBackend: 'orphan'` is injected into config.json for `installGitHooks`, then immediately reverted. As a result, `detectBackend()` in `runSync` reads no `stateBackend` field and treats every subsequent sync as a local-only operation. Persisting the field in the canonical `SquadDirConfig` object at bind time is the correct fix; it collapses two file writes into one and removes a code path that exists solely to paper over an omission.
+
+**Code anchors:** `packages/squad-cli/src/cli/commands/bind.ts:272–278` (temporary write/restore), `packages/squad-cli/src/cli/commands/sync.ts:169–177` (detectBackend null path), `packages/squad-cli/src/cli/commands/bind.ts:231–246` (SquadDirConfig construction)
+
+**Test anchor:** `test/cli/bind.test.ts` — extend; secondary assertion in `test/cli/sync-command.test.ts`
+
+---
+
+### 2026-06-03: Piece 31 sub-proposal C — hydrateTeamRootFromStateRef on pull
+
+**Date:** 2026-06-03  
+**Author:** Flight (Lead)  
+**Verdict:** Accept
+
+**Rationale:** `hydrateTeamRootFromStateRef` is exported from sync.ts (lines 708–748) and the pull path in `runSync` (lines 477–490) never calls it. After `squad sync --pull` the TEAM_ROOT sidecar directory is not populated, leaving the working directory in an incorrect state for cross-repo configuration. Wiring the call after `syncPull` when `config.teamRoot` is present is a direct restoration of piece-27's stated contract with no schema changes required.
+
+**Code anchors:** `packages/squad-cli/src/cli/commands/sync.ts:708` (hydrateTeamRootFromStateRef definition), `packages/squad-cli/src/cli/commands/sync.ts:477–490` (runSync pull block — hydration call absent)
+
+**Test anchor:** `test/cli/cross-repo-sync.test.ts` — extend with pull-path assertions
+
+---
+
+### 2026-06-03: Piece 31 sub-proposal D — SQUAD_DEVELOPER_ALIAS env fallback
+
+**Date:** 2026-06-03  
+**Author:** Flight (Lead)  
+**Verdict:** Accept
+
+**Rationale:** The alias resolution chain at sync.ts lines 453–466 checks `options.developer` then `syncConfig?.developerAlias` but skips `process.env['SQUAD_DEVELOPER_ALIAS']`. The ADO pipeline template sets that variable; any pipeline invocation that omits `--developer` fails with an alias-required error despite the variable being present. The env var belongs between the CLI flag and the persisted config in the resolution order — more specific than stored state for pipeline runs, less authoritative than an explicit flag.
+
+**Code anchors:** `packages/squad-cli/src/cli/commands/sync.ts:453–466` (alias resolution chain), pipeline template `publish-inbox.yml` (SQUAD_DEVELOPER_ALIAS injection site)
+
+**Test anchor:** `test/cli/sync-command.test.ts` — extend with env-var priority tests
+
+---
+
+### 2026-06-03: Piece 31 sub-proposal E — alias validation at bind
+
+**Date:** 2026-06-03  
+**Author:** Flight (Lead)  
+**Verdict:** Accept
+
+**Rationale:** `DEVELOPER_ALIAS_RE` is defined at sync.ts line 504 but is never applied in `runBind`. Malformed aliases (uppercase, underscores, leading digits) are persisted to config.json and produce errors inside `publishTeamRootToInbox` with no indication that the alias came from an earlier bind. Applying the regex at bind time is strictly better: the error surface is the correct command, the flag name (`--developer-alias`) is named in the message, and no malformed alias ever reaches disk.
+
+**Code anchors:** `packages/squad-cli/src/cli/commands/sync.ts:504` (DEVELOPER_ALIAS_RE definition, not exported), `packages/squad-cli/src/cli/commands/bind.ts:231` (config write — validation absent), `packages/squad-cli/src/cli/entry/cli-entry.ts:1162` (--developer-alias flag name)
+
+**Test anchor:** `test/cli/bind.test.ts` — extend with invalid-alias rejection tests
+
+---
+
+### 2026-06-03: Piece 31 Quality Gate — FIDO Verdict (REJECT → APPROVE Re-Run)
+
+**Date:** 2026-06-03T15:09:57-07:00  
+**Author:** FIDO (Quality Owner)  
+**Branch:** `squad/piece-31-cross-repo-cli-wiring-fixes`  
+**Status:** Re-gate APPROVE
+
+**Summary:** Both issues from the original REJECT have been fully resolved. All gates pass at or above the pre-existing baseline. No new failures introduced by piece 31. Booster may stage and squash.
+
+**Piece 31 Test Files — All PASS:**
+- `test/cli/cross-repo-sync.test.ts` — all pass; timeout fixes at lines 178 and 215 (30_000ms)
+- `test/cli/bind.test.ts` — all pass
+- `test/cli/sync-command.test.ts` — all pass
+
+**Scrub Gate Results:**
+| Gate | Result | Notes |
+|---|---|---|
+| Gate 1 — Strip-listed paths | ❌ FAIL | Pre-existing baseline (32 paths); piece 31 introduces zero new violations |
+| Gate 8 — ADO variable syntax | ✅ PASS | Fixed in piece 30 (99b036e8, ac779e24); Flight's rewrites resolved all 16 violations |
+| All others | ✅ PASS | Clean |
+
+**Scope Verification:** Exactly 5 piece-31 source/test files staged; no out-of-scope files included.
+
+**Booster Green Light:** APPROVE — Stage exactly these five files:
+- `packages/squad-cli/src/cli/commands/sync.ts`
+- `packages/squad-cli/src/cli/commands/bind.ts`
+- `test/cli/cross-repo-sync.test.ts`
+- `test/cli/bind.test.ts`
+- `test/cli/sync-command.test.ts`
+
+---
+
+### 2026-06-03: Gate 8 Design Scope — PowerShell sub-expression exemption (escalation)
+
+**Date:** 2026-06-03T12:06:31-07:00  
+**Filed by:** Flight (Lead)  
+**Piece:** 31 — Cross-repo CLI wiring fixes  
+**Severity:** Low — workaround applied; no blocking condition
+
+**Finding:** Gate 8 on akubly/upstream-specs scans .squad-templates/ado/ for `$(...)` expressions and rejects inner content that doesn't match `^[A-Za-z][A-Za-z0-9._]*$`. This correctly enforces ADO pipeline variable references (`$(System.AccessToken)`) but also flags:
+1. PowerShell sub-expressions — `$($Url.Split('//')[0])` in .ps1 files (standard PowerShell syntax)
+2. Bash command substitutions — `$(jq ...)` in embedded script: blocks (bash, not ADO expressions)
+
+**Piece 31 Resolution:** Both violation categories were resolved by code rewrite (pre-computed expressions into named variables; converted `$(cmd)` to backtick form in bash). Gate 8 now passes.
+
+**Recommendation:** Gate 8 upstream should be updated to skip the `$(...)` check for .ps1 files (or apply PowerShell-aware parser). For embedded bash in YAML, scope the check to lines outside `script:` block indentation.
+
+**Action:** Informational escalation to upstream-specs. No action required to unblock piece 31.
+
+---
+
+### 2026-06-03: DEVELOPER_ALIAS_RE export location — EECOM decision
+
+**Date:** 2026-06-03  
+**Author:** EECOM (Core Dev)  
+**Piece:** 31, sub-proposal E
+
+**Decision:** Export `DEVELOPER_ALIAS_RE` from `sync.ts` rather than moving to a shared utility module.
+
+**Rationale:** The regex (`/^[a-z][a-z0-9-]{0,38}$/`) validates the alias format enforced by `publishTeamRootToInbox` — a function in `sync.ts`. It is inherently part of the inbox publish contract, not a general-purpose utility. Moving it would fragment the validation contract and introduce unnecessary dependencies. `bind.ts` importing from `sync.ts` is architecturally correct: bind configures the cross-repo transport that sync operates on. The import makes the dependency explicit.
+
+**Alternatives rejected:**
+- Move to shared utils — no other callers; adds indirection without benefit
+- Duplicate regex — two copies drift independently; bind silently accepts aliases that publishTeamRootToInbox rejects
+
+**Status:** Accepted. Implementation in `packages/squad-cli/src/cli/commands/sync.ts` (exported) and `packages/squad-cli/src/cli/commands/bind.ts` (imported).
+
+---
+
+### 2026-06-03: Piece 31 spec complete — Procedures ready for Phase B replay
+
+**Date:** 2026-06-03  
+**Author:** Procedures (Spec & Prompt Authorship)  
+**Status:** Recorded
+
+The piece 31 spec (`31-cross-repo-cli-wiring-fixes.md`) is now present on `akubly/upstream-specs` at Phase B completion.
+
+**Spec Path:** `docs/proposals/upstream-bradygaster/31-cross-repo-cli-wiring-fixes.md`  
+**Final Commit:** f76800f1 (pushed to origin/akubly/upstream-specs)
+
+**Amendments Applied (forward-only):**
+1. Added standalone verify-first probe block (Phase B handoff requirement)
+2. Added explicit acceptance criteria subsections per sub-proposal (A–E)
+
+**Phase B Readiness Checklist:**
+- ✅ Problem statement for all five wiring gaps
+- ✅ Verify-first probe block (Phase B contract)
+- ✅ Sub-proposals A–E with rationale, code anchors, test plans, acceptance criteria
+- ✅ Special scrutiny for session ID sourcing, dead-code surface, workaround removal
+- ✅ Consolidated test surface table
+- ✅ Dependencies documented (pieces 26–30, 30.5)
+- ✅ Identifier scrub complete — no usernames, emails, secrets
+
+**Sub-proposal Status:** A is S0 (non-deferrable); triage verdict: accept-only.
+---
+
 ### 2026-06-03: Piece 31 Spec and Prompt Authorship — Procedures Complete
 
 **Date:** 2026-06-03  
