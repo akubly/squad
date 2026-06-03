@@ -24,6 +24,34 @@ Pitfalls:
 
 Spawn-template file writes must be anchored at TEAM_ROOT (or a derived SQUAD_DIR). Bare `.squad/` paths resolve against agent CWD, which can be a shared-squad consumer repo instead of the owning team root.
 
+### Phase A staging pattern for fix pieces — piece 31 (2026-06-03)
+
+**Situation handled:** The `akubly/upstream-specs` branch had diverged from the local clone's knowledge of it. The local branch was at `e31b1b92`; the remote had `80cdcfc0` (a spec at the same path, staged by a prior session). The worktree-based staging workflow surfaced this via a non-fast-forward push rejection.
+
+**Resolution pattern:** Reset the worktree to the remote's HEAD, inspect the remote spec for gaps against the Phase B handoff requirements, then commit only the delta as a forward-only amendment. Do not overwrite the remote spec wholesale — other sessions may have started reading it. Commit the amendment as a separate commit with a clear message distinguishing it from the original staging commit.
+
+**Verify-first probe as mandatory spec element:** The Phase B handoff contract requires a verify-first probe block. If the pre-existing remote spec lacks it, the amendment must add it. The probe block must match the handoff exactly — do not paraphrase or summarize it.
+
+**Acceptance criteria subsections are Phase B navigation aids:** Phase B agents triage sub-proposals before implementation. Each sub-proposal needs an explicit "Acceptance criteria" block so the agent can verify its own work without re-reading the full problem statement. If the remote spec omits these, the amendment must add them.
+
+**Worktree cleanup:** `git worktree remove ../squad-replay-specs` succeeds cleanly after push. No stale worktree entries remain.
+
+
+
+Fix pieces differ from feature pieces in authoring discipline:
+
+**Tone translation:** Source findings arrive as "defects" with sev tags. The spec must reframe as "surfaces not yet reachable from the CLI" or "not yet enforced at the correct boundary." Never use "defect," "bug," "dogfood," or sev labels in spec text.
+
+**Sub-proposal non-deferability:** When a finding is S0 (or the entire fix piece is blocked without it), the spec must state the non-deferability constraint AND the kickoff prompt must repeat it explicitly. The triage block in the prompt must name the non-deferrable sub-proposal and say "accept only, no defer/reject path."
+
+**Verify-first probe as spec contract:** For S0 sub-proposals, encode a concrete verify-first probe (e.g., a `node -e` one-liner) that the implementer runs before writing any code. This confirms the finding is still accurate and the line numbers haven't shifted. The probe is part of the spec's value — it makes the finding falsifiable at execution time.
+
+**Integration-level test requirement:** Unit tests that call library functions directly cannot catch CLI dispatch regressions. Fix pieces that wire library functions into CLI dispatch must require an integration-level test that goes through the exported function (e.g., `runSync`) — not the internal helper. State this constraint explicitly in each relevant sub-proposal.
+
+**Temporary workaround archaeology:** When the implementation contains a workaround (temporary write/restore, environment override, etc.) that a fix sub-proposal supersedes, name it explicitly in the spec so the implementer knows to remove it. Otherwise it silently persists.
+
+**Line number verification before encoding:** Always verify cited line numbers against the actual shipped code before writing the spec. Line numbers shift between session and authorship. Note any shifts in a triage note; don't carry forward stale refs.
+
 ### Agent Prompt Reachability (2026-05-21)
 
 Decision triggers at the top of an agent prompt define the agent's reachability tree. Logic buried deeper in the file is unreachable for any path the top trigger short-circuits. Always reach-check top-down.
