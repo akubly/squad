@@ -133,3 +133,5 @@ Older context (pieces 1–14, Q1 2026) in `history-archive.md`: template sync pa
 
 ---
 📌 **2026-06-02 Piece 29 Spawn-Contract Update — Five Variables Required (Commit b642f9cd):** Piece 29 replaces single TEAM_ROOT label with five-variable protocol (TEAM_ROOT, WORK_ROOT, STATE_REMOTE, STATE_BRANCH, DEVELOPER_ALIAS). All future agent prompts must include all five without optional omission. State reads/writes via TEAM_ROOT; product work in WORK_ROOT. Backward-compat projection at WORK_ROOT/.squad is read-only. Session restart required for any active sessions.
+
+📌 **Team update (2026-06-03 — Piece 30 Revision-3 Complete):** Piece-30 revision (3c6c9edf) addressed both round-3 blocking findings: CAPCOM M_NEW_1 (fold timestamp→ref-membership), RETRO M_NEW_1 (clone stderr redaction). Both verified resolved. Round-3 adversarial panel (CAPCOM + FIDO) achieved convergence: zero new mandatory. Piece-30 Phase B complete; ready for Phase C (PR review).

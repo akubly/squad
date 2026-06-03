@@ -1450,3 +1450,67 @@ The spawn-contract introduces five mandatory variables (`TEAM_ROOT`, `WORK_ROOT`
 **Why:** Without explicit write rules, agents operating after pieces 26–28 could silently route decisions or history writes to `WORK_ROOT/.squad/`, causing Squad artifacts to appear in product PR diffs and breaking state integrity. The four-path table makes the boundary unambiguous at the protocol level, independent of any runtime enforcement.
 
 Sessions active before this piece merges operate under the old single-root contract and must be restarted.
+---
+
+### 2026-06-02: Piece 30 Revision-3 Review — CAPCOM Verdict
+
+# Decision: Piece 30 Revision-3 Review — CAPCOM
+
+**Date:** 2026-06-02  
+**Author:** CAPCOM (SDK Expert)  
+**Commit reviewed:** 3c6c9edf (EECOM's revision)
+
+## Verdict
+
+**APPROVE-WITH-NITS**
+
+## Prior M_NEW_1 status
+
+**RESOLVED.** Timestamp-based skip (`LAST_PUBLISHED_AT` scalar cutoff) fully replaced with ref-name set-membership check against `.[].inboxRef` in `publish-history.json`. Field name is self-consistent (fold writes `inboxRef`, fold reads `.[].inboxRef`). All edge cases probe clean: empty array folds all, missing file folds all, malformed JSON aborts with `exit 1`, duplicates are idempotent.
+
+## New mandatory findings
+
+None.
+
+## Pre-existing non-blocking (carry-forward, not re-escalated)
+
+- **Prior N1 (persists):** `foldCommit` in history entries stores the inbox ref HEAD SHA, not the squad-state fold commit SHA. Capture `git rev-parse HEAD` after `git commit` to fix.
+- **Prior N3 (persists):** Prune step deletes ALL current inbox refs, not just folded ones. Residual risk limited to refs with missing `publish-metadata.json` when `pruneAfterFold=true` (default false).
+
+
+---
+
+### 2026-06-02: Piece 30 Revision-3 Review — FIDO Verdict
+
+# FIDO — Piece 30 Revision-3 Review Decision
+
+**Date:** 2026-06-02
+**Reviewer:** FIDO (Quality Owner)
+**Commit reviewed:** 3c6c9edf (EECOM's revision)
+**Full verdict file:** `.squad/reviews/piece-30-revision3-fido.md`
+
+---
+
+**Verdict:** APPROVE
+**New mandatory findings:** 0
+**New non-blocking findings:** 3
+
+**Test count:** 200 ADO-suite (18 + 181 + 1) — EECOM's claim VERIFIED. Grand total 212 passing.
+
+**Mirror byte-identity:** PASS — all 4 locations for both `fold-squad-state.yml` and
+`bootstrap-cross-repo.ps1` have identical SHA-256 hashes.
+
+**Idempotency test:** PASS (32.3 s, real pwsh execution, no regressions from stderr-capture additions).
+
+---
+
+**Non-blocking findings summary:**
+- NB1: Gate 15 (`not.toContain('LAST_PUBLISHED_AT')`) has false-positive risk if a comment
+  mentioning the banned variable is added to the YAML.
+- NB2: Gate 16 (`toContain('.[].inboxRef')`) can be satisfied by a YAML comment containing the
+  string even if the functional jq code is removed.
+- NB3: Gate 18 checks variable existence (`$cloneOutput`, `$redactedOutput`) but does not verify
+  that `$redactedOutput` is the variable actually emitted in the `Write-Error` call — correctness
+  bypass possible without tripping the guard.
+
+All three are refinement items. None block merge.

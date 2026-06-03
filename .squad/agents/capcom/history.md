@@ -10,6 +10,8 @@ For historical archive (Phase A, pieces 1–18): see `.squad/agents/capcom/histo
 
 ## Recent Team Updates
 
+📌 **Team update (2026-06-02 — Piece 30 Revision-3 Review):** CAPCOM reviewed EECOM's revision (commit 3c6c9edf). Verdict: APPROVE-WITH-NITS. M_NEW_1 fully resolved. Prior N2 (sort tie-breaker) also resolved as a side-effect. Prior N1 (foldCommit wrong SHA) and N3 (prune-all-refs scope) persist as non-blocking carry-forward; not re-escalated. Zero new mandatory findings. See `.squad/reviews/piece-30-revision3-capcom.md`.
+
 📌 **Team update (2026-06-03 — Piece 30 Follow-On Revision):** Piece-30 follow-on findings addressed in commit 3c6c9edf by EECOM. M_NEW_1 (fold timestamp→ref-membership) fixed; ref-name membership now checks `.[].inboxRef` in publish-history.json, eliminating drop-on-tie defect.
 
 📌 **Team update (2026-06-02 — Piece 30 Revision Follow-On Review):** CAPCOM participated in 3-reviewer follow-on adversarial review of Booster's revision (commit a9da5453). Verdict: REJECT. 1 new mandatory finding: inline fold script uses timestamp-based skip logic that silently drops inbox refs on clock skew or same-second ties — fix requires ref-name membership check against publish-history.json instead of timestamp comparison. Prior M1 + M2 fully RESOLVED. 3 new non-blocking findings noted.
@@ -140,3 +142,15 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 **Sync mirror story confirmed sound:** `sync-templates.mjs` `collectFiles()` recurses into subdirectories correctly. The `ado/` subdirectory mirror story required no script changes and produced byte-for-byte mirror parity at all three mirror targets. This is a stable pattern for future subdirectory additions under `.squad-templates/`.
 
 **Pipeline variable documentation debt:** ADO pipeline templates that reference `$(variable)` expressions not in the `variables:` block should include a comment block listing all required external variables. Without this, teams get silent substitution with empty strings in ADO, which surfaces as confusing runtime errors rather than clear "variable not set" messages. This is a template authoring convention to enforce for all future ADO templates.
+
+## Learnings — Piece 30 Revision-3 (EECOM's ref-membership pattern)
+
+**Ref-membership pattern is correct and sufficient.** EECOM's `jq -r '.[].inboxRef // empty'` extraction followed by `grep -qxF "$REF"` membership guard is the right approach for idempotent fold enumeration. Key properties that make it correct: (1) `%(refname:short)` produces `origin/squad/inbox/<alias>/<session>` at both write time (when the fold records `inboxRef`) and read time (when `ALL_REFS` is populated), so the same string is compared in both directions; (2) `grep -qxF` requires a full-line exact match, preventing partial-path false positives; (3) the `[ -n "$FOLDED_REFS" ]` guard before the grep call handles the empty-set case without spawning a grep process over an empty string.
+
+**`jq empty` as a malformed-JSON guard is the right validator.** `jq empty` exits non-zero for invalid JSON and produces no output for valid JSON. Running it before the extraction query (rather than combining them) is cleaner: the guard step is explicit and its intent is legible. Future fold-logic revisions should preserve this two-step pattern: validate first, extract second.
+
+**The sort-key column-count must track the field count.** Booster's original used a two-field key and `cut -f2`; EECOM's addition of a third field (developerAlias) required updating to `cut -f3`. When adding fields to a tab-separated sort key, always update the `cut -f` index. This is a latent correctness trap in bash pipeline templates — the mismatch produces wrong results silently (it cuts the wrong field, not an error).
+
+**`|| true` on membership extraction after a validated file is safe but noisy.** After `jq empty` succeeds (file is valid JSON), a `|| true` on the extraction line is defensive but misleading — it implies the extraction can fail in ways the validation doesn't catch. In practice it cannot for well-formed JSON. Acceptable as defense-in-depth (extraction failure → empty FOLDED_REFS → fold everything, which is the safe-side default), but reviewers should note the intent.
+
+**foldCommit field naming remains unresolved (carry-forward).** The history entry's `foldCommit` field captures `git rev-parse "$REF"` (inbox commit SHA) rather than `git rev-parse HEAD` after the fold commit (squad-state commit SHA). This makes fold provenance tracing harder. The fix — capture HEAD after commit — is trivial. Should be addressed in a future cleanup piece before publish-history.json accumulates many entries with the wrong SHA type.

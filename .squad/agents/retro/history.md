@@ -34,3 +34,5 @@
 
 **Key patterns:** All git subprocess calls use `execFileSync` with array arguments (no shell). Remote names validated against `listRemotes()` output before use. Hook templates use literal refspec concatenation with proper quoting. SQUAD_SYNC_ACTIVE env guard prevents recursion. No cross-repo privilege escalation vectors. Charset allowlists for all user-controlled git identifiers (callsigns, aliases, remote names).
 
+
+📌 **Team update (2026-06-03 — Piece 30 Phase B Convergence):** Piece-30 converged on branch after round-3 adversarial review (CAPCOM + FIDO both approved). EECOM's revision resolved RETRO M_NEW_1 (clone stderr PAT redaction). No further revisions needed. Branch ready for Phase C (PR review).

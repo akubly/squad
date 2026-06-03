@@ -34,3 +34,5 @@
 
 **Key systems:** squad-ci.yml (6 jobs, 585 lines), squad-npm-publish.yml (preflight job added), smoke-test pattern (npm pack + vitest), lockfile validation (nested dependency detection), template-sync.test.ts (SHA-256 parity gates).
 
+
+📌 **Team update (2026-06-03 — Piece 30 Phase B Convergence):** Piece-30 converged on branch after round-3 adversarial review (CAPCOM + FIDO both approved). EECOM cross-trained follow-on revision addressed all blocking findings. No further revisions needed. Branch ready for Phase C (PR review).

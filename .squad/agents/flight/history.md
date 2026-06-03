@@ -78,3 +78,5 @@ All 23 acceptance-checklist items PASS. Both mutation tests confirm guards have 
 
 **Archive location:** Detailed learnings from pieces 02–27 available in history-archive.md (removed during summarization to keep active history focused on recent pieces and systemically important patterns).
 
+
+📌 **Team update (2026-06-03 — Piece 30 Phase B Convergence):** Piece-30 converged on branch after round-3 adversarial review (CAPCOM + FIDO both approved). Both mandatory finding chains (CAPCOM M_NEW_1 + RETRO M_NEW_1) fully resolved by EECOM revision. No further revisions needed. Branch ready for Phase C (PR review).
