@@ -21,6 +21,10 @@
  *  12. bootstrap-cross-repo.ps1 has an alias-empty guard before first write
  *  13. bootstrap-cross-repo.ps1 has a DocsRepoUrl null/empty guard before first write
  *  14. bootstrap-cross-repo.ps1 has URL-scheme allowlist validation (RETRO M3 fix)
+ *  15. fold-squad-state.yml does NOT contain LAST_PUBLISHED_AT timestamp comparison (CAPCOM M_NEW_1 regression guard)
+ *  16. fold-squad-state.yml uses .[].inboxRef ref-name membership check (CAPCOM M_NEW_1 fix)
+ *  17. bootstrap-cross-repo.ps1 git clone captures stderr with 2>&1 (RETRO M_NEW_1 fix)
+ *  18. bootstrap-cross-repo.ps1 applies URL redaction to captured clone error output (RETRO M_NEW_1 fix)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -147,6 +151,23 @@ describe('fold-squad-state.yml', () => {
       'fold-squad-state.yml must not call "squad fold" — fold logic is inlined as git plumbing per piece 28/30 spec'
     ).not.toMatch(/squad\s+fold\b/);
   });
+
+  it('does NOT contain LAST_PUBLISHED_AT timestamp comparison (CAPCOM M_NEW_1 regression guard)', () => {
+    // The old timestamp-based skip caused silent data loss on clock skew and same-second ties.
+    // The fix replaces the scalar LAST_PUBLISHED_AT variable with ref-name membership.
+    expect(
+      raw,
+      'fold-squad-state.yml must not use LAST_PUBLISHED_AT timestamp comparison to skip inbox refs (data-loss bug on clock skew/tie)'
+    ).not.toContain('LAST_PUBLISHED_AT');
+  });
+
+  it('uses .[].inboxRef ref-name membership check against publish-history.json (CAPCOM M_NEW_1 fix)', () => {
+    // Must read .[].inboxRef from publish-history.json to determine what has already been folded.
+    expect(
+      raw,
+      'fold-squad-state.yml must contain .[].inboxRef membership check — the idempotency key for the fold pipeline'
+    ).toContain('.[].inboxRef');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -186,6 +207,30 @@ describe('bootstrap-cross-repo.ps1', () => {
     expect(
       hasSchemeCheck,
       'bootstrap-cross-repo.ps1 must validate DocsRepoUrl scheme against an allowlist (https://, ssh://, git@) before git clone'
+    ).toBe(true);
+  });
+
+  it('git clone captures stderr with 2>&1 (RETRO M_NEW_1 — PAT-in-URL stderr leak fix)', () => {
+    // git clone failure emits the raw URL (with any embedded PAT) to stderr.
+    // Must capture stderr with 2>&1 before any error is surfaced to pipeline logs.
+    expect(
+      raw,
+      'bootstrap-cross-repo.ps1 must use 2>&1 on git clone to capture stderr and prevent PAT-in-URL leak on failure'
+    ).toMatch(/git\s+clone\b[^\n]*2>&1/);
+  });
+
+  it('applies URL redaction to captured clone error output (RETRO M_NEW_1 — defense in depth)', () => {
+    // Must capture clone output in a variable AND apply URL-redaction regex to that variable
+    // before emitting any error — not just on the Write-Host display path.
+    const hasCaptureVar = /\$cloneOutput\s*=/.test(raw);
+    const hasRedactionVar = /\$redactedOutput/.test(raw);
+    expect(
+      hasCaptureVar,
+      'bootstrap-cross-repo.ps1 must capture git clone output in $cloneOutput'
+    ).toBe(true);
+    expect(
+      hasRedactionVar,
+      'bootstrap-cross-repo.ps1 must apply URL redaction to captured output via $redactedOutput before emitting error'
     ).toBe(true);
   });
 });

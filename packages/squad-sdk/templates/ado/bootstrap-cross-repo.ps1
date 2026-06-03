@@ -98,7 +98,15 @@ if (Test-Path $TeamRoot) {
     Write-Host "[1/5] TEAM_ROOT sidecar clone already exists at $TeamRoot — skipping clone."
 } else {
     Write-Host "[1/5] Cloning docs repo to TEAM_ROOT sidecar at $TeamRoot ..."
-    git clone -- "$DocsRepoUrl" "$TeamRoot"
+    $cloneOutput = & git clone -- $DocsRepoUrl $TeamRoot 2>&1
+    $cloneExitCode = $LASTEXITCODE
+    if ($cloneExitCode -ne 0) {
+        # Redact any embedded credentials in the captured output before emission.
+        $redactedOutput = ($cloneOutput | Out-String) -replace '://[^@/\s]+@', '://***@'
+        $redactedOutput = $redactedOutput -replace [regex]::Escape($DocsRepoUrl), ($DocsRepoUrl -replace '://[^@/]+@', '://***@')
+        Write-Error "[1/5] git clone failed (exit $cloneExitCode). Sanitized output: $redactedOutput"
+        exit 1
+    }
     Write-Host "      Clone complete."
 }
 
@@ -118,7 +126,15 @@ if ($existingRemotes -contains $DocsRemoteName) {
     Write-Host "[3/5] Remote '$DocsRemoteName' already configured — skipping remote add."
 } else {
     Write-Host "[3/5] Adding remote '$DocsRemoteName' → $($DocsRepoUrl -replace '://[^@/]+@', '://***@') ..."
-    git -C "$WorkRoot" remote add "$DocsRemoteName" "$DocsRepoUrl"
+    $remoteAddOutput = & git -C $WorkRoot remote add $DocsRemoteName $DocsRepoUrl 2>&1
+    $remoteAddExitCode = $LASTEXITCODE
+    if ($remoteAddExitCode -ne 0) {
+        # Redact any embedded credentials in the captured output before emission.
+        $redactedRemoteOutput = ($remoteAddOutput | Out-String) -replace '://[^@/\s]+@', '://***@'
+        $redactedRemoteOutput = $redactedRemoteOutput -replace [regex]::Escape($DocsRepoUrl), ($DocsRepoUrl -replace '://[^@/]+@', '://***@')
+        Write-Error "[3/5] git remote add failed (exit $remoteAddExitCode). Sanitized output: $redactedRemoteOutput"
+        exit 1
+    }
     Write-Host '      Remote added.'
 }
 

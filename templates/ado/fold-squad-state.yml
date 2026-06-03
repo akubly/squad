@@ -85,12 +85,27 @@ steps:
         git commit -m "chore: initialize squad-state branch"
       fi
 
-      # Step 2: Determine last-folded publishedAt from history
-      LAST_PUBLISHED_AT=""
+      # Step 2: Load the set of already-folded inbox ref names from publish-history.json.
+      # Uses ref-name membership (not timestamp comparison) — immune to clock skew and
+      # same-second tie collisions that cause silent data loss with a scalar timestamp cutoff.
+      # Edge cases:
+      #   - File absent (first fold ever): treated as empty set; fold all refs.
+      #   - File present but empty ([]):  treated as empty set; fold all refs.
+      #   - File present but malformed:   abort with error to prevent data loss.
+      FOLDED_REFS=""
       if [ -f "$HISTORY_FILE" ]; then
-        LAST_PUBLISHED_AT=$(jq -r '.[-1].publishedAt // empty' "$HISTORY_FILE" 2>/dev/null || true)
+        if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
+          echo "::error::$HISTORY_FILE contains malformed JSON — aborting fold to prevent data loss."
+          exit 1
+        fi
+        FOLDED_REFS=$(jq -r '.[].inboxRef // empty' "$HISTORY_FILE" 2>/dev/null || true)
       fi
-      echo "Last folded publishedAt: ${LAST_PUBLISHED_AT:-(none — first fold)}"
+      if [ -n "$FOLDED_REFS" ]; then
+        FOLDED_COUNT=$(printf '%s\n' "$FOLDED_REFS" | grep -c .)
+      else
+        FOLDED_COUNT=0
+      fi
+      echo "Already-folded refs in publish-history.json: ${FOLDED_COUNT}"
 
       # Collect all remote inbox refs
       mapfile -t ALL_REFS < <(
@@ -103,23 +118,32 @@ steps:
       fi
       echo "Found ${#ALL_REFS[@]} inbox ref(s)."
 
-      # Step 3: Build sort list (skip already-folded refs)
+      # Step 3: Build sort list — skip any ref already recorded in publish-history.json.
+      # Sort key: publishedAt (primary), developerAlias (tie-breaker per spec §3),
+      # ref name (tertiary, for full stability).
+      # Refs missing publish-metadata.json are skipped with a warning (skip-and-continue
+      # chosen over abort so one malformed branch cannot block folding of valid refs).
       SORT_LIST=()
       for REF in "${ALL_REFS[@]}"; do
-        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || echo '{}')
-        REF_PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty' 2>/dev/null || true)
-
-        # Skip refs whose publishedAt is on-or-before the last fold timestamp
-        if [ -n "$LAST_PUBLISHED_AT" ] && [ -n "$REF_PUB_AT" ]; then
-          if [[ "$REF_PUB_AT" < "$LAST_PUBLISHED_AT" ]] || [[ "$REF_PUB_AT" == "$LAST_PUBLISHED_AT" ]]; then
-            echo "  Skipping $REF (publishedAt=$REF_PUB_AT <= last=$LAST_PUBLISHED_AT)"
-            continue
-          fi
+        # Membership guard: skip if this inbox ref name already appears in publish-history.json.
+        # This is the idempotency key — re-running against an already-folded ref is a no-op.
+        if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
+          echo "  Skipping $REF (already recorded in publish-history.json)"
+          continue
         fi
 
-        # Sort key: publishedAt if available, else ref name for deterministic ordering
-        SORT_KEY="${REF_PUB_AT:-$REF}"
-        SORT_LIST+=("${SORT_KEY}"$'\t'"${REF}")
+        META_JSON=$(git show "${REF}:.squad/publish-metadata.json" 2>/dev/null || true)
+        if [ -z "$META_JSON" ] || [ "$META_JSON" = '{}' ]; then
+          echo "  Warning: $REF has no publish-metadata.json — skipping (older provenance or malformed branch)."
+          continue
+        fi
+
+        REF_PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // empty' 2>/dev/null || true)
+        ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // empty' 2>/dev/null || true)
+
+        # Sort key: publishedAt primary, developerAlias secondary, ref name tertiary (for stability)
+        SORT_KEY="${REF_PUB_AT:-}"$'\t'"${ALIAS:-}"$'\t'"$REF"
+        SORT_LIST+=("$SORT_KEY")
       done
 
       if [ "${#SORT_LIST[@]}" -eq 0 ]; then
@@ -128,7 +152,7 @@ steps:
       fi
 
       # Sort by key, extract ref names in deterministic order
-      mapfile -t SORTED_REFS < <(printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f2)
+      mapfile -t SORTED_REFS < <(printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f3)
 
       echo "Folding ${#SORTED_REFS[@]} ref(s) in order:"
       for R in "${SORTED_REFS[@]}"; do echo "  $R"; done
