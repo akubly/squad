@@ -1514,3 +1514,100 @@ None.
   bypass possible without tripping the guard.
 
 All three are refinement items. None block merge.
+
+---
+
+### 2026-06-02: Dogfood Findings — Handbook (Handbook Agent)
+
+# Dogfood Findings — Handbook (2026-06-02)
+
+> Source: Handbook dogfood runbook authorship — code read of bind.ts, sync.ts, cli-entry.ts.
+> These are shipping defects found by static analysis, not future test ideas.
+
+---
+
+## Finding 1 — `publishTeamRootToInbox` is never called from `runSync` (S0)
+
+**File:** `packages/squad-cli/src/cli/commands/sync.ts`  
+**Lines:** 425–497 (`runSync`), 812–926 (`publishTeamRootToInbox`)
+
+`runSync` dispatches to `syncPull` (fast-forward squad-state branches) and `syncPush`
+(push squad-state branches). It never calls `publishTeamRootToInbox`. The ADO pipeline
+`publish-inbox.yml` executes `squad sync --push`, which triggers `syncPush` — pushing
+squad-state branches to the remote instead of creating inbox branches. Piece 28's inbox
+publish flow exists as exported functions but has no path from the CLI.
+
+**Reproduction:** `squad sync --push --developer dev1` — observe no `squad/inbox/*` ref
+created on the remote; only squad-state branches are pushed (or none if there are no
+local squad-state branches).
+
+**Suggested fix:** `runSync` should call `publishTeamRootToInbox` (with resolved
+teamRoot from config.json and a live sessionId) when direction is `push` or
+`publish-only` and a cross-repo config is detected (config.json has `stateRemote`).
+
+---
+
+## Finding 2 — `stateBackend` not written to config.json by `squad bind` (S1)
+
+**File:** `packages/squad-cli/src/cli/commands/bind.ts` (line 231-246, config object)  
+**Interacts with:** `packages/squad-cli/src/cli/commands/sync.ts:170-177` (`detectBackend`)
+
+`runBind` builds a `SquadDirConfig` object that does not include `stateBackend`.
+`detectBackend()` in sync.ts reads `config.stateBackend` and returns `null` when the
+field is absent. `runSync` then bails with "no remote sync needed" before performing
+any git operations.
+
+**Reproduction:** run `squad bind <url> --state-remote squad-docs`, then
+`squad sync --pull` — observe "backend is 'local' — no remote sync needed".
+
+**Suggested fix:** `runBind` should write `stateBackend: 'orphan'` into config.json
+when wiring up a cross-repo configuration (i.e. when `teamRepoUrl` is provided and
+`stateRemote` is configured).
+
+---
+
+## Finding 3 — `hydrateTeamRootFromStateRef` never called from `runSync` (S1)
+
+**File:** `packages/squad-cli/src/cli/commands/sync.ts`  
+**Lines:** 477–490 (runSync pull path), 708–748 (`hydrateTeamRootFromStateRef`)
+
+`syncPull` fast-forwards squad-state branches in WORK_ROOT. It does not populate the
+TEAM_ROOT (sidecar) working directory. `hydrateTeamRootFromStateRef` exists and is
+exported but is never invoked from the CLI dispatch path. After `squad sync --pull`,
+the sidecar directory is empty.
+
+**Suggested fix:** `runSync` (pull path) should read `teamRoot` from config.json and
+call `hydrateTeamRootFromStateRef(teamRoot, remote, stateBranch)` after `syncPull`.
+
+---
+
+## Finding 4 — `SQUAD_DEVELOPER_ALIAS` env var silently ignored (S1)
+
+**File:** `packages/squad-cli/src/cli/commands/sync.ts:453-466`  
+**Related:** `.squad-templates/ado/publish-inbox.yml:58`
+
+The publish-inbox ADO pipeline sets `env: SQUAD_DEVELOPER_ALIAS: $(developerAlias)`.
+`runSync` resolves the alias as: `options.developer` (CLI `--developer` flag) then
+`syncConfig?.developerAlias` (config.json). It does not check `process.env['SQUAD_DEVELOPER_ALIAS']`.
+Any pipeline run without an explicit `--developer` flag will fail with
+"developer alias required" even when `SQUAD_DEVELOPER_ALIAS` is set.
+
+**Suggested fix:** Add `process.env['SQUAD_DEVELOPER_ALIAS']` as a third fallback
+in the alias resolution chain (after config.json, before "missing alias" error).
+
+---
+
+## Finding 5 — `developerAlias` not validated at bind time (S2)
+
+**File:** `packages/squad-cli/src/cli/commands/bind.ts` (config write, no validation)  
+**Regex defined at:** `packages/squad-cli/src/cli/commands/sync.ts:504`
+
+`runBind` accepts any string for `developerAlias` and writes it to config.json without
+validating against `DEVELOPER_ALIAS_RE` (`^[a-z][a-z0-9-]{0,38}$`). An alias like
+`DEV_1` or `MyAlias` is silently persisted. The validation error only surfaces later
+when `publishTeamRootToInbox` is called, with no indication that the alias came from
+config.json or bind.
+
+**Suggested fix:** Apply `DEVELOPER_ALIAS_RE` validation in `runBind` before writing
+config.json, and emit a clear error pointing at the `--developer-alias` flag.
+

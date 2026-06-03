@@ -1,4 +1,4 @@
-# FIDO
+# FIDO — History (Summarized 2026-06-02)
 
 > Flight Dynamics Officer
 
@@ -6,7 +6,29 @@
 
 Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPECTED_FEATURES, EXPECTED_SCENARIOS, etc.) MUST stay in sync with files on disk. When reviewing PRs with CI failures, always check if dev branch has the same failures — don't block PRs for pre-existing issues. 3,931 tests passing, 149 test files, ~89s runtime.
 
-📌 **Team update (2026-06-02 — Piece 30 Revision-3 Follow-on Review, commit 3c6c9edf):** FIDO ran round-3 mutation-test pass on EECOM's 4 new regression guards. Verdict: APPROVE. 0 new mandatory findings. 3 new non-blocking findings: (NB1) Gate 15 `not.toContain('LAST_PUBLISHED_AT')` has false-positive risk from YAML comments mentioning the banned variable; (NB2) Gate 16 `toContain('.[].inboxRef')` can be satisfied by a comment rather than functional jq code; (NB3) Gate 18 checks variable existence (`$cloneOutput`, `$redactedOutput`) but not that `$redactedOutput` is the variable emitted in Write-Error — correctness bypass possible. Test count 200 (18+181+1 ADO suites) and 212 grand total both VERIFIED. Mirror byte-identity PASS: `fold-squad-state.yml` hash 65223D35… and `bootstrap-cross-repo.ps1` hash FD6B5FD7… identical across all 4 locations. Idempotency test PASS (32.3 s real pwsh).
+Full historical record (pieces 1–24 and foundational work) archived in `history-archive.md`.
+
+## Current Sprint — Pieces 27–30 Reviews
+
+📌 **Team update (2026-06-02 — Piece 30 Revision-3 Follow-on Review, commit 3c6c9edf):** FIDO ran round-3 mutation-test pass on EECOM's 4 new regression guards. Verdict: APPROVE. 0 new mandatory findings. 3 new non-blocking findings: gate false-positive risk on comment lines, variable-existence guards insufficient for correctness. Test count 200 (18+181+1 ADO suites) and 212 grand total verified. Mirror byte-identity PASS. Idempotency test PASS (32.3 s real pwsh).
+
+📌 **Team update (2026-06-02 — Piece 30 Follow-On Revision):** Piece-30 follow-on findings addressed in commit 3c6c9edf by EECOM. Test count 196→200 (+4 regression guards); Gate 8 net +2; mirrors byte-identical.
+
+📌 **Team update (2026-06-02 — Piece 30 Revision Follow-On Review):** FIDO participated in 3-reviewer follow-on adversarial review of Booster's revision (commit a9da5453). Verdict: APPROVE. 0 new mandatory findings. 2 new non-blocking findings. Mirror byte-identity PASS; test count 196 verified. Ready to merge.
+
+## Key Patterns This Sprint
+
+- **`not.toContain` on raw file text is vulnerable to comment false-positives.** Filter out comment lines before asserting patterns on functional code.
+- **Positive `toContain` guards satisfied by comments (comment bypass).** Asserts like `toContain('.[].inboxRef')` pass even if the string only appears in a comment. Filter comments or use regex excluding comment lines.
+- **Variable-existence guards ≠ correctness guards.** Asserting `$redactedOutput` exists doesn't prove it's used in the error-emission path. For security-sensitive redaction, assert `Write-Error[^\n]*\$redactedOutput` to confirm the redacted variable is emitted.
+- **indexOf-with-colon pattern for spawn-variable ordering assertions** doubles as rename-detection guard. If variable name changes, indexOf returns -1, failing the check before ordering even runs.
+- **Lookbehind-based negative guards** (e.g., `(?<!never|must not)` before a grant phrase) effectively detect accidental permission drift in templates.
+- **Stray .tmp files** from sync-templates.mjs can break template-sync tests. Always check for and clean untracked artifacts.
+- **Source-reading tests are not execution tests.** Regex scan confirming a guard pattern exists does not verify it fires at runtime or is ordered correctly. Require execution tests for behavioral idempotency.
+- **`$ErrorActionPreference = 'Stop'` does NOT apply to native commands in pwsh.** Must check `$LASTEXITCODE` explicitly or set PS 7.3+ `$PSNativeCommandUseErrorActionPreference = $true`.
+- **Fixture path must match script-computed path exactly.** Mismatch causes the step to run anyway, leaving guards unexercised.
+- **EXPECTED_FEATURES gate is behind Astro-build gate.** Adding a feature to EXPECTED_FEATURES is correct, but gate is inoperative without Astro installed.
+
 
 📌 **Team update (2026-06-03 — Piece 30 Follow-On Revision):** Piece-30 follow-on findings addressed in commit 3c6c9edf by EECOM. Test count 196→200 (+4 regression guards in ado-templates.test.ts); Gate 8 net +2; mirrors byte-identical across 4 locations.
 

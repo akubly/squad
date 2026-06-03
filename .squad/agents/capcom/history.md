@@ -1,12 +1,12 @@
-# CAPCOM — History
+# CAPCOM — History (Summarized 2026-06-02)
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
 ## Summary
 
-This history tracks SDK architecture review, contract validation, and cross-repo patterns for pieces 19–30 and Phase B foundational work. Key learnings: template-only pieces need behavioral test assertions for CLI command existence and trigger-repo alignment; fold pipeline pattern requires set-membership for idempotent enumeration, not timestamp comparison; canonical callsign validation must be shared through SDK barrel, not copied inline.
+This history tracks SDK architecture review, contract validation, and cross-repo patterns for pieces 25–30 of the current sprint. Full historical record (phases A and earlier pieces) archived in `history-archive.md`.
 
-For historical archive (Phase A, pieces 1–18): see `.squad/agents/capcom/history-archive.md`.
+**Key learnings this sprint:** Timestamp-based skip logic causes data loss on clock skew; use set-membership by stable identifier instead. Template-only pieces need command-existence assertions (test that CLI commands the pipeline calls are registered). Cross-repo pipeline triggers must match repo boundaries (inbox branches in TEAM_ROOT, but publish pipeline in WORK_ROOT). Ref-membership pattern using `jq empty` + `grep -qxF` is the correct idempotent fold enumeration strategy. Tab-separated sort keys must update `cut -f` index when adding fields, or results fail silently.
 
 ## Recent Team Updates
 
