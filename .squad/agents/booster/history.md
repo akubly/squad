@@ -4,6 +4,8 @@
 
 ## Team Updates
 
+📌 **Team update (2026-06-03 — Piece 30 Revision, commit a9da5453):** Booster (as implementer) completed full revision addressing all 9 mandatory findings from 5-reviewer adversarial panel. Key deliverables: (1) fold-squad-state.yml completely rewritten — `squad fold` replaced with 150-line inline bash+jq plumbing (subcommand doesn't exist); (2) publish-inbox.yml trigger fixed — removed erroneous `include: squad/inbox/**` clause; (3) persistCredentials/batch added; (4) bootstrap-cross-repo.ps1 hardened with URL scheme allowlist, `--` clone separator, PAT redaction; (5) new ado-bootstrap-idempotency.test.ts (execution-based, pwsh-guarded); (6) ado-templates.test.ts expanded 9→14 assertions; (7) docs typos and terminology fixed. 196 tests pass; scrub Gate 1 pre-existing baseline (no new violations).
+
 📌 **Team update (2026-06-02T22:35:00Z — Piece 30 Adversarial Review):** Booster conducted CI/CD-focused adversarial review of piece 30 ADO templates (commit 10168051); verdict: REJECT. Identified 2 mandatory findings: (1) no `batch: true` on fold trigger — concurrent inbox pushes cause race condition with non-fast-forward rejection, (2) missing `persistCredentials: true` in publish checkout — OAuth token lost before `squad sync --push`. Additional 5 non-blocking observations on documentation, test isolation, error handling. Consolidated to REJECT verdict by Flight.
 
 📌 **Team update (2026-06-02T21:55:00Z — Piece 30 ADO Templates Complete):** CI/CD: ADO pipeline templates now canonical at `.squad-templates/ado/` — `publish-inbox.yml` is no-PR-trigger gate, `fold-squad-state.yml` is sole-writer to squad-state. All mirrored to templates/, CLI, SDK via sync-templates.mjs (recursive subdir support). 190 tests pass; scrub gates 2,5–9 pass.
