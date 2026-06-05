@@ -237,6 +237,10 @@
     "./copilot-payload": {
       "types": "./dist/copilot-payload.d.ts",
       "import": "./dist/copilot-payload.js"
+    },
+    "./validation": {
+      "types": "./dist/validation.d.ts",
+      "import": "./dist/validation.js"
     }
   },
   "files": [

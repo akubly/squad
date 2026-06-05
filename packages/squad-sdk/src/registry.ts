@@ -14,6 +14,11 @@ export interface RegistryEntry {
   status?: 'active' | 'inactive';
   initUri?: string;
   stateBackend?: 'worktree' | 'local' | 'external';
+  /** Git remote name used for state synchronisation. Default: `'origin'` when absent. */
+  stateRemote?: string;
+  /** Git branch name used for state synchronisation. Default: `'squad-state'` when absent. */
+  stateBranch?: string;
+  developerAlias?: string;
   [key: string]: unknown;
 }
 
@@ -142,8 +147,29 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
     entry.stateBackend = value['stateBackend'] as 'worktree' | 'local' | 'external';
   }
 
+  if (value['stateRemote'] !== undefined) {
+    if (typeof value['stateRemote'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} stateRemote must be a string.`);
+    }
+    entry.stateRemote = value['stateRemote'];
+  }
+
+  if (value['stateBranch'] !== undefined) {
+    if (typeof value['stateBranch'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} stateBranch must be a string.`);
+    }
+    entry.stateBranch = value['stateBranch'];
+  }
+
+  if (value['developerAlias'] !== undefined) {
+    if (typeof value['developerAlias'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} developerAlias must be a string.`);
+    }
+    entry.developerAlias = value['developerAlias'];
+  }
+
   // Preserve unknown forward-compatible fields for round-trip fidelity.
-  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend']);
+  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'developerAlias']);
   for (const [key, val] of Object.entries(value)) {
     if (!knownFields.has(key)) {
       entry[key] = val;

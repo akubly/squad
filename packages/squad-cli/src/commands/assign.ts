@@ -25,6 +25,7 @@ import { getTemplatesDir } from '../cli/core/templates.js';
 import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
+import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */
@@ -223,7 +224,8 @@ export type AssignErrorCode =
   | 'ERR_ASSIGN_CALLSIGN_COLLISION'
   | 'ERR_ASSIGN_CLONE_FAILED'
   | 'ERR_ASSIGN_NO_TEAM_MD'
-  | 'ERR_ASSIGN_INVALID_SKILLS_SOURCE';
+  | 'ERR_ASSIGN_INVALID_SKILLS_SOURCE'
+  | 'INVALID_ALIAS';
 
 /** Structured error thrown by runAssign — carries a typed error code. */
 export class AssignError extends ConfigurationError {
@@ -273,6 +275,12 @@ export interface SquadAssignOpts {
   getRemoteUrls?: (dir: string) => string[];
   /** @internal Injectable seam: override registry write. For testing failure paths only. */
   _writeRegistryFn?: (filePath: string, registry: Registry) => void;
+  /** --state-remote <name>: git remote name for state operations. */
+  stateRemote?: string;
+  /** --state-branch <name>: orphan branch holding folded canonical state. */
+  stateBranch?: string;
+  /** --developer-alias <alias>: per-developer namespace identifier for inbox branches. */
+  developerAlias?: string;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -316,6 +324,14 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   const remotesFn = opts.getRemoteUrls ?? collectCwdRemoteUrls;
   const cloneFn = opts.cloneCommand ?? _defaultCloneCommand;
   const writeRegistryFn = opts._writeRegistryFn ?? writeRegistry;
+
+  // Guard 0: Validate developerAlias format before any registry read.
+  if (opts.developerAlias !== undefined && !DEVELOPER_ALIAS_RE.test(opts.developerAlias)) {
+    throw new AssignError(
+      'INVALID_ALIAS',
+      `Invalid --developer-alias "${opts.developerAlias}": must match /${DEVELOPER_ALIAS_RE.source}/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+    );
+  }
 
   // Early validation: --skills-from must be a recognized keyword or an existing local directory.
   // This runs before any registry write so a bad source leaves no side effects.
@@ -367,7 +383,7 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   }
 
   // Warm path.
-  return _warmPath({ callsign: rawArg, opts, resolvedTargetDir, gitRootFn, remotesFn });
+  return _warmPath({ callsign: rawArg, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn });
 }
 
 interface _WarmCtx {
@@ -376,10 +392,11 @@ interface _WarmCtx {
   resolvedTargetDir: string;
   gitRootFn: (dir: string) => string | null;
   remotesFn: (dir: string) => string[];
+  writeRegistryFn: (filePath: string, registry: Registry) => void;
 }
 
 async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
-  const { callsign, opts, resolvedTargetDir, gitRootFn, remotesFn } = ctx;
+  const { callsign, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn } = ctx;
   const warnings: string[] = [];
 
   const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
@@ -520,6 +537,10 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     // Defensive dedup at write boundary: deduplicate origins regardless of source.
     origins: Array.from(new Set([...existingOrigins, ...originsToAdd])),
     ...(wasInactive ? { status: 'active' as const } : {}),
+    // Additive merge: opts values win when supplied; existing entry values preserved when omitted.
+    ...(opts.stateRemote !== undefined ? { stateRemote: opts.stateRemote } : {}),
+    ...(opts.stateBranch !== undefined ? { stateBranch: opts.stateBranch } : {}),
+    ...(opts.developerAlias !== undefined ? { developerAlias: opts.developerAlias } : {}),
   };
 
   const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
@@ -529,7 +550,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   };
 
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
-  writeRegistry(registryFilePath, newRegistry);
+  writeRegistryFn(registryFilePath, newRegistry);
 
   // Install Copilot payload after successful registry write.
   let coordinatorInstalled = false;
@@ -686,6 +707,10 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     // Defensive dedup at write boundary: deduplicate origins regardless of source.
     origins: Array.from(new Set([...existingOrigins, ...originsToAdd])),
     ...(reactivating ? { status: 'active' as const } : {}),
+    // Additive merge: opts values win when supplied; existing entry values preserved when omitted.
+    ...(opts.stateRemote !== undefined ? { stateRemote: opts.stateRemote } : {}),
+    ...(opts.stateBranch !== undefined ? { stateBranch: opts.stateBranch } : {}),
+    ...(opts.developerAlias !== undefined ? { developerAlias: opts.developerAlias } : {}),
   };
 
   const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
