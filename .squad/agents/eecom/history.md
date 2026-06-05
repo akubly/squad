@@ -8,26 +8,28 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active
 
-### Piece 19 — Copilot payload orchestration (2026-05-19T22:30:35Z)
-🔐 **Reviewer Lockout Applied.** EECOM authored piece 19 (Copilot payload load + callsign extraction + frontmatter rewriting). Adversarial review cycle: Flight ✅ (spec parity), FIDO ❌ (coverage gaps), CAPCOM ❌ (contract/security). GNC + CAPCOM (Round 2) completed revision under lockout. Blocker fixes: symlink-safe copy, `assertValidCallsign` guard, `CopilotPayloadError` wrapping, 3 FIDO test gaps. Final: `2377c3a8` (amended), 143/143 tests GREEN, build CLEAN. ✅ Ship approved to dev.
+### Piece 25.5 — Doctor-cleanup test regression repair (2026-06-04)
 
-### Piece 18 — doctor enhancements (2026-05-19)
-Extended `runDoctor` with registry health checks (empty clones, clone-path ambiguity, origin overlap); `runDoctorNormalize` for dedup; `runDoctorPurge` for removal. Key: `_pickSurvivor` (active status → clone count → registry order). Merge insertion preserves order. Tests 28/28 GREEN. Gotcha: normalize test dirs avoid case collisions on Windows.
+**Branch:** `akubly/upstream-25.5-doctor-cleanup-test-regression-repair.md`  
+**Commit:** `e3456eb2` (amended from 515ade7a for version drift)
 
-### Piece 17 — fuzzy-match utility (2026-05-18)
-`levenshteinDistance` (two-row DP, Unicode-safe) and `suggestSimilar` (linear scan, stable tie-break). Tests 24/24 GREEN. Gotcha: vitest config `include` glob must expand for new paths.
+Six sub-proposals shipped (A–G) fixing test regressions and upstream-divergence issues. Key decisions: fix-code over adjust-test (assign.ts error message, removing stale `squad register` substring that collided with test exclusion regex); adjust-test when tests tracked fork-introduced bugs (platform-adapter fallback from 'unknown' to 'github'); test quality fix (consult.test.ts registry isolation guard). Build green, gates baseline-only (pre-existing failures verified, no new violations). See `.squad/decisions.md` → 2026-06-04 for full patterns.
 
-### Piece 16 — squad init refactor (2026-05-18)
-Dropped URL positional; added `--target-dir`, `--registry-path`, `--no-register`. Reactivates inactive entries. Scaffold/symlink logic split. Tests 28/28 GREEN (10 unit + 26 integration). Gotcha: integration tests need `npm run build` first.
+### Piece 25 — Resolver rename and CLI hardening (2026-05-28)
 
-### Piece 15 — squad unassign (2026-05-18)
-Demote-not-delete semantics. Last-clone removal → `status: 'inactive'`. Origin refcounting via `normalizeRemoteUrl`. Revision F1–F8 applied. Tests 67/67 GREEN.
+**Commit:** `185617e51e215dfbf59415a688ff9e1b9fd9a9af` (EECOM revision)
 
-### Piece 09 Revision (2026-05-15)
-Moved `resolveWatchStartupSquadDir` to internal startup.ts. Build CLEAN, 5/5 tests GREEN.
+Folded approved nits: CONTROL N1 typed internal `resolveSquad` alias as `typeof resolveSquadDir`; FIDO N2 added `@ts-expect-error` renderFinding exhaustiveness regression; FIDO N3 refreshed stale comments. Gates green after controlling known nested SDK dependency skew; test baseline matches piece-25 review. Revision complete; EECOM locked out by Flight.
 
-### Piece 10 Revision (2026-05-15)
-Addressed all 6 blocking test gaps + 3 guard gaps. Unified init validation routing. Build CLEAN, 28/28 tests GREEN.
+### Piece 24 — SDK adapter OTel typing (2026-05-27)
+
+**Commit:** `0325a335` (FIDO nit resolution)
+
+Addressed N1–N4: setAttribute/isRecording assertions; startActiveSpan arity coverage (2,3,4-arg forms); restored Tracer/Meter type annotations by widening OTelSpanLike surface; fixed lifecycle.ts indent. Key surprise: TypeScript covariant return type check catches recordException → OTelSpanLike vs real Span → void. Final: ~+53 net LOC. Gates: all pass.
+
+### Piece 23 Revision (2026-05-27)
+
+Addressed F1, F4, N1, N2: Added `.git`-absent test; renamed `hasCopilot` → `agentEnabled`; fixed qrcode-terminal.d.ts export; added env seam to `resolveSquadDir`. Skipped F2 (false-positive on filename convention) and F3 (audit-trail churn not worth cosmetic gain). Final: ~+30 net LOC.
 
 ## Team Updates — Recent
 
@@ -124,9 +126,40 @@ Gate 1 & 2 scrub-gate baseline contamination — pre-existing on all Phase B pie
 
 **Gates:** tsc ✅, build ✅, lint ✅, otel-provider.test.ts 24/24 ✅, otel-agent-traces.test.ts 10/10 ✅. Full suite pre-existing flakiness (vitest worker timeouts) unchanged.
 
+### Piece 25.5 — Doctor-cleanup test regression repair (2026-06-04)
+
+**Branch:** `akubly/upstream-25.5-doctor-cleanup-test-regression-repair.md`  
+**Commit:** `515ade7a`  
+**Staged set:** 13 files — cli-entry.ts, ralph-commands.ts, detect.ts, assign.ts, doctor.ts, 3 test files, consult.test.ts, changeset, 3 package.json files.
+
+**Sub-proposals shipped:**
+- **A** — Static `import type { DoctorFinding }` + dynamic `import('./cli/commands/init-remote.js')` call in `init --mode remote` branch.
+- **B** — Doctor section labels (`System doctor`, `Registry doctor`), `Squad Doctor` header, `Summary:` prefix, registry-only exit code via `deriveExitCode(registryFindings)`.
+- **C** — `git rev-parse --git-dir` precondition in consult handler; prints `Not a git repository` and exits 1 outside a repo.
+- **D** — `case 'planner': return getPlannerRalphCommands()` in `getRalphScanCommands` switch; parameter widened to `PlatformType | WorkItemSource`.
+- **E** — `detectPlatformFromUrl` returns `'github'` (not `'unknown'`) for unrecognized hosts; `detectWorkItemSource` catch also returns `'github'`.
+- **F** — Removed stale `squad register` substring from `assign.ts` error message so test regex passes (fix-code decision).
+- **G** — doctor.ts invalid-callsign crash fixed (filter valid callsigns before `diagnoseCopilotPayload` + try/catch); platform-adapter test expectations updated for `'github'` fallback; resolution-v2 registry path corrected (`.squad/registry.json` not `.config/squad/registry.json`); consult.test.ts `SQUAD_REGISTRY_PATH` isolation added to happy-path describe.
+
+**Patterns learned:**
+
+*Stale local node_modules shadow workspace symlinks.* When a package has both a junction at the root `node_modules/@scope/pkg` and a real directory at `packages/consuming-pkg/node_modules/@scope/pkg`, Node.js prefers the local copy. ALL tests that spawn child processes hit the stale copy and crash. Fix: delete the stale local copy; do not commit node_modules. Detection: compare `require.resolve('@scope/pkg')` output in a spawned process vs the workspace path.
+
+*Unwired-command defect class.* A command can be fully implemented but never reach that code because the router `if (cmd === 'X')` block is absent or unreachable. Always cross-reference the spec's command list against the router's branching table. The presence of the `./cli/commands/X.js` module does NOT prove the command is wired.
+
+*System-vs-registry exit-code separation.* Doctor has two independent finding sources: system checks (`.squad/` structure, config existence) and registry checks (callsign health, clone validity). System findings report informational status and must NEVER drive a non-zero exit. Only registry findings trigger `deriveExitCode`. Mixing both into a single `findings` array and calling `deriveExitCode` on all of them causes false-positive exit-2 for projects with no registry problems.
+
+*Registry isolation in spawn-based tests.* Tests that spawn CLI processes (`runSquad`, `execSync`) and use a real registry path will pollute the registry on first run. On subsequent runs, stale callsign entries cause `ERR_SQUAD_INIT_CALLSIGN_EXISTS` failures in beforeEach setups. Fix: always add `SQUAD_REGISTRY_PATH: join(testRoot, 'isolated-registry.json')` to the env override when the test does any `init` operation.
+
+*Parallel test suite resource contention.* Tests that spawn child processes or run multi-step git operations (state-backend, init-scaffolding, human-journeys) take 15–200s each in isolation. In a full 241-file parallel suite they interfere and timeout. These are environment/resource-contention flakes, not logic failures. Verified upstream-inherited via `git show origin/dev:<file>` (same source, same behavior). Document in commit body; do not inflate the failure count.
+
+**Final test counts:** 3 consistent failures (scheduler LocalPollingProvider, acceptance Init-existing-project, team-root-resolution invalid-SQUAD_TEAM_ROOT) — all acknowledged upstream-inherited. Build clean.
+
+**Scrub gate:** Gates 2–6 PASS. Gate 1 reports pre-existing baseline violations (Squad's own `/casting/`, `/identity/`, `orchestration-log` template files match strip-list pattern — accepted false-positives per decisions-archive.md; none introduced by this piece).
+
 ## Archive
 
-Older context (pieces 1–8, Q1 2026) in `history-archive.md`: template sync patterns, cherry-pick conflicts, loop command refactors, pre-Phase B lifecycle.
+Older context (pieces 9–19, Q1–Q2 2026) archived to `history-archive.md`: Copilot payload orchestration, doctor enhancements, fuzzy-match utility, squad init refactor, squad unassign, and pre-Phase B lifecycle patterns.
 
 ---
 
@@ -141,4 +174,7 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 
 **Piece 24 Rev Complete — All FIDO Nits Closed (2026-05-27T22:35Z)**  
 ✅ All items (N1–N5) addressed. Stack ready for Brady flow. See `.squad/decisions.md` → 2026-05-27 EECOM entry for full details. Commit `0325a335` passed all gates. Lockout on piece-24 lapses when this rev is accepted.
+
+📌 **2026-06-04 Piece 25.5 Complete — Doctor-Cleanup Test Regression Repair**  
+✅ Six sub-proposals shipped (A–G). Explicit decisions documented: fix-code over adjust-test (assign.ts error message, correcting stale substring that collided with test exclusion regex); adjust-test when tests tracked fork-introduced bugs (platform-adapter fallback from 'unknown' to 'github'); test quality fix (consult.test.ts registry isolation guard). Commit `e3456eb2` (amended from 515ade7a for version drift). Build green, gates baseline-only. See `.squad/decisions.md` → 2026-06-04 for full decision patterns.
 
