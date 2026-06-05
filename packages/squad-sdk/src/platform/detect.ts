@@ -129,14 +129,14 @@ export function normalizeRemoteUrl(url: string): string {
 /**
  * Detect platform type from git remote URL string.
  * Returns 'github' for github.com remotes, 'azure-devops' for ADO remotes,
- * or 'unknown' for unrecognized hosts.
+ * or 'github' as the default for unrecognized hosts.
  */
 export function detectPlatformFromUrl(url: string): PlatformType {
   if (/github\.com/i.test(url)) return 'github';
   if (/dev\.azure\.com/i.test(url) || /\.visualstudio\.com/i.test(url) || /ssh\.dev\.azure\.com/i.test(url)) {
     return 'azure-devops';
   }
-  return 'unknown';
+  return 'github';
 }
 
 /**
@@ -202,8 +202,7 @@ export function detectPlatform(repoRoot: string): PlatformType {
  * Detect work-item source for hybrid setups.
  * When a squad config specifies `workItems: 'planner'`, work items come from
  * Planner even though the repo is on GitHub or Azure DevOps.
- * Returns 'unknown' when platform detection fails so callers get an explicit
- * signal rather than a silent GitHub default that may be wrong for ADO repos.
+ * Returns 'github' as the safe default when platform detection fails.
  */
 export function detectWorkItemSource(
   repoRoot: string,
@@ -212,9 +211,9 @@ export function detectWorkItemSource(
   if (configWorkItems === 'planner') return 'planner';
   try {
     const platform = detectPlatform(repoRoot);
-    return platform === 'unknown' ? 'unknown' : platform;
+    return platform === 'unknown' ? 'github' : platform;
   } catch {
-    return 'unknown';
+    return 'github';
   }
 }
 

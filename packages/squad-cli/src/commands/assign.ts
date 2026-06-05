@@ -400,7 +400,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     const suggestion = _findCloseMatch(callsign, allCallsigns);
     throw new AssignError(
       'ERR_ASSIGN_UNKNOWN_CALLSIGN',
-      `No squad registered as "${callsign}".` +
+      `No squad found with callsign "${callsign}".` +
       (suggestion ? `\n  Did you mean "${suggestion}"?` : '') +
       '\n  Run "squad list" to see registered squads.',
     );

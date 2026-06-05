@@ -350,8 +350,8 @@ describe('resolveSquad() — registry-path precedence', () => {
   });
 
   it('resolves registry from platform default path when neither opts.registryPath nor SQUAD_REGISTRY_PATH is set', () => {
-    scaffold('.git', 'team', 'team/.squad', 'fake-home/.config/squad');
-    const defaultRegistryFile = dir('fake-home', '.config', 'squad', 'registry.json');
+    scaffold('.git', 'team', 'team/.squad', 'fake-home/.squad');
+    const defaultRegistryFile = dir('fake-home', '.squad', 'registry.json');
     writeRegistry(defaultRegistryFile, [{ callsign: 'foxtrot', path: dir('team', '.squad') }]);
 
     const result = resolveSquad({

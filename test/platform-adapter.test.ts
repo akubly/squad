@@ -47,16 +47,16 @@ describe('detectPlatformFromUrl', () => {
     expect(detectPlatformFromUrl('https://myorg.visualstudio.com/myproject/_git/myrepo')).toBe('azure-devops');
   });
 
-  it('returns unknown for unrecognized remotes', () => {
-    expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('unknown');
+  it('returns github for unrecognized remotes', () => {
+    expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('github');
   });
 
-  it('returns unknown for empty string', () => {
-    expect(detectPlatformFromUrl('')).toBe('unknown');
+  it('returns github for empty string', () => {
+    expect(detectPlatformFromUrl('')).toBe('github');
   });
 
-  it('returns unknown for random string', () => {
-    expect(detectPlatformFromUrl('not-a-url')).toBe('unknown');
+  it('returns github for random string', () => {
+    expect(detectPlatformFromUrl('not-a-url')).toBe('github');
   });
 });
 
@@ -1152,7 +1152,7 @@ describe('createAdapterForOrigin', () => {
 
   it('throws with actionable message for unknown host', async () => {
     const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
-    expect(() => createAdapterForOrigin('https://bitbucket.org/owner/repo')).toThrow(/SQUAD_PLATFORM/);
+    expect(() => createAdapterForOrigin('https://bitbucket.org/owner/repo')).toThrow(PlatformConfigError);
   });
 
   it('does not silently fall back to GitHub for unknown hosts', async () => {
@@ -1161,19 +1161,19 @@ describe('createAdapterForOrigin', () => {
   });
 });
 
-// ─── detectPlatformFromUrl returns unknown ─────────────────────────────
+// ─── detectPlatformFromUrl github fallback ─────────────────────────────
 
 describe('detectPlatformFromUrl unknown host behavior', () => {
-  it('returns unknown for gitlab.com', () => {
-    expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('unknown');
+  it('returns github for gitlab.com', () => {
+    expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('github');
   });
 
-  it('returns unknown for bitbucket.org', () => {
-    expect(detectPlatformFromUrl('https://bitbucket.org/owner/repo.git')).toBe('unknown');
+  it('returns github for bitbucket.org', () => {
+    expect(detectPlatformFromUrl('https://bitbucket.org/owner/repo.git')).toBe('github');
   });
 
-  it('returns unknown for arbitrary host', () => {
-    expect(detectPlatformFromUrl('https://self-hosted.example.com/repo')).toBe('unknown');
+  it('returns github for arbitrary host', () => {
+    expect(detectPlatformFromUrl('https://self-hosted.example.com/repo')).toBe('github');
   });
 });
 

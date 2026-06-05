@@ -317,14 +317,20 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
 
   // Orphaned user-scoped payload entries
   const copilotHome = opts.copilotHome ?? path.join(os.homedir(), '.copilot');
-  const knownCallsigns = entries.map(e => e.callsign).filter((c): c is string => !!c);
-  const { orphans } = diagnoseCopilotPayload({ knownCallsigns, copilotHome });
-  for (const orph of orphans) {
-    findings.push(
-      `Orphan ${orph.kind} payload: "${orph.pathOnDisk}" belongs to callsign "${orph.callsign}" ` +
-      `which is not in the registry. Run "squad assign ${orph.callsign}" to re-bind, or remove manually.`,
-    );
-    escalate('warn');
+  const knownCallsigns = entries
+    .map(e => e.callsign)
+    .filter((c): c is string => !!c && /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(c));
+  try {
+    const { orphans } = diagnoseCopilotPayload({ knownCallsigns, copilotHome });
+    for (const orph of orphans) {
+      findings.push(
+        `Orphan ${orph.kind} payload: "${orph.pathOnDisk}" belongs to callsign "${orph.callsign}" ` +
+        `which is not in the registry. Run "squad assign ${orph.callsign}" to re-bind, or remove manually.`,
+      );
+      escalate('warn');
+    }
+  } catch {
+    // Payload diagnosis is best-effort; suppress errors to keep the doctor non-fatal.
   }
 
   return { severity, findings };

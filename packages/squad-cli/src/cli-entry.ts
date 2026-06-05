@@ -100,6 +100,7 @@ import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
 import { runCost } from './cli/commands/cost.js';
 import { getPackageVersion } from './cli/core/version.js';
 import { resolveSquadDir } from './cli/core/squad-resolver.js';
+import type { DoctorFinding } from './cli/commands/doctor-types.js';
 
 // Lazy-load squad-sdk to avoid triggering @github/copilot-sdk import on Node 24+
 // (Issue: copilot-sdk has broken ESM imports - vscode-jsonrpc/node without .js extension)
@@ -382,6 +383,12 @@ async function main(): Promise<void> {
         stateBackend: initStateBackend,
         remoteTeamPath,
       });
+
+      if (mode === 'remote' && remoteTeamPath) {
+        const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
+        await writeRemoteConfig(resolvedTargetDir, remoteTeamPath);
+      }
+
       const ok = noColor ? 'OK' : `${GREEN}✔${RESET}`;
       if (result.registered) {
         console.log(`${ok} Initialized and registered: ${result.registered.callsign} → ${result.registered.path}`);
@@ -1057,30 +1064,46 @@ async function main(): Promise<void> {
     const systemFindings = findings.filter(f => f.source === 'system');
     const registryFindings = findings.filter(f => f.source === 'registry');
 
+    console.log('Squad Doctor');
     if (systemFindings.length > 0) {
-      console.log(noColor ? '=== System ===' : `${BOLD}=== System ===${RESET}`);
+      console.log(noColor ? 'System doctor' : `${BOLD}System doctor${RESET}`);
       for (const f of systemFindings) renderFinding(f, noColor);
     }
     if (registryFindings.length > 0) {
-      console.log(noColor ? '\n=== Registry ===' : `\n${BOLD}=== Registry ===${RESET}`);
+      console.log(noColor ? '\nRegistry doctor' : `\n${BOLD}Registry doctor${RESET}`);
       for (const f of registryFindings) renderFinding(f, noColor);
     }
 
-    const exitCode = deriveExitCode(findings);
+    const registryExitCode = deriveExitCode(registryFindings);
     const warnCount = findings.filter(f => f.severity === 'warn').length;
     const errorCount = findings.filter(f => f.severity === 'error').length;
-    console.log(`\n${passCount} passed, ${errorCount} errors, ${warnCount} warnings`);
+    console.log(`\nSummary: ${passCount} passed, ${errorCount} errors, ${warnCount} warnings`);
 
-    // Exit code: error → 2, else 0. Warnings go to stderr.
-    if (exitCode === 2) process.exit(2);
+    // Exit code driven by registry findings only — system findings are diagnostic.
+    if (registryExitCode === 2) process.exit(2);
     return;
   }
 
   if (cmd === 'consult') {
     const showStatus = args.includes('--status');
     if (!showStatus) {
+      // Check git repository presence before squad resolution.
+      const startDir = getSquadStartDir();
+      let isGitRepo = false;
+      try {
+        const { execSync: _execSync } = await import('node:child_process');
+        _execSync('git rev-parse --git-dir', { cwd: startDir, stdio: ['pipe', 'pipe', 'pipe'] });
+        isGitRepo = true;
+      } catch {
+        isGitRepo = false;
+      }
+      if (!isGitRepo) {
+        console.error('Not a git repository');
+        process.exit(1);
+        return;
+      }
       // Resolution is the precondition for setup and dry-run modes.
-      if (!sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env })) {
+      if (!sdkResolveSquadDir({ cwd: startDir, env: process.env })) {
         fatal(
           'No squad found.\n' +
             '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',

@@ -191,11 +191,14 @@ describe('CLI: squad consult', { timeout: 30_000 }, () => {
   describe('happy path: init global → consult → status → extract', () => {
     const globalConfig = join(TEST_ROOT, 'xdg-config');
     const projectDir = join(TEST_ROOT, 'their-project');
+    // Isolate registry so repeated runs don't accumulate stale callsign entries
+    const isolatedRegistry = join(TEST_ROOT, 'isolated-registry.json');
     const envWithGlobal = {
       XDG_CONFIG_HOME: globalConfig,
       // On Windows, resolveGlobalSquadPath() reads APPDATA, not XDG_CONFIG_HOME
       APPDATA: globalConfig,
       LOCALAPPDATA: globalConfig,
+      SQUAD_REGISTRY_PATH: isolatedRegistry,
     };
 
     beforeEach(() => {

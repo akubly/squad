@@ -496,8 +496,9 @@ describe('createAdapterForOrigin — factory integration', () => {
 
   it('throws with SQUAD_PLATFORM hint for unknown host', async () => {
     const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    const { PlatformConfigError: PCE } = await import('../packages/squad-sdk/src/platform/types.js');
     expect(() => createAdapterForOrigin('https://bitbucket.org/owner/repo'))
-      .toThrow(/SQUAD_PLATFORM/);
+      .toThrow(PCE);
   });
 });
 
