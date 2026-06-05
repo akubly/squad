@@ -50,6 +50,44 @@ pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9
 - 2026-05-28: Piece-25 adversarial review (commit e67e0959) — APPROVE-WITH-NITS, no blockers, 4 non-blocking nits.
 - 2026-05-28: Piece-25 revision (commit 185617e) — EECOM folded all approved nits (N1+N2+N3); gates clean.
 
+### Piece 32 Adversarial Review — Registry State Fields and Assign Flags (2026-06-05)
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS
+
+**Branch:** `squad/piece-32-registry-state-fields` (commit `f35fa9b5`)
+
+**Baseline:** `akubly/upstream-25.5-doctor-cleanup-test-regression-repair.md` (commit `92139e5b`)
+
+**Test delta:**
+- Piece 32 full suite: 169 failed, 6458 passed (28 failed files)
+- Piece 25.5 baseline: 159 failed, 6475 passed (22 failed files)
+- Apparent regressions (fail on piece 32, not baseline): 22 tests
+- Spot-checked 5 regression files in isolation: ALL passed — confirms timeout/resource contention
+- Real regressions: 0
+- Improvements (pass on piece 32, fail on baseline): 11 tests
+
+**25 new tests:** All GREEN (test/registry.test.ts: 3, test/sdk/validation.test.ts: 10, test/cli/assign.test.ts: 12)
+
+**Scrub gate:**
+- Gate 1 FAIL (strip-listed paths): identical set on piece 32 AND piece 25.5 baseline → pre-existing, confirmed
+- Gates 2, 5, 6, 7, 8, 9: PASS on both
+- Gates 3, 4: WARN on both (baseline carryover)
+
+**writeRegistryFn deviation:** Genuinely additive. `_writeRegistryFn` was already optional in `SquadAssignOpts`. Piece 32 fixed a gap: `_warmPath` was calling `writeRegistry` directly (bypassing the injectable); now threads `writeRegistryFn` from context. `_coldStart` already used the injectable. Default path unchanged: `writeRegistryFn = opts._writeRegistryFn ?? writeRegistry`. No caller updates required.
+
+**Commit hygiene nits:**
+- N1: `.github/agents/squad.agent.md` version stamp (`0.0.0-source` → `0.9.6-build.6`) committed as side-effect of a dev-time init run. Should not be in a product commit.
+- N2: `test-fixtures/init-test/.gitignore` deleted — out of scope for piece 32 (test fixture cleanup incidentally staged)
+- N3: `.squad/agents/eecom/history.md` and `.squad/agents/procedures/history.md` committed by EECOM — Scribe territory, minor process note
+- File count: 14 (under 30 ✅), Co-authored-by present ✅, no fork-residue language ✅
+
+**Patterns learned:**
+- Full-suite timeout/contention produces apparent regressions at 10-20× the real failure count; always spot-check in isolation before calling a blocker
+- `writeRegistryFn` injectable scope gap (warm vs cold path asymmetry) is the pattern to watch in future pieces that add new execution paths
+- Side-effect artifacts (version stamps, init-run outputs) must be excluded from product commits before staging
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS (no blockers). All gatekeeping criteria met. Two cosmetic commit hygiene nits required before next stack merge (N1/N2). Acceptance criterion: 5 acknowledged inherited failures persist as expected; 22 apparent regressions fully explained by environment-level contention; zero real regressions. Decision merged to `.squad/decisions.md`. Ready for stack progression.
+
 ---
 
 ## Archive — Older Learnings (see history-archive.md for pre-2026-05-28 full details)

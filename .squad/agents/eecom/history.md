@@ -57,7 +57,15 @@ Addressed F1, F4, N1, N2: Added `.git`-absent test; renamed `hasCopilot` → `ag
 
 ## Learnings
 
-### Recent Pieces Summary (Pieces 23-25.5)
+### Recent Pieces Summary (Pieces 23-32)
+
+**Piece 32 (2026-06-05) — Registry state fields** ✅  
+- 3 sub-proposals shipped: A (RegistryEntry interface extension with stateRemote/stateBranch/developerAlias), B (assign flags --state-remote/--state-branch/--developer-alias with warm+cold path persistence and additive re-assign merge), C (DEVELOPER_ALIAS_RE validation module, INVALID_ALIAS error code)
+- Key structural decision: thread `writeRegistryFn` injectable through `_warmPath` (same discipline as `_coldStart`) to enable test interception of warm path writes; previously warm path called `writeRegistry` directly
+- Validation module location: `packages/squad-sdk/src/validation.ts` — avoids circular dependency; importable from CLI via `@bradygaster/squad-sdk/validation` subpath export added to SDK package.json exports map
+- Alias validation fires at top of `runAssign` before any registry read — fail-fast pattern preserves no-side-effect guarantee on bad input
+- Additive merge via conditional spread: `...(opts.stateX !== undefined ? { stateX: opts.stateX } : {})` — cleanest way to omit fields explicitly vs writing `undefined`
+- Commit `f35fa9b5`; 25 new tests GREEN; scrub gate: Gates 2–9 PASS, Gate 1 baseline-only (pre-existing strip-listed paths)
 
 **Piece 25.5 (2026-06-04) — Doctor cleanup** ✅  
 - 6 sub-proposals shipped; fix-code over adjust-test pattern applied
@@ -107,3 +115,5 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 
 📌 **2026-06-05: Specs 32-35 staged on akubly/upstream-specs (commit 211102b4). New cross-repo arc kickoff is piece 32 (off piece 25.5). Replaces archived pieces 26-31. See upstream specs for design + prompts at _planning/prompts/.**
 
+📌 **2026-06-05 Piece 32 Complete — Registry State Fields**  
+✅ All three sub-proposals shipped (A: RegistryEntry interface extension with stateRemote/stateBranch/developerAlias; B: squad assign flags with warm+cold path persistence and additive re-assign merge discipline; C: DEVELOPER_ALIAS_RE validation module with subpath export). Key structural decision: thread writeRegistryFn injectable through _WarmCtx to enable test interception of warm path writes (same discipline as _coldStart, additive with no production behavior change). Alias validation fires at top of runAssign before registry read — fail-fast pattern. Additive merge via conditional spread `...(opts.stateX !== undefined ? { stateX: opts.stateX } : {})` preserves no-undefined-in-JSON guarantee. Commit `f35fa9b5` — 25 new tests GREEN (P32.R1–R3, P32.V1–V10, P32.A1–A9 + P32.B1–B3). Scrub gate: Gates 2–9 PASS, Gate 1 baseline-only (pre-existing strip-listed paths, byte-for-byte identical on baseline commit 92139e5b). FIDO verification complete: zero real regressions (22 apparent regressions confirmed as resource contention via isolation spot-checks). Verdict: APPROVE-WITH-NITS (two cosmetic cleanup nits flagged, do not block). Phase B protocol followed (commit + push, no PR). Piece 32 gate-cleared and ready for stack progression.

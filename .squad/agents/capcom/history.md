@@ -2,6 +2,8 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
+📌 **Team update (2026-06-05T12:54:00Z — Piece 32 Adversarial Review Complete):** CAPCOM conducted adversarial contract review of piece 32 (registry state fields, commit `f35fa9b5`). Core hypothesis: re-assign preservation mechanism verified SAFE on both warm and cold paths. Verification: (1) `...entry` spread precedes conditional overwrites, existing values survive when options absent; (2) test P32.A5 confirmed as genuine disk round-trip (writeRegistry → loadRegistryFromDisk → validate). Findings: 4 nits (maintenance risk on package.json indentation, spec defect on INVALID_ALIAS error code convention, coverage gap for cold-start re-assign test, doc placement issue on validation JSDoc). No blockers. Verdict: **APPROVE-WITH-NITS**. Decision drop merged to `.squad/decisions.md`.
+
 📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
 
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
@@ -96,3 +98,26 @@ The specific smell to watch for is writer/reader/doctor triple-divergence: once 
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+### 2026-06-05: Piece 32 adversarial contract review — registry state fields
+
+Performed peer-adversarial SDK contract review of piece 32 (stateRemote/stateBranch/developerAlias on RegistryEntry; `--state-remote`/`--state-branch`/`--developer-alias` on `squad assign`; `DEVELOPER_ALIAS_RE` extracted to `packages/squad-sdk/src/validation.ts` with `./validation` subpath export).
+
+**Key findings:**
+
+- **Re-assign preservation (H1): CORRECT.** Both `_warmPath` and `_coldStart` spread the existing entry first (`...entry` / `...baseEntry`) before applying conditional state-field overrides. Preservation test P32.A5 is a genuine disk round-trip, not a mock-only test.
+
+- **package.json export map (H2): VALID, COSMETICALLY BROKEN.** JSON is structurally valid (node-confirmed). `./validation` is correctly placed as a sibling export. `dist/validation.js` and `.d.ts` exist. However, brace indentation around lines 240–245 is shifted relative to every other export entry — visually implies nesting that does not exist.
+
+- **Error code convention (H4): SPEC MANDATES INCONSISTENCY.** `INVALID_ALIAS` breaks the `ERR_ASSIGN_*` prefix pattern shared by all other assign error codes. Spec errata should rename to `ERR_ASSIGN_INVALID_ALIAS` before any piece-33/34/35 consumer hard-codes the bare name.
+
+- **Coverage gap:** Cold-start re-assign preservation has no test. Code is correct; scenario is missing (reactivating cold-start with existing stateRemote → re-assign without flag → assert preservation).
+
+- **Doc concern:** `validation.ts` JSDoc mentions `'origin'`/`'squad-state'` defaults that belong to piece-33 consumer semantics, not the SDK validation module.
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS. Decision drop at `.squad/decisions/inbox/capcom-piece-32-adversarial.md`.
+
+**SDK contract patterns reinforced:**
+- Subpath export contract = `package.json` export map entry + tsconfig coverage + dist file existence. All three must be verified independently.
+- Additive merge on registry entries requires `...existingEntry` spread as the FIRST element of the new-entry object literal. Order matters — later spreads silently override earlier ones.
+- Error code naming in a typed union (`AssignErrorCode`) creates a forward-compat surface. Convention breaks in the union propagate to every downstream switch statement. Name before first consumer.

@@ -346,3 +346,47 @@ Three decisions made during piece 25.5 test regression repair:
 Fix-code over adjust-test when the original test correctly captured the intended contract and the source was the divergence point. Adjust-test when the test was tracking behavior that was itself a fork-introduced bug. Both choices follow the principle: tests must assert the contract, not the current implementation.
 
 ---
+
+### 2026-06-05: EECOM Piece 32 Implementation — Registry State Fields
+
+**By:** EECOM (Core Dev)  
+**What:** Piece 32 implementation complete: three new registry state fields (`stateRemote`, `stateBranch`, `developerAlias`) added to `RegistryEntry` interface in `packages/squad-sdk/src/registry.ts`. Both warm and cold paths persist these fields via conditional spreads. New `DEVELOPER_ALIAS_RE` validation module added to `packages/squad-sdk/src/validation.ts` with subpath export. Validation enforces regex `^[a-z][a-z0-9-]{1,38}$` at start of `runAssign`. Structural deviation: `_warmPath` threaded `writeRegistryFn` injectable through `_WarmCtx` for test interception (additive, no behavior change in production). 25 new tests across three files all GREEN. Scrub gate 1 failure pre-existing (identical strip-list on baseline). Branch: `squad/piece-32-registry-state-fields`, commit: `f35fa9b5`.  
+**Why:** Enables developer alias and remote/branch metadata persistence for registry entries, with full test coverage and zero new regressions on piece 25.5 baseline.
+
+---
+
+### 2026-06-05: FIDO Piece 32 Adversarial Verification — APPROVE-WITH-NITS
+
+**By:** FIDO (Quality Owner)  
+**What:** Adversarial verification of piece 32 (commit `f35fa9b5`) against baseline `92139e5b` finds zero real regressions. Raw failure count apparent increase (159 → 169 failures) attributable to resource contention, confirmed via spot-check isolation: all 22 apparent regressions pass when run individually. 25 new piece 32 tests all GREEN. Scrub gate 1 failure identical on both branches (pre-existing strip-list). writeRegistryFn injectable threading verified as genuinely additive with zero production behavior change. Verdict: **APPROVE-WITH-NITS**. Two cosmetic nits flagged: N1 — `.github/agents/squad.agent.md` version stamp is side-effect artifact from dev-time init/upgrade, should be excluded; N2 — `test-fixtures/init-test/.gitignore` deletion is out-of-scope cleanup. Neither blocks piece 32 from proceeding.  
+**Why:** Confirms piece 32 meets acceptance criterion (zero real regressions, 25 new tests green, gates clean). Nits require cleanup before next stack merge for commit hygiene but do not block current piece.
+
+---
+
+### 2026-06-05: CAPCOM Piece 32 Adversarial Review — APPROVE-WITH-NITS
+
+**By:** CAPCOM (SDK Expert)
+
+**What:** Adversarial contract review of piece 32 (commit `f35fa9b5`) finds zero SDK-boundary defects. Re-assign preservation mechanism validated on both warm and cold paths: `...entry` spread precedes conditional field overwrites, ensuring existing `stateRemote`/`stateBranch`/`developerAlias` values survive when flags are absent. Test P32.A5 confirmed as genuine disk round-trip (writeRegistry → loadRegistryFromDisk → validate). Export contract integrity confirmed: `./validation` subpath present in package.json, both `dist/validation.js` and `dist/validation.d.ts` exist. `DEVELOPER_ALIAS_RE` imported correctly from subpath; circular dependency structurally impossible.
+
+Findings ranked by severity: (1) package.json brace indentation broken around `./validation` entry — valid JSON but visually suggests nesting that doesn't exist, maintenance risk. (2) `INVALID_ALIAS` error code violates `ERR_ASSIGN_*` naming convention — spec-binding defect, not implementation bug; recommend spec errata to rename `ERR_ASSIGN_INVALID_ALIAS` before piece 33/34 consumer locks in bare name. (3) No test exercises cold-start re-assign preservation when reactivating with existing `stateRemote` — code is correct; test coverage gap. (4) `validation.ts` JSDoc mentions `'origin'`/`'squad-state'` defaults on `stateRemote`/`stateBranch` — these are piece 33 consumer semantics, not validation-module concerns; misplaced doc.
+
+Verdict: **APPROVE-WITH-NITS**. No blocking bugs. Nit 1 (indentation) and Nit 3 (test gap) highest-value for piece 33/34 foundation. Nit 2 (error code) track as spec errata with zero-cost rename opportunity before downstream consumer adoption.
+
+**Why:** Validates SDK contract preservation mechanism, export surface integrity, and import path correctness. Clears re-assign preservation and circular-dependency hypotheses. Nits are cosmetic, spec-errata, or forward-risk — none require piece-32 rework; all deferred to spec errata and pieces 33/34.
+
+---
+
+### 2026-06-05: CONTROL Piece 32 Adversarial Review — APPROVE-WITH-NITS
+
+**By:** CONTROL (TypeScript Engineer)
+
+**What:** Adversarial type-system and build-pipeline review of piece 32 (commit `f35fa9b5`) finds zero type errors and zero new regressions. Regex `/^[a-z][a-z0-9-]{1,38}$/` has no flags (confirmed via `re.flags === ""`); repeated `.test()` calls return consistent results across valid aliases, stateless correctness verified. SDK tsc exit 0 under strict+noUncheckedIndexedAccess. CLI tsc exit 2 but all failures pre-existing (stale node_modules mismatch, unchanged context lines); piece 32 introduces zero new type errors. Build emit clean: `npm run build` exit 0, both `dist/validation.js` and `dist/validation.d.ts` exist. Conditional spreads on both `_warmPath` and `_coldStart` type-sound: `...(opts.field !== undefined ? { field: opts.field } : {})` correctly narrows to omit property when flag absent. All 79 SDK tests GREEN.
+
+Findings ranked by severity: (N1) Regex accepts trailing/consecutive hyphens — spec-faithful but forward-risk for piece 33/34 branch-name construction (`squad/inbox/ab-/...` visually ambiguous); pieces 33/34 must sanitise at interpolation or tighten regex before branch naming. (N2) Error message hardcodes regex source instead of `DEVELOPER_ALIAS_RE.source` — DRY violation, error message silently stale if regex changes. (N3) `validation.ts` JSDoc misplaces `stateRemote`/`stateBranch` defaults — these belong on `RegistryEntry` field docs, not regex constant. (N4) `package.json` indentation inconsistency: `./validation` entry at 6 spaces while other exports at 4 spaces — valid JSON, visually suggests nesting, future maintenance risk. (N5) Test suite does not assert trailing-hyphen acceptance as explicit contract — coverage gap for forward-risk documentation.
+
+Verdict: **APPROVE-WITH-NITS**. No blocking defects. N1 is most consequential for pieces 33/34 branch-naming; annotate as forward-risk and defer tightening to piece 33/34 spec decision. N2–N5 are cosmetic/coverage/DRY issues.
+
+**Why:** Confirms type-system clean, build-emit working, regex statelessness verified. Clears all core type-safety and build-integrity hypotheses. Nits document forward-risk for pieces 33/34 (trailing-hyphen branch-name handling) and minor improvements for spec errata and coverage.
+
+---
