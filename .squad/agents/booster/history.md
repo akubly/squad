@@ -178,3 +178,5 @@ Updated both release-process skill files (`.squad/skills/release-process/SKILL.m
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+📌 **2026-06-05: Specs 32-35 staged on akubly/upstream-specs (commit 211102b4). New cross-repo arc kickoff is piece 32 (off piece 25.5). Replaces archived pieces 26-31. See upstream specs for design + prompts at _planning/prompts/.**

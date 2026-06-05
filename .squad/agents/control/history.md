@@ -95,4 +95,9 @@ Flight's proposed `OTelTracerLike` interface uses a variadic generic (`<T>(...ar
 
 ---
 
+---
+
 ## Archive — Older Learnings (see `history-archive.md` for pre-2026-05-27 full details)
+
+📌 **2026-06-05: Specs 32-35 staged on akubly/upstream-specs (commit 211102b4). New cross-repo arc kickoff is piece 32 (off piece 25.5). Replaces archived pieces 26-31. See upstream specs for design + prompts at _planning/prompts/.**
+
