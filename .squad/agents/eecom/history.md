@@ -22,6 +22,21 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces — Phase B Active
 
+### Piece 32 Nit Pass — Export indentation, DRY error message, JSDoc ownership, test coverage (2026-06-05)
+
+**Branch:** `squad/piece-32-registry-state-fields`  
+**Amended commit:** `26c17667` (nit-folded version)
+
+Four nits applied post-adversarial-review:
+- **N1:** `./validation` export indentation in `packages/squad-sdk/package.json` — re-aligned to match siblings
+- **N2:** INVALID_ALIAS error message — replaced hardcoded `/^[a-z][a-z0-9-]{1,38}$/` with `` `.../${DEVELOPER_ALIAS_RE.source}/...` `` for DRY
+- **N3:** JSDoc ownership — removed default-semantics lines from `DEVELOPER_ALIAS_RE`, added to `RegistryEntry` fields
+- **N4:** Test coverage — added P32.V11 (trailing/consecutive-hyphen acceptance per spec), P32.B4 (cold-start preservation)
+
+Working-tree cleanup: reverted noise (package-lock.json, root package.json, .github/agents/squad.agent.md, test-fixtures/init-test/.gitignore). Consolidated .squad logging. Origin isolated: 8 product files, zero .squad/noise. 27/27 piece 32 tests GREEN. Deferred to piece 33: regex tightening and INVALID_ALIAS → ERR_ASSIGN_INVALID_ALIAS rename.
+
+**FIDO verdict:** ✅ APPROVE (re-verification complete, nits verified correct, zero regressions).
+
 ### Piece 25.5 — Doctor-cleanup test regression repair (2026-06-04)
 
 **Branch:** `akubly/upstream-25.5-doctor-cleanup-test-regression-repair.md`  

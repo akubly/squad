@@ -390,3 +390,81 @@ Verdict: **APPROVE-WITH-NITS**. No blocking defects. N1 is most consequential fo
 **Why:** Confirms type-system clean, build-emit working, regex statelessness verified. Clears all core type-safety and build-integrity hypotheses. Nits document forward-risk for pieces 33/34 (trailing-hyphen branch-name handling) and minor improvements for spec errata and coverage.
 
 ---
+
+### 2026-06-05: EECOM Piece 32 Nit Pass — What Was Fixed and What Is Deferred
+
+**By:** EECOM (Core Dev)  
+**Scope:** Post-adversarial-review cleanup; folded into amended product commit `26c17667`
+
+All independent verification checks pass. The nit-fix amend is clean. No regressions.
+
+#### Fixed in This Pass
+
+**(1) `./validation` export indentation in `packages/squad-sdk/package.json`**  
+Re-indented to align with siblings (`"./copilot-payload"`, `"./resolution"`, etc.). JSON remained valid throughout; verified with `node -e "JSON.parse(...)"`.
+
+**(2) INVALID_ALIAS error message — DRY via `DEVELOPER_ALIAS_RE.source`**  
+Replaced hardcoded `/^[a-z][a-z0-9-]{1,38}$/` with `` `.../${DEVELOPER_ALIAS_RE.source}/...` `` so the displayed pattern tracks the live regex. Drift between the message and the actual enforcement pattern is now structurally impossible.
+
+**(3) JSDoc moved to the right owner**  
+Removed from `DEVELOPER_ALIAS_RE` doc block in `packages/squad-sdk/src/validation.ts`: the two lines describing `'origin'`/`'squad-state'` defaults for `stateRemote`/`stateBranch`. Added to `RegistryEntry` in `packages/squad-sdk/src/registry.ts`: brief inline JSDoc on `stateRemote` (`default: 'origin' when absent`) and `stateBranch` (`default: 'squad-state' when absent`).
+
+**(4) Two new tests**  
+P32.V11 (`test/sdk/validation.test.ts`): asserts that `DEVELOPER_ALIAS_RE` currently accepts `"ab-"` and `"a--b"`. Documents the intentional spec-faithful behaviour. Any future tightening will fail this test loudly.
+
+P32.B4 (`test/cli/assign.test.ts`): cold-start re-assign without `--state-remote`/`--state-branch`/`--developer-alias` flags preserves the existing values already on the registry entry.
+
+#### Deferred — Piece 33 Backlog
+
+**Regex tightening: trailing and consecutive hyphens**  
+`DEVELOPER_ALIAS_RE` (`/^[a-z][a-z0-9-]{1,38}$/`) accepts `"ab-"` and `"a--b"`. Tightening is **not** in scope for piece 32. P32.V11 ensures any future tightening is a loud, explicit test change rather than a silent behaviour shift.
+
+**INVALID_ALIAS error code name**  
+The error code `'INVALID_ALIAS'` is mandated by the piece 32 spec. A rename (e.g. to `'ERR_ASSIGN_INVALID_ALIAS'`) is recorded spec-errata for a later piece. The spec mandate takes precedence during piece 32; consistency is a separate concern.
+
+#### Test Result
+
+27 tests GREEN after nit pass: 11 validation, 3 registry, 13 assign.  
+Scrub gate: Gate 1 pre-existing baseline FAIL; Gates 2–9 PASS, no new violations introduced.
+
+**Why:** Four nits addressed (indentation, DRY regex message, JSDoc ownership, test gaps). Working-tree noise reverted. Isolated product commit `26c17667` remains clean on origin (8 files, zero .squad/noise). No regression introduced.
+
+---
+
+### 2026-06-05: FIDO Piece 32 Nit-Fix Re-Verification — APPROVE
+
+**By:** FIDO (Quality Owner)  
+**Amended commit:** `26c17667`
+
+All independent verification checks pass. The nit-fix amend is clean. No regressions.
+
+#### Verification Evidence
+
+**Origin isolation:** `origin/squad/piece-32-registry-state-fields` tip = `26c17667`. Exactly 8 files in diff (no `.squad/` files, no `package-lock.json`, no root `package.json`, no `.github/`, no `test-fixtures`).
+
+**Piece 32 Tests:** 27/27 GREEN — validation 11, registry 3, assign 13.  
+P32.V11 confirmed present: accepts trailing hyphen and consecutive hyphens per spec.  
+P32.B4 confirmed present: cold-start re-assign without state flags preserves existing fields.  
+P32.B4 cold-path soundness: `cloneDir` not created before `runAssign`; state flags omitted; asserts fields preserved. **Test is NOT tautological** — removal of the additive merge operators would cause the test to fail.
+
+**Nit Correctness:**
+- (a) `./validation` export aligns with sibling exports. `node -e "JSON.parse(...)"` returns without error.
+- (b) INVALID_ALIAS error message uses `DEVELOPER_ALIAS_RE.source` — no hardcoded regex pattern.
+- (c) Default-semantics JSDoc on registry fields: `stateRemote` and `stateBranch` have inline defaults. Regex JSDoc in `validation.ts` describes only type/format.
+- (d) Regex `/^[a-z][a-z0-9-]{1,38}$/` unchanged. `'INVALID_ALIAS'` code name unchanged. No deferred items touched.
+
+**Build + Scrub Gate:**  
+SDK builds clean. CLI TypeScript fails with pre-existing errors — reproduced identically on `dev` baseline before piece 32.  
+Scrub gate: Gate 1 FAIL (pre-existing strip-list, byte-for-byte same as parent). Gates 2–9 PASS. Gate 9 (developerAlias format) is new and PASS — directly exercises piece 32 code.
+
+**Regression spot-check:**  
+`test/cli/init.test.ts` — 13/13 PASS.  
+No new failures versus baseline.
+
+#### Final Assessment
+
+All nit fixes verified correct. Origin isolation confirmed. 27/27 piece-32 tests green. P32.V11 present and meaningful. P32.B4 present and cold-path sound. Build clean (no new failures). Scrub gates pass (Gate 1 pre-existing, Gate 9 new PASS). Zero regressions introduced.
+
+**Verdict: ✅ APPROVE — nit-fix amend verified clean. Ready for stack progression.**
+
+**Why:** Independent re-verification confirms all four nits are correct, working-tree noise is cleaned, isolated product commit remains clean on origin, and zero regressions introduced by the amendment. FIDO approval clears piece 32 for stack progression.

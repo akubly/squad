@@ -22,7 +22,24 @@ Key patterns from recent reviews:
 
 ---
 
-## Current Session — May 2026 (Piece 24-25 Reviews)
+## Current Session — May-June 2026 (Piece 24-32 Reviews)
+
+### Piece 32 Nit-Fix Re-Verification — FIDO Sign-Off (2026-06-05T13:53Z)
+
+**Branch:** `squad/piece-32-registry-state-fields`  
+**Amended commit:** `26c17667`  
+**Verdict:** ✅ APPROVE
+
+Performed independent re-verification of EECOM's nit-fix amend:
+- **Origin isolation:** 8 product files only, zero .squad/ files
+- **Tests:** 27/27 GREEN (11 validation, 3 registry, 13 assign); P32.V11 and P32.B4 confirmed present
+- **P32.B4 soundness:** cloneDir not pre-created; state flags omitted; asserts preservation. NOT tautological — removal of merge operators would fail test.
+- **Nits verified:** (a) JSON export indentation valid+aligned, (b) DEVELOPER_ALIAS_RE.source in message, (c) JSDoc on registry fields, (d) regex/code-name unchanged, deferred items untouched
+- **Build:** SDK clean; CLI pre-existing failures (byte-for-byte identical to dev baseline)
+- **Scrub gate:** Gates 2–9 PASS, Gate 9 new + exercises piece 32, zero new violations
+- **Regressions:** spot-check init.test.ts (13/13 PASS), zero new failures
+
+Piece 32 has now received four independent approvals (FIDO regression, CAPCOM SDK-contract, CONTROL type/edge, plus this re-verify). Product commit remains single isolated clean commit on origin.
 
 ### Piece 24 Adversarial Review — SDK Adapter & OTel Typing Hardening (2026-05-27T16:00Z)
 
@@ -87,6 +104,32 @@ pm install can create packages/squad-cli/node_modules/@bradygaster/squad-sdk@0.9
 - Side-effect artifacts (version stamps, init-run outputs) must be excluded from product commits before staging
 
 **Verdict:** ⚠️ APPROVE-WITH-NITS (no blockers). All gatekeeping criteria met. Two cosmetic commit hygiene nits required before next stack merge (N1/N2). Acceptance criterion: 5 acknowledged inherited failures persist as expected; 22 apparent regressions fully explained by environment-level contention; zero real regressions. Decision merged to `.squad/decisions.md`. Ready for stack progression.
+
+### Piece 32 Nit-Fix Re-Verification (2026-06-05T13:53Z)
+
+**Amended commit:** `26c17667` — EECOM applied four nits: package.json indentation, INVALID_ALIAS message DRY via `DEVELOPER_ALIAS_RE.source`, JSDoc relocation to registry fields, two new tests (P32.V11, P32.B4).
+
+**Origin isolation:** ✅ Confirmed. `origin/squad/piece-32-registry-state-fields` tip = `26c17667`. Stat shows exactly 8 files: 3 source, 3 test, 1 changeset, 1 package.json. Zero `.squad/`, zero `package-lock.json`, zero `.github/`, zero `test-fixtures` noise. Local HEAD is `d5a83426` (`.squad` logging commit), one ahead of origin as expected.
+
+**Working tree:** ✅ Clean. Only tracked modification is `.squad/agents/eecom/history.md` (pre-existing logging artifact). All other untracked files are pre-existing scratch.
+
+**Tests (27/27 GREEN):** ✅ validation 11, registry 3, assign 13. P32.V11 and P32.B4 confirmed present and passing. P32.B4 cold-start soundness independently verified: `cloneDir` is never created before `runAssign`, forcing the `--clone-to` clone path; state flags omitted; asserts preserved values from pre-seeded registry. Test would FAIL if cold-start preservation code were removed.
+
+**Nit correctness:**
+- (a) ✅ `./validation` export aligns with sibling exports; `node -e "JSON.parse(...)"` confirms valid JSON
+- (b) ✅ INVALID_ALIAS message uses `DEVELOPER_ALIAS_RE.source` — no hardcoded pattern in message string
+- (c) ✅ Default-semantics JSDoc on `stateRemote` and `stateBranch` registry fields; regex JSDoc describes type only
+- (d) ✅ Regex `/^[a-z][a-z0-9-]{1,38}$/` unchanged; `'INVALID_ALIAS'` code name unchanged
+
+**Build:** SDK builds clean. CLI fails with pre-existing TypeScript errors — identical failures reproduced on `dev` baseline before piece 32. Zero new failures.
+
+**Scrub gate:** Gate 1 FAIL (32 strip-listed paths) — identical list to prior baseline, pre-existing. Gates 2/5/6/7/9 PASS. Gates 3/4 WARN (expected `.squad/` references). Gate 9 (developerAlias format validation) is NEW and PASSES — directly exercises piece 32 code. Zero new violations introduced by the nits.
+
+**Regression spot-check:** `test/cli/init.test.ts` 13/13 PASS. `test/resolution-v2.test.ts` 1 failure (`uninstallCopilotPayload is not a function`) confirmed pre-existing from commit `e3456eb2` which predates piece 32's base commit `92139e5b`.
+
+**Verdict:** ✅ APPROVE. Nit-fix amend is clean. All nit claims verified independently. No regressions introduced. Origin push isolated correctly.
+
+**Pattern reinforced:** When checking build regressions, always reproduce the failure on the parent baseline before attributing it to the PR. Pre-existing TypeScript/dependency skew is a recurring pattern in this repo — never count it as a blocker without a baseline diff.
 
 ---
 
