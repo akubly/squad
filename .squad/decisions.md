@@ -557,3 +557,70 @@ Defer to a future piece:
 **What:** The earlier piece-33 ruling (reduced scope: sub-proposals A + D only, defer B + C) is SUPERSEDED. Piece 32.5 (state-transport-helpers) is staged on akubly/upstream-specs (be32791c); it defines `publishTeamRootToInbox` and `hydrateTeamRootFromStateRef`, which piece 33 sub-proposals B and C wire into `runSync`. Piece 33 therefore returns to its full A–D scope and branches off `squad/piece-32.5-state-transport-helpers` (not piece 32). Stack re-sequences to 32 → 32.5 → 33 → 34 → 35.
 
 **Why:** The transport helpers piece 33 depends on were absent from the piece-32 lineage; rather than ship a partial piece 33, piece 32.5 supplies the helpers as parameterized, registry-agnostic primitives (TEAM_ROOT-only, kill-list enforced, §9 PII rule, snapshot allowlist guard). This unblocks the full cross-repo arc (33/34/35) without reintroducing dead-topology surfaces.
+
+---
+
+### 2026-06-05: Use ls-tree+cat-file for hydrateTeamRootFromStateRef on Windows
+
+**Context:** The spec prescribes `git --work-tree=<teamRoot> checkout refs/remotes/<remote>/<stateBranch> -- .`, but this fails in nested test environments with "Directory not empty" when the test `teamRoot` is inside the outer squad-replay repo.
+
+**Decision:** Replace Step 4 with git-plumbing:
+1. `git --git-dir=<X> ls-tree -r --name-only <ref>` — enumerate file paths
+2. For each path: `git --git-dir=<X> cat-file blob <ref>:<path>` — extract content
+3. `fs.mkdirSync` + `fs.writeFileSync` — write to TEAM_ROOT
+
+**Effect:** Materializes the state tree in TEAM_ROOT without altering HEAD, semantically identical to spec. Platform-agnostic; avoids OS-level path resolution ambiguity in nested contexts. Applies to `packages/squad-cli/src/cli/commands/sync.ts` — `hydrateTeamRootFromStateRef` only. Piece 33 should note this implementation detail in integration tests.
+
+---
+
+### 2026-06-05: hydrateTeamRootFromStateRef idempotency mechanism
+
+**Finding:** The idempotency guard `if (headSha === fetchedSha) return;` is structurally broken. The snapshot commit is always orphan (no parent), and working repo HEAD is always its own init commit — SHAs can never be equal. The short-circuit never fires.
+
+**Decision needed:** Choose one:
+- **A. Fix via sentinel:** After hydrating, persist a `.squad/.hydrate-sha` file with `fetchedSha`; compare against that on re-entry.
+- **B. Drop idempotency claim:** Document that `hydrateTeamRootFromStateRef` is safe to call repeatedly (overwrites with identical content) but does not short-circuit. Remove dead code.
+- **C. Update HEAD after hydrating:** Move HEAD to fetched SHA via `git update-ref`, but this violates spec ("does not alter HEAD").
+
+**Recommendation:** Option A is least invasive and preserves spec. Option B is honest about current behavior. Piece 33 author must not assume repeated hydrate calls are skipped — they are re-executed silently.
+
+---
+
+### 2026-06-05: Piece 32.5 State Transport Helpers — CAPCOM SDK-Contract Review
+
+**Date:** 2026-06-05  
+**Reviewer:** CAPCOM (SDK Expert)  
+**Branch:** `squad/piece-32.5-state-transport-helpers`  
+**Verdict:** APPROVE
+
+**Contract checks:** All signatures byte-for-byte match piece 33 call sites. `DEVELOPER_ALIAS_RE` imported correctly from `@bradygaster/squad-sdk/validation`. Regex `/^[a-z][a-z0-9-]{1,38}$/` matches canonical. Both helpers are `export async function` and NOT invoked from `runSync`.
+
+**Advisory (non-blocking):** `publishTeamRootToInbox` applies the allowlist as a hard throw-gate (entire call throws if any `.squad/` file is unlisted). On a live squad repo, this will throw on first invocation. Recommend confirming whether strict-guard (throw on unlisted) or filter-mode (silently skip unlisted) is intended before piece 33 integration. Either is defensible.
+
+---
+
+### 2026-06-05: Piece 32.5 State Transport Helpers — CONTROL Type/Edge Adversarial Review
+
+**Date:** 2026-06-05  
+**Reviewer:** CONTROL (TypeScript Engineer)  
+**Subject:** `packages/squad-cli/src/cli/commands/sync.ts` (new exports + private helpers) and `test/cli/cross-repo-sync.test.ts`  
+**Verdict:** APPROVE
+
+**Findings:** No blocking type-safety issues. Build compiles without new type errors. Type hygiene: no new `any` leaks, no `@ts-ignore`, no unjustified non-null assertions. `pathHash` normalization stable across Windows/Unix. Allowlist prefix matching has no collision bugs (all entries carry trailing `/`). Isolated index via `GIT_INDEX_FILE` env var never mutates real `.git/index`. Error ordering correct: alias validation → allowlist check → git operations → push.
+
+**MEDIUM (non-blocking):** Idempotency guard is dead code — `headSha === fetchedSha` never fires because function never updates HEAD. Files are re-written on every invocation (idempotent in outcome, not a true no-op). Recommended fix for follow-up: use sentinel ref or revise spec comment.
+
+**Export independence:** Both helpers are `export async function` and NOT called from `runSync`. Correct. VERDICT: Approved to merge; MEDIUM finding for follow-up before exposing to end users.
+
+---
+
+### 2026-06-05: Gate Decision — Piece 32.5 State Transport Helpers
+
+**Date:** 2026-06-05  
+**Commit:** `d32fe25b` — `squad/piece-32.5-state-transport-helpers`  
+**Gate:** Constraint-Compliance Gate (read-only)  
+**Verdict:** PASS
+
+**Checks:** Exactly 3 files changed (`.changeset/state-transport-helpers.md`, `packages/squad-cli/src/cli/commands/sync.ts`, `test/cli/cross-repo-sync.test.ts`). Zero kill-list violations (`config.json`/`detectBackend` only in pre-existing functions, not in new helpers). §9 PII rule enforced by passing Test 4 (no raw path in JSON, forbidden segments absent, `pathHash` with `sha256:` prefix present). Allowlist guard enforced by passing Test 8 (unlisted path throws before any commit). Signatures exact, not invoked from `runSync`. Scrub gate: pre-existing baseline carryover only, zero new violations. Tests: 10/10 GREEN.
+
+**Final disposition:** GATE PASS. Cleared to push product SHA `d32fe25b`. No kill-list violation, no PII leak, no scope creep.
