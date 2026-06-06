@@ -547,3 +547,13 @@ Authorize implementing:
 Defer to a future piece:
 - **Sub-proposal B** (wire `publishTeamRootToInbox` into push path)
 - **Sub-proposal C** (wire `hydrateTeamRootFromStateRef` into pull path)
+
+---
+
+### 2026-06-05: Piece 33 scope restored to full A–D (supersedes reduced-scope ruling)
+
+**By:** akubly (via Copilot), on Flight's re-sequencing
+
+**What:** The earlier piece-33 ruling (reduced scope: sub-proposals A + D only, defer B + C) is SUPERSEDED. Piece 32.5 (state-transport-helpers) is staged on akubly/upstream-specs (be32791c); it defines `publishTeamRootToInbox` and `hydrateTeamRootFromStateRef`, which piece 33 sub-proposals B and C wire into `runSync`. Piece 33 therefore returns to its full A–D scope and branches off `squad/piece-32.5-state-transport-helpers` (not piece 32). Stack re-sequences to 32 → 32.5 → 33 → 34 → 35.
+
+**Why:** The transport helpers piece 33 depends on were absent from the piece-32 lineage; rather than ship a partial piece 33, piece 32.5 supplies the helpers as parameterized, registry-agnostic primitives (TEAM_ROOT-only, kill-list enforced, §9 PII rule, snapshot allowlist guard). This unblocks the full cross-repo arc (33/34/35) without reintroducing dead-topology surfaces.
