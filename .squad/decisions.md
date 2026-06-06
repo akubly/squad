@@ -468,3 +468,82 @@ All nit fixes verified correct. Origin isolation confirmed. 27/27 piece-32 tests
 **Verdict: ✅ APPROVE — nit-fix amend verified clean. Ready for stack progression.**
 
 **Why:** Independent re-verification confirms all four nits are correct, working-tree noise is cleaned, isolated product commit remains clean on origin, and zero regressions introduced by the amendment. FIDO approval clears piece 32 for stack progression.
+
+---
+
+### 2026-06-05: Piece 32.5 — State transport helpers spec
+
+**Date:** 2026-06-05  
+**Author:** Procedures  
+**Status:** Adopted
+
+## What piece 32.5 specifies
+
+Spec `docs/proposals/upstream-bradygaster/32.5-state-transport-helpers.md` defines two exported async functions in `packages/squad-cli/src/cli/commands/sync.ts`:
+
+1. `publishTeamRootToInbox(teamRoot: string, remote: string, developerAlias: string, sessionId: string): Promise<void>`
+   — Builds a git commit from a TEAM_ROOT `.squad/` snapshot and pushes it as a per-developer inbox branch (`squad/inbox/<alias>/<yyyyMMdd-HHmmss>-<sessionId>`) to the docs remote. Validates `developerAlias` against `DEVELOPER_ALIAS_RE` before any branch work. Enforces a snapshot allowlist guard. Writes `publish-metadata.json` with `{ repo, pathHash }` shaped `sourceWorkRoot` (§9 NFR PII rule: no raw absolute paths).
+
+2. `hydrateTeamRootFromStateRef(teamRoot: string, remote: string, stateBranch: string): Promise<void>`
+   — Fetches the docs remote's state branch and checks out its tree into TEAM_ROOT. Idempotent.
+
+Both helpers are parameterized transport primitives: they receive resolved inputs as arguments and must not read config files or query the registry. Caller (piece 33's `runSync`) owns all resolution.
+
+## Stack re-sequence
+
+```
+32 (registry state fields)
+  └── 32.5 (state transport helpers)  ← this piece
+        └── 33 (sync from registry)
+              └── 34 (coordinator protocol)
+                    └── 35 (fold pipeline / docs repo)
+```
+
+Piece 33's dependency line now reads "branches off 32.5" rather than "branches off 32."
+
+## Invariants baked in
+
+| Invariant | Mechanism |
+|-----------|-----------|
+| No product-repo writes | Both helpers operate on TEAM_ROOT only |
+| No raw absolute paths in metadata | `sourceWorkRoot` is `{ repo, pathHash }` object; §9 NFR PII rule enforced |
+| No squad files outside allowlist in inbox commits | Allowlist guard exits before commit on violation |
+| `developerAlias` format validated | `DEVELOPER_ALIAS_RE` from `@bradygaster/squad-sdk/validation` checked before any branch creation |
+| Idempotent hydration | `hydrateTeamRootFromStateRef` no-ops if TEAM_ROOT already at fetched commit |
+| GitHub AND ADO supported | `remote` is a name, not a URL; platform-agnostic |
+| No `.gitignore` / `.git/info/exclude` writes | Deployer constraint 2 honored |
+| No product-repo pipeline automation | Deployer constraint 4 honored |
+
+## Kill-list (must NOT be created by the implementing piece)
+
+- `hydrateWorkRootProjection` and all WORK_SQUAD_DIR projection writes
+- `config.json` reads, `readSyncConfig`, `detectBackend` calls inside the helpers
+- `runBind` / `bind.ts` references
+- `SquadDirConfig` augmentation or `declare module` extension
+- `.gitignore` / `.git/info/exclude` writes
+- Writes into WORK_ROOT
+- Product-repo pipeline or server-side automation
+
+---
+
+### 2026-06-05: Piece 33 Reduced Scope — A + D Only
+
+**By:** Flight (Lead), pending user authorization
+
+**What:** Piece 33 proceeds with sub-proposals A (registry resolution) and D (alias env-var fallback). Sub-proposals B and C deferred: spec references transport functions from archived pieces 26–31; contradiction requires Procedures resolution.
+
+**Why:** A + D deliver independent value, leave runSync coherent, and make future B + C easier. No half-wired state.
+
+**Triage decision:**
+
+Piece 33's spec references transport functions (`publishTeamRootToInbox` from piece 28, `hydrateTeamRootFromStateRef` from piece 31 sub-C) that belong to a lineage explicitly marked "archived under archive/pieces-26-30-dead" in the piece 32 spec. Piece 32 declares itself the foundation of a NEW cross-repo arc (32→33→34→35), yet piece 33 depends on exports from the archived lineage. This is a stack-design contradiction, not a not-yet-staged dependency.
+
+**Authorized implementation scope:**
+
+Authorize implementing:
+- **Sub-proposal A** (registry resolution) — Replace config.json with registry as the primary source for `teamRoot`, `stateRemote`, `stateBranch`, `developerAlias` in `runSync`. This is marked "non-deferrable" in the spec. Delivers registry-first topology support.
+- **Sub-proposal D** (alias env-var fallback) — Add `SQUAD_DEVELOPER_ALIAS` to the alias resolution chain. Unblocks pipeline invocations.
+
+Defer to a future piece:
+- **Sub-proposal B** (wire `publishTeamRootToInbox` into push path)
+- **Sub-proposal C** (wire `hydrateTeamRootFromStateRef` into pull path)
