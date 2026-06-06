@@ -13,8 +13,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
+import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
 
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';
 const STATE_BRANCH_PREFIX = 'squad-state';
@@ -226,6 +228,243 @@ function syncPush(cwd: string, remote: string, backend: string | null, quiet: bo
     }
   }
 }
+
+// ─── Piece 32.5: State transport helpers ─────────────────────────────────────
+
+/**
+ * Characters and patterns illegal in git ref components.
+ * A sessionId must not cause the inbox branch name to be malformed.
+ */
+const SESSION_ID_FORBIDDEN_RE = /[\x00-\x20\x7f~^:?*\[\\]|\.\.|\@\{|\/\/|^\/|^\-|\/\.lock$|\.lock\/|\.$/;
+
+/**
+ * Allowlisted paths within .squad/ that may be published.
+ * Relative to teamRoot, forward-slash separated.
+ */
+const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md'];
+const PUBLISH_ALLOWLIST_PREFIX = [
+  '.squad/decisions/inbox/',
+  '.squad/log/',
+  '.squad/orchestration-log/',
+  '.squad/sessions/',
+  '.squad/identity/',
+];
+
+function isAllowlisted(relPath: string): boolean {
+  const p = relPath.replace(/\\/g, '/');
+  if (PUBLISH_ALLOWLIST_EXACT.includes(p)) return true;
+  return PUBLISH_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix));
+}
+
+/** Enumerate all regular files under `teamRoot/.squad/` as forward-slash relative paths. */
+function enumerateSquadFiles(teamRoot: string): string[] {
+  const squadDir = path.join(teamRoot, '.squad');
+  if (!fs.existsSync(squadDir)) return [];
+  const entries = fs.readdirSync(squadDir, { recursive: true }) as string[];
+  const result: string[] = [];
+  for (const entry of entries) {
+    const fullPath = path.join(squadDir, entry);
+    try {
+      if (fs.statSync(fullPath).isFile()) {
+        result.push(`.squad/${entry.replace(/\\/g, '/')}`);
+      }
+    } catch { /* skip unreadable entries */ }
+  }
+  return result;
+}
+
+/** Format a Date as yyyyMMdd-HHmmss from its UTC representation. */
+function formatPublishTimestamp(date: Date): string {
+  const iso = date.toISOString();
+  return `${iso.slice(0, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}`;
+}
+
+/**
+ * Publish a snapshot of TEAM_ROOT/.squad/ (allowlisted subtree) to a
+ * per-session inbox branch on `remote`.
+ *
+ * Parameterized: takes all resolved inputs as arguments.
+ * Does NOT read config.json, call detectBackend, or query the registry.
+ */
+export async function publishTeamRootToInbox(
+  teamRoot: string,
+  remote: string,
+  developerAlias: string,
+  sessionId: string,
+): Promise<void> {
+  // Step 1: Validate developerAlias before any git operation
+  if (!DEVELOPER_ALIAS_RE.test(developerAlias)) {
+    throw new Error(
+      `Invalid developerAlias "${developerAlias}": must match /^[a-z][a-z0-9-]{1,38}$/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+    );
+  }
+
+  // Step 1b: Validate sessionId for git-ref legality before constructing any branch name
+  if (!sessionId || SESSION_ID_FORBIDDEN_RE.test(sessionId) || sessionId.startsWith('/') || sessionId.startsWith('-') || sessionId.endsWith('/') || sessionId.endsWith('.lock')) {
+    throw new Error(
+      `Invalid sessionId "${sessionId}": must be non-empty and must not contain characters illegal in a git ref component (whitespace, control chars, ~^:?*[\\, .., @{, consecutive/leading/trailing slashes, leading dash, or .lock suffix).`,
+    );
+  }
+
+  // Step 2: Build inbox branch name
+  const ts = formatPublishTimestamp(new Date());
+  const inboxBranch = `squad/inbox/${developerAlias}/${ts}-${sessionId}`;
+
+  // Step 3: Resolve base commit
+  const baseStateCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+
+  // Step 4: Enumerate files and enforce allowlist BEFORE any git object is created
+  const squadFiles = enumerateSquadFiles(teamRoot);
+  for (const relPath of squadFiles) {
+    if (!isAllowlisted(relPath)) {
+      throw new Error(
+        `Publish blocked: path "${relPath}" is outside the allowed .squad/ subtree. ` +
+        `Only decisions.md, decisions/inbox/**, log/**, orchestration-log/**, sessions/**, and identity/** may be published.`,
+      );
+    }
+  }
+
+  // Step 5: Build snapshot via git plumbing with isolated index
+  const indexFile = path.join(
+    teamRoot, '.git',
+    `squad-publish-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+  const indexEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
+
+  // Author/committer identity fallback for environments without global git config
+  const commitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env['GIT_AUTHOR_NAME'] ?? 'Squad',
+    GIT_AUTHOR_EMAIL: process.env['GIT_AUTHOR_EMAIL'] ?? 'squad@system',
+    GIT_COMMITTER_NAME: process.env['GIT_COMMITTER_NAME'] ?? 'Squad',
+    GIT_COMMITTER_EMAIL: process.env['GIT_COMMITTER_EMAIL'] ?? 'squad@system',
+  };
+
+  try {
+    // Hash and stage each allowlisted file
+    for (const relPath of squadFiles) {
+      const fullPath = path.join(teamRoot, relPath.replace(/\//g, path.sep));
+      const content = fs.readFileSync(fullPath);
+      const sha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: teamRoot, env: indexEnv, input: content,
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${sha},${relPath}`], {
+        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+
+    // §9 PII: sourceWorkRoot is {repo: basename, pathHash: sha256(normalizedAbsPath)} — no raw path
+    const normalizedTeamRoot = teamRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const pathHash = 'sha256:' + createHash('sha256').update(normalizedTeamRoot).digest('hex');
+    const metadata = {
+      developerAlias,
+      sessionId,
+      sourceWorkRoot: {
+        repo: path.basename(teamRoot),
+        pathHash,
+      },
+      publishedAt: new Date().toISOString(),
+      baseStateCommit,
+    };
+    const metadataJson = JSON.stringify(metadata, null, 2);
+    const metadataSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+      cwd: teamRoot, env: indexEnv, input: Buffer.from(metadataJson, 'utf-8'),
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${metadataSha},.squad/publish-metadata.json`], {
+      cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    // Write tree from isolated index
+    const treeSha = execFileSync('git', ['write-tree'], {
+      cwd: teamRoot, env: indexEnv, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    // Commit tree (orphan snapshot — no parent)
+    const commitSha = execFileSync('git', ['commit-tree', treeSha, '-m', 'squad: publish snapshot'], {
+      cwd: teamRoot, env: commitEnv, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    // Step 6: Push to inbox branch (new branch per session — no non-fast-forward possible)
+    execFileSync('git', ['push', remote, `${commitSha}:refs/heads/${inboxBranch}`], {
+      cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } finally {
+    try { fs.unlinkSync(indexFile); } catch { /* index may not exist if we errored before creating it */ }
+  }
+}
+
+/**
+ * Hydrate TEAM_ROOT working directory from a state ref on `remote`.
+ *
+ * Fetches the state branch, then writes its tree files into TEAM_ROOT without
+ * altering HEAD. Idempotent: returns early when HEAD already equals the fetched commit.
+ *
+ * Parameterized: takes all resolved inputs as arguments.
+ * Does NOT read config.json, call detectBackend, or query the registry.
+ */
+export async function hydrateTeamRootFromStateRef(
+  teamRoot: string,
+  remote: string,
+  stateBranch: string,
+): Promise<void> {
+  // Step 1: Fetch the state branch into a remote-tracking ref
+  try {
+    execFileSync('git', [
+      'fetch', remote,
+      `refs/heads/${stateBranch}:refs/remotes/${remote}/${stateBranch}`,
+    ], { cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? ((err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? err.message) : String(err);
+    throw new Error(
+      `hydrateTeamRootFromStateRef: failed to fetch "${stateBranch}" from "${remote}": ${msg}`,
+    );
+  }
+
+  // Step 2: Resolve fetched SHA
+  const fetchedSha = execFileSync('git', ['rev-parse', `refs/remotes/${remote}/${stateBranch}`], {
+    cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+
+  // Step 3: Idempotency — skip if HEAD already matches the fetched commit
+  let headSha: string | null = null;
+  try {
+    headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch { /* empty repo or detached HEAD — proceed */ }
+
+  if (headSha === fetchedSha) return;
+
+  // Step 4: Write state branch tree files into TEAM_ROOT (does not alter HEAD).
+  // Uses ls-tree + cat-file blob to enumerate and write files directly — avoids
+  // `git checkout --work-tree` index-state conflicts in nested repo contexts.
+  const normalizedGitDir = path.join(teamRoot, '.git').replace(/\\/g, '/');
+  const isolatedEnv = { ...process.env };
+  delete isolatedEnv['GIT_DIR'];
+  delete isolatedEnv['GIT_WORK_TREE'];
+  delete isolatedEnv['GIT_INDEX_FILE'];
+
+  const fileList = execFileSync('git', [
+    '--git-dir', normalizedGitDir,
+    'ls-tree', '-r', '--name-only', `refs/remotes/${remote}/${stateBranch}`,
+  ], { encoding: 'utf-8', env: isolatedEnv, stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n').filter(Boolean);
+
+  for (const filePath of fileList) {
+    const content = execFileSync('git', [
+      '--git-dir', normalizedGitDir,
+      'cat-file', 'blob', `refs/remotes/${remote}/${stateBranch}:${filePath}`,
+    ], { encoding: null, env: isolatedEnv, stdio: ['pipe', 'pipe', 'pipe'] }) as Buffer;
+    const outPath = path.join(teamRoot, filePath.replace(/\//g, path.sep));
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, content);
+  }
+}
+
+// ─── End piece 32.5 ──────────────────────────────────────────────────────────
 
 /**
  * Main sync entrypoint.
