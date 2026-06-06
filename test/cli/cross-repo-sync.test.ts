@@ -1,10 +1,14 @@
 /**
- * Cross-repo state transport helpers — piece 32.5
+ * Cross-repo state transport helpers — pieces 32.5 and 33
  *
- * Tests for publishTeamRootToInbox and hydrateTeamRootFromStateRef.
- * Exercises both helpers directly against bare-repo fixtures and real
- * working clones. No mocks; no runSync integration.
+ * Tests for publishTeamRootToInbox and hydrateTeamRootFromStateRef (direct).
+ * Integration tests for runSync CLI dispatch wiring (B/C sub-proposals).
  */
+
+// ─── Registry mock (used by runSync integration tests only) ──────────────────
+vi.mock('@bradygaster/squad-sdk/registry', () => ({
+  loadRegistryFromDisk: vi.fn(),
+}));
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
@@ -13,7 +17,11 @@ import { execFileSync } from 'node:child_process';
 import {
   publishTeamRootToInbox,
   hydrateTeamRootFromStateRef,
+  runSync,
+  _transport,
 } from '../../packages/squad-cli/src/cli/commands/sync.js';
+import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import type { Registry } from '@bradygaster/squad-sdk/registry';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -78,12 +86,23 @@ function showBareFile(bareDir: string, refAndPath: string): string {
 
 beforeEach(() => {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
+  // Reset registry mock to null before each test (integration tests override per-test)
+  vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+  delete process.env['SQUAD_TEAM_ROOT'];
+  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_SYNC_ACTIVE'];
+  delete process.env['COPILOT_SESSION_ID'];
 });
 
 afterEach(() => {
   for (const dir of FIXTURE_DIRS.splice(0)) {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  vi.clearAllMocks();
+  delete process.env['SQUAD_TEAM_ROOT'];
+  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_SYNC_ACTIVE'];
+  delete process.env['COPILOT_SESSION_ID'];
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -347,3 +366,252 @@ describe('hydrateTeamRootFromStateRef', { timeout: 60_000 }, () => {
     writeSpy.mockRestore();
   });
 });
+
+// ─── runSync integration (piece 33 sub-proposals B & C) ──────────────────────
+//
+// These tests call runSync through the CLI dispatch interface — NOT the library
+// helpers directly — to prove push/pull wiring is in place.
+
+function makeRegistry(entries: Registry['squads']): Registry {
+  return { version: 1, squads: entries };
+}
+
+describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120_000 }, () => {
+  it('B1: --push with matching registry entry creates squad/inbox/<alias>/<ts>-<sessionId> on bare remote', async () => {
+    const base = makeTmpDir('B1-push');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const docsTeamRoot = path.join(base, 'docs-teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(docsTeamRoot, 'origin', docsRemote);
+    setupSquadDir(docsTeamRoot);
+
+    // workRepo is the product repo (its git root = clone in registry)
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    // Registry entry: path ends in .squad; clones contains workRepo git root
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        path: path.join(docsTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        stateRemote: 'origin',
+        stateBranch: 'squad-state',
+        developerAlias: 'alice',
+      }]),
+      warnings: [],
+    });
+
+    process.env['COPILOT_SESSION_ID'] = 'test-session-b1';
+
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'alice', quiet: true });
+
+    const refs = listBareRefs(docsRemote);
+    const inboxRefs = refs.filter(r => r.includes('refs/heads/squad/inbox/alice/'));
+    expect(inboxRefs).toHaveLength(1);
+    expect(inboxRefs[0]).toContain('test-session-b1');
+  });
+
+  it('B2: --push with no registry entry falls back to syncPush — NO inbox ref (regression guard)', async () => {
+    const base = makeTmpDir('B2-regression');
+    const workRemote = path.join(base, 'work-remote.git');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(workRemote);
+    initWorkingRepo(workRepo, 'origin', workRemote);
+
+    // Capture the default branch name before switching to squad-state
+    const defaultBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    // Create squad-state branch so syncPush has something to push
+    execFileSync('git', ['checkout', '--orphan', 'squad-state'], { cwd: workRepo, stdio: 'pipe' });
+    execFileSync('git', ['rm', '-rf', '--cached', '.'], { cwd: workRepo, stdio: 'pipe' });
+    // Remove any untracked files so the commit is clean
+    try { fs.rmSync(path.join(workRepo, '.gitkeep')); } catch { /* may not exist */ }
+    fs.writeFileSync(path.join(workRepo, 'state.json'), '{}');
+    execFileSync('git', ['add', 'state.json'], { cwd: workRepo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'state init'], { cwd: workRepo, stdio: 'pipe' });
+    // Switch back to default branch; HEAD must not be squad-state for resolveRemote to fall back to origin
+    execFileSync('git', ['checkout', '-f', defaultBranch], { cwd: workRepo, stdio: 'pipe' });
+
+    // Write .squad/config.json so single-repo path is taken (no exit-1)
+    fs.mkdirSync(path.join(workRepo, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(workRepo, '.squad', 'config.json'), JSON.stringify({ stateBackend: 'orphan' }));
+
+    // No registry entry
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    // G1: spy-based guard — publishTeamRootToInbox must NOT be called for single-repo push
+    const publishSpy = vi.spyOn(_transport, 'publishTeamRootToInbox');
+
+    await runSync({ direction: 'push', cwd: workRepo, quiet: true });
+
+    const refs = listBareRefs(workRemote);
+    // squad-state branch should be pushed (normal syncPush)
+    expect(refs.some(r => r.includes('squad-state'))).toBe(true);
+    // No inbox ref — observable guard
+    expect(refs.filter(r => r.includes('squad/inbox/'))).toHaveLength(0);
+    // Spy-based guard: publishTeamRootToInbox must not have been called
+    expect(publishSpy).not.toHaveBeenCalled();
+    publishSpy.mockRestore();
+  });
+
+  it('G2: single-repo --pull does NOT call hydrateTeamRootFromStateRef (no sidecar when teamRoot absent)', async () => {
+    const base = makeTmpDir('G2-single-pull');
+    const workRemote = path.join(base, 'work-remote.git');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(workRemote);
+    initWorkingRepo(workRepo, 'origin', workRemote);
+
+    // Write .squad/config.json so single-repo path is taken (no exit-1)
+    fs.mkdirSync(path.join(workRepo, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(workRepo, '.squad', 'config.json'), JSON.stringify({ stateBackend: 'orphan' }));
+
+    // No registry entry → no teamRoot → single-repo pull path
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const hydrateSpy = vi.spyOn(_transport, 'hydrateTeamRootFromStateRef');
+
+    try {
+      await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
+    } catch {
+      // syncPull may fail (nothing on remote) — not relevant to this assertion
+    }
+
+    expect(hydrateSpy).not.toHaveBeenCalled();
+    hydrateSpy.mockRestore();
+  });
+
+  it('C1: --pull with matching registry entry calls hydrateTeamRootFromStateRef (sidecar populated)', async () => {
+    const base = makeTmpDir('C1-pull');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const publisherRepo = path.join(base, 'publisher');
+    const hydrateTeamRoot = path.join(base, 'hydrate-teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(publisherRepo, 'origin', docsRemote);
+    setupSquadDir(publisherRepo);
+
+    // Publish so there is content on docsRemote
+    await publishTeamRootToInbox(publisherRepo, 'origin', 'dev1', 'sess-c1');
+    const docsRefs = listBareRefs(docsRemote);
+    const inboxRef = docsRefs.find(r => r.includes('squad/inbox/dev1/'))!;
+    expect(inboxRef).toBeTruthy();
+    const inboxBranch = inboxRef.replace('refs/heads/', '');
+
+    // hydrateTeamRoot is a fresh working clone of docsRemote (no .squad/ yet)
+    initWorkingRepo(hydrateTeamRoot, 'origin', docsRemote);
+
+    // workRepo is the product repo
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        path: path.join(hydrateTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        stateRemote: 'origin',
+        stateBranch: inboxBranch,
+      }]),
+      warnings: [],
+    });
+
+    await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
+
+    // hydrateTeamRoot should now have .squad/decisions.md from the inbox snapshot
+    expect(fs.existsSync(path.join(hydrateTeamRoot, '.squad', 'decisions.md'))).toBe(true);
+  });
+
+  it('C2: repeated --pull is idempotent (second call does not error)', async () => {
+    const base = makeTmpDir('C2-idempotent');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const publisherRepo = path.join(base, 'publisher');
+    const hydrateTeamRoot = path.join(base, 'hydrate-teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(publisherRepo, 'origin', docsRemote);
+    setupSquadDir(publisherRepo);
+    await publishTeamRootToInbox(publisherRepo, 'origin', 'dev2', 'sess-c2');
+
+    const docsRefs = listBareRefs(docsRemote);
+    const inboxBranch = docsRefs.find(r => r.includes('squad/inbox/dev2/'))!.replace('refs/heads/', '');
+
+    initWorkingRepo(hydrateTeamRoot, 'origin', docsRemote);
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        path: path.join(hydrateTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        stateRemote: 'origin',
+        stateBranch: inboxBranch,
+      }]),
+      warnings: [],
+    });
+
+    // First pull
+    await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
+    expect(fs.existsSync(path.join(hydrateTeamRoot, '.squad', 'decisions.md'))).toBe(true);
+
+    // Second pull — must not throw
+    await expect(
+      runSync({ direction: 'pull', cwd: workRepo, quiet: true })
+    ).resolves.not.toThrow();
+  });
+
+  it('B3: sessionId from COPILOT_SESSION_ID when set, randomUUID() otherwise', async () => {
+    const base = makeTmpDir('B3-sessionid');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const docsTeamRoot = path.join(base, 'docs-teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(docsTeamRoot, 'origin', docsRemote);
+    setupSquadDir(docsTeamRoot);
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        path: path.join(docsTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        stateRemote: 'origin',
+        developerAlias: 'dev3',
+      }]),
+      warnings: [],
+    });
+
+    // Test 1: COPILOT_SESSION_ID present → its value appears in the inbox branch name
+    process.env['COPILOT_SESSION_ID'] = 'explicit-sid-xyz';
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'dev3', quiet: true });
+
+    const refs1 = listBareRefs(docsRemote);
+    const withEnvSession = refs1.filter(r => r.includes('explicit-sid-xyz'));
+    expect(withEnvSession).toHaveLength(1);
+
+    // Test 2: COPILOT_SESSION_ID absent → randomUUID used (branch still created, no "undefined" in name)
+    delete process.env['COPILOT_SESSION_ID'];
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'dev3', quiet: true });
+
+    const refs2 = listBareRefs(docsRemote);
+    const inboxRefs = refs2.filter(r => r.includes('refs/heads/squad/inbox/dev3/'));
+    expect(inboxRefs).toHaveLength(2); // two pushes, two inbox branches
+    expect(inboxRefs.every(r => !r.includes('undefined'))).toBe(true);
+  });
+});
+

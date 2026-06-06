@@ -13,10 +13,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
+import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';
 const STATE_BRANCH_PREFIX = 'squad-state';
@@ -26,6 +28,8 @@ export interface SyncOptions {
   remote?: string;
   cwd?: string;
   quiet?: boolean;
+  /** Developer alias for cross-repo inbox publish. Overrides env var and registry entry. */
+  developer?: string;
 }
 
 /**
@@ -467,7 +471,29 @@ export async function hydrateTeamRootFromStateRef(
 // ─── End piece 32.5 ──────────────────────────────────────────────────────────
 
 /**
+ * Internal transport dispatch — exposed for test interception via vi.spyOn.
+ * runSync calls helpers through this object so spy-based guards work under ESM
+ * (direct local calls bypass module-export replacement; object-property calls do not).
+ */
+export const _transport = {
+  publishTeamRootToInbox,
+  hydrateTeamRootFromStateRef,
+};
+
+/**
  * Main sync entrypoint.
+ *
+ * Resolution order (sub-proposal A):
+ *   1. SQUAD_TEAM_ROOT env var — explicit override.
+ *   2. Registry lookup via loadRegistryFromDisk() — find entry whose clones[] contains
+ *      the current git root; TEAM_ROOT = path.dirname(entry.path).
+ *   3. Fallback to WORK_ROOT/.squad/config.json for single-repo / unregistered contexts.
+ *   4. Neither present + push direction → exit 1 (run 'squad assign').
+ *
+ * detectBackend disposition: the detectBackend call has been removed from runSync.
+ * backend is now derived from registry presence (entry → 'orphan'; no entry → null from
+ * config.json stateBackend, or null when config.json is absent). detectBackend() is kept
+ * as a private helper but no longer called from runSync.
  */
 export async function runSync(options: SyncOptions): Promise<void> {
   // Recursion guard — prevent re-entry when our push triggers pre-push
@@ -477,25 +503,117 @@ export async function runSync(options: SyncOptions): Promise<void> {
   process.env[SQUAD_SYNC_ENV] = '1';
 
   try {
-    const cwd = options.cwd || process.cwd();
-    const repoRoot = getRepoRoot(cwd);
-    const remote = options.remote || resolveRemote(repoRoot);
-    const backend = detectBackend(repoRoot);
+    const cwd = options.cwd ?? process.cwd();
     const quiet = options.quiet ?? false;
+    const repoRoot = getRepoRoot(cwd);
+    const remote = options.remote ?? resolveRemote(repoRoot);
+    const isPush = options.direction === 'push' || options.direction === 'both';
+    const isPull = options.direction === 'pull' || options.direction === 'both';
 
-    // Skip sync for backends that don't need it
-    if (backend === 'local' || backend === 'external' || backend === null) {
-      if (!quiet) console.log(`squad sync: backend is '${backend || 'local'}' — no remote sync needed.`);
+    // ── Sub-proposal A: Registry-first TEAM_ROOT resolution ───────────────────
+    let teamRoot: string | undefined;
+    let stateRemote: string | undefined;
+    let stateBranch: string | undefined;
+    let registryAlias: string | undefined;
+    let backend: string | null = null;
+    let configJsonPresent = false;
+
+    if (process.env['SQUAD_TEAM_ROOT']) {
+      // Explicit env override: bypass registry lookup entirely
+      teamRoot = process.env['SQUAD_TEAM_ROOT'];
+    } else {
+      const { registry } = loadRegistryFromDisk();
+      const normalizedRoot = normalisedPathKey(repoRoot);
+      const entry = registry?.squads.find(e =>
+        e.clones?.some(c => normalisedPathKey(c) === normalizedRoot)
+      );
+      if (entry) {
+        teamRoot = path.dirname(entry.path); // entry.path ends in .squad
+        stateRemote = entry.stateRemote;
+        stateBranch = entry.stateBranch;
+        registryAlias = entry.developerAlias;
+        backend = 'orphan';
+      }
+    }
+
+    // Fallback to config.json for single-repo / unregistered contexts
+    if (!teamRoot) {
+      const configPath = path.join(repoRoot, '.squad', 'config.json');
+      if (fs.existsSync(configPath)) {
+        configJsonPresent = true;
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          stateRemote ??= config.stateRemote;
+          stateBranch ??= config.stateBranch;
+          registryAlias ??= config.developerAlias;
+          backend = config.stateBackend ?? null;
+        } catch { /* ignore parse errors — treat as empty config */ }
+      }
+    }
+
+    // Explicit local/external backends do not use remote sync
+    if (backend === 'local' || backend === 'external') {
+      if (!quiet) console.log(`squad sync: backend is '${backend}' — no remote sync needed.`);
       return;
     }
 
-    if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend || 'orphan'})`);
-
-    if (options.direction === 'pull' || options.direction === 'both') {
-      syncPull(repoRoot, remote, backend, quiet);
+    // No registry match AND no config.json AND push direction → error
+    if (!teamRoot && !configJsonPresent && isPush) {
+      console.error(
+        `squad sync: no registry entry found for ${repoRoot}.\n` +
+        `  Run 'squad assign' to register this repo before syncing.`,
+      );
+      process.exit(1);
     }
-    if (options.direction === 'push' || options.direction === 'both') {
-      syncPush(repoRoot, remote, backend, quiet);
+
+    const crossRepo = teamRoot !== undefined;
+
+    // ── Sub-proposal D: Alias resolution chain ────────────────────────────────
+    // Order: (1) --developer flag; (2) SQUAD_DEVELOPER_ALIAS env var; (3) registry entry alias.
+    // Trim whitespace so a blank/whitespace-only alias triggers the friendly exit-1 guidance.
+    const rawAlias =
+      options.developer !== undefined
+        ? options.developer
+        : (process.env['SQUAD_DEVELOPER_ALIAS'] ?? registryAlias);
+    const resolvedAlias = rawAlias?.trim() || undefined;
+
+    if (!resolvedAlias && isPush && crossRepo) {
+      console.error(
+        `squad sync: developer alias is required for --push.\n` +
+        `  Pass --developer <alias>, set SQUAD_DEVELOPER_ALIAS, or run ` +
+        `'squad assign --developer-alias <alias>' to persist the alias.`,
+      );
+      process.exit(1);
+    }
+
+    if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend ?? 'orphan'})`);
+
+    // ── Sub-proposal C: Pull path ──────────────────────────────────────────────
+    if (isPull) {
+      syncPull(repoRoot, remote, backend, quiet);
+      if (crossRepo) {
+        await _transport.hydrateTeamRootFromStateRef(
+          teamRoot!,
+          stateRemote ?? 'squad-docs',
+          stateBranch ?? 'squad-state',
+        );
+      }
+    }
+
+    // ── Sub-proposal B: Push path ──────────────────────────────────────────────
+    if (isPush) {
+      if (crossRepo) {
+        const sessionId = process.env['COPILOT_SESSION_ID'] ?? randomUUID();
+        await _transport.publishTeamRootToInbox(
+          teamRoot!,
+          stateRemote ?? 'squad-docs',
+          resolvedAlias!,
+          sessionId,
+        );
+      } else {
+        // Single-repo path: unchanged
+        syncPush(repoRoot, remote, backend, quiet);
+      }
     }
   } finally {
     delete process.env[SQUAD_SYNC_ENV];

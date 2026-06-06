@@ -245,6 +245,7 @@ async function main(): Promise<void> {
     console.log(`  ${b}personal${r}   Manage your personal squad`);
     console.log(`  ${b}preset${r}     Manage squad presets`);
     console.log(`  ${b}cast${r}       Show current session cast`);
+    console.log(`  ${b}sync${r}       Synchronize squad state with remote`);
     console.log(`  ${b}upstream${r}   Manage upstream Squad sources`);
     console.log(`  ${b}economy${r}    Toggle economy mode`);
     console.log(`  ${b}version${r}    Print installed version`);
@@ -323,6 +324,22 @@ async function main(): Promise<void> {
       console.log(`  ${b}--purge <callsign>${r}    Remove a registry entry entirely`);
       console.log(`  ${b}--yes${r}                 Skip confirmation prompts`);
       console.log(`  ${b}--registry-path${r}       Alternate registry file\n`);
+      return;
+    }
+    if (cmd === 'sync') {
+      console.log(`\n${b}squad sync${r} — Synchronize squad state with remote\n`);
+      console.log(`Usage: squad sync [--push | --pull | --both] [options]\n`);
+      console.log(`Options:`);
+      console.log(`  --push              Push squad state to remote`);
+      console.log(`  --pull              Pull squad state from remote`);
+      console.log(`  --both              Push and pull (default)`);
+      console.log(`  --remote <name>     Remote name (default: origin)`);
+      console.log(`  --developer <alias> Developer alias for cross-repo inbox publish`);
+      console.log(`  --quiet             Suppress output\n`);
+      console.log(`Environment:`);
+      console.log(`  SQUAD_TEAM_ROOT          Override team root path`);
+      console.log(`  SQUAD_DEVELOPER_ALIAS    Developer alias fallback`);
+      console.log(`  COPILOT_SESSION_ID       Session ID for inbox branch naming\n`);
       return;
     }
     // For other commands, fall through to the main help
@@ -1401,6 +1418,26 @@ async function main(): Promise<void> {
       const exitCode = (err as { exitCode?: number }).exitCode ?? 1;
       process.exit(exitCode);
     }
+    return;
+  }
+
+  if (cmd === 'sync') {
+    const hasPush = args.includes('--push');
+    const hasPull = args.includes('--pull');
+    const hasBoth = args.includes('--both');
+    let direction: 'push' | 'pull' | 'both' = 'both';
+    if (hasPush && !hasPull) direction = 'push';
+    else if (hasPull && !hasPush) direction = 'pull';
+    else if (hasBoth || (!hasPush && !hasPull)) direction = 'both';
+
+    const remoteIdx = args.indexOf('--remote');
+    const syncRemote = remoteIdx !== -1 ? args[remoteIdx + 1] : undefined;
+    const developerIdx = args.indexOf('--developer');
+    const developer = developerIdx !== -1 ? args[developerIdx + 1] : undefined;
+    const syncQuiet = args.includes('--quiet');
+
+    const { runSync } = await import('./cli/commands/sync.js');
+    await runSync({ direction, remote: syncRemote, developer, quiet: syncQuiet });
     return;
   }
 
