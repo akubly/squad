@@ -624,3 +624,113 @@ Defer to a future piece:
 **Checks:** Exactly 3 files changed (`.changeset/state-transport-helpers.md`, `packages/squad-cli/src/cli/commands/sync.ts`, `test/cli/cross-repo-sync.test.ts`). Zero kill-list violations (`config.json`/`detectBackend` only in pre-existing functions, not in new helpers). §9 PII rule enforced by passing Test 4 (no raw path in JSON, forbidden segments absent, `pathHash` with `sha256:` prefix present). Allowlist guard enforced by passing Test 8 (unlisted path throws before any commit). Signatures exact, not invoked from `runSync`. Scrub gate: pre-existing baseline carryover only, zero new violations. Tests: 10/10 GREEN.
 
 **Final disposition:** GATE PASS. Cleared to push product SHA `d32fe25b`. No kill-list violation, no PII leak, no scope creep.
+
+---
+
+### 2026-06-06: Decision — detectBackend Disposition — Piece 33
+
+**Date:** 2026-06-06  
+**Piece:** 33 (sync-from-registry)  
+**Filed by:** EECOM  
+
+**Context:** `runSync` previously called `detectBackend(repoRoot)` to determine state backend. This read from WORK_ROOT/.squad/config.json and returned `'local' | 'external' | 'orphan' | null`. The call was used as a gate: backend `null` → early return (no sync). Sub-proposal A introduced registry-first TEAM_ROOT resolution. With registry resolution in place, config.json is demoted to fallback. The `detectBackend` call was a duplicate read of config.json data now already loaded inline.
+
+**Decision:** Remove the `detectBackend(repoRoot)` call from `runSync`. Backend is now derived inline:
+- Registry entry found → backend = `'orphan'`
+- No entry, config.json present → backend = `config.stateBackend ?? null`
+- No entry, no config.json → `configJsonPresent = false` (triggers exit-1 on push)
+
+The `detectBackend` function definition is retained in sync.ts (unused by runSync, not exported) to avoid scope creep. It may be removed in a dedicated cleanup piece if no other callers exist.
+
+**Rationale:** Eliminates a second config.json read after registry resolution already captured the needed data. Registry presence is the natural signal for orphan-branch backend mode — no separate detection needed. Keeps the change surface minimal. The `'local'` and `'external'` backend early-exits are replaced by the config.json stateBackend field, preserving backward-compat for single-repo setups.
+
+---
+
+### 2026-06-06: Piece 33 FIDO Adversarial Review — Gaps to Track Forward
+
+**Status:** Approved  
+**Context:** Piece 33 (sync-from-registry) — FIDO adversarial review of commit `0ce892e2`.  
+**Verdict:** APPROVE
+
+**Decision:** Piece 33 ships APPROVED. The following gaps are carried forward as explicit debt items for piece 34 test hardening or the next test-pass opportunity. None blocked the approve; all are non-critical.
+
+**Gaps Carried Forward:**
+- **G1:** B2 regression guard: add spy-based NOT-called assertion for `publishTeamRootToInbox`
+- **G2:** Single-repo pull: add `hydrateTeamRootFromStateRef` NOT-called assertion (A6/A7)
+- **G3:** Exit message content: assert stderr references `squad assign` (D4, A4)
+- **G4:** `direction: 'both'` integration test missing — combined push+pull scenario untested
+- **G5:** `SQUAD_TEAM_ROOT` + pull direction untested (A3 pull variant)
+- **G6:** C2 idempotency: assert stable state after second pull
+
+**Rationale for Approve Despite Gaps:** All gaps are assertion-coverage gaps, not logic errors. The implementation is correct. The behavioral protections for all gaps exist (incorrect wiring would produce a TypeError or git error that surfaces as test failure). The 64 targeted tests are GREEN; zero regressions vs baseline.
+
+---
+
+### 2026-06-06: Piece 33 SDK Contract Review — CAPCOM
+
+**Reviewer:** CAPCOM (SDK Expert)  
+**Commit:** `0ce892e2` on `squad/piece-33-sync-from-registry`  
+**Date:** 2026-06-06  
+**Verdict:** APPROVE
+
+**Summary:** All six SDK contract checks for `runSync`'s consumption of registry primitives and 32.5 transport helpers passed. No defects found. No blocking issues.
+
+**Contracts Verified:**
+1. Imports: `loadRegistryFromDisk`, `normalisedPathKey`, `randomUUID` all canonical
+2. Registry Entry Shape: `entry.path`, `entry.clones`, `entry.stateRemote`, `entry.stateBranch`, `entry.developerAlias` — all actual field names
+3. Clone Matching: Both sides normalized via `normalisedPathKey` — case-insensitive on win32/darwin, case-sensitive on linux
+4. Helper Call-Site Signatures: `publishTeamRootToInbox` and `hydrateTeamRootFromStateRef` parameter order and types match
+5. sessionId: `process.env['COPILOT_SESSION_ID'] ?? randomUUID()` — correct
+6. Remote is Platform-Agnostic Name: git remote name, not URL
+
+**Finding:** No mismatch between call sites and frozen helper signatures. Kill-list honored on all six points.
+
+---
+
+### 2026-06-06: Piece 33 — Adversarial review findings (CONTROL)
+
+**Date:** 2026-06-06  
+**Reviewer:** CONTROL (TypeScript Engineer)  
+**Scope:** `sync.ts`, `cli-entry.ts`, commit `0ce892e2`  
+**Verdict:** APPROVE
+
+**Type-safety findings:** Non-null assertions (teamRoot!, resolvedAlias!) are justified by control-flow guards. No `@ts-ignore`. No implicit `any`. No unsafe casts. Zero new type errors in changed files. `strict: true` and `noUncheckedIndexedAccess: true` both active.
+
+**Branch/precedence findings:** Resolution order implemented correctly:
+- TEAM_ROOT: `SQUAD_TEAM_ROOT` env > registry > config.json fallback ✅
+- Alias: `options.developer` > `SQUAD_DEVELOPER_ALIAS` > `registryAlias` ✅
+
+**MEDIUM — Whitespace alias inconsistency (not blocking):** Whitespace-only values (e.g. `"  "`) in `options.developer`, `SQUAD_DEVELOPER_ALIAS`, or registry `developerAlias` pass the `!resolvedAlias` guard and then throw inside `publishTeamRootToInbox` from regex validation, rather than `process.exit(1)` with the "squad assign" guidance message. Recommend: add `.trim()` before the falsy guard, or document the behaviour.
+
+**Exit-code paths:** Registry-miss + no config.json + push → exit 1 naming `squad assign` ✅. Missing alias on push + crossRepo → exit 1 referencing `squad assign --developer-alias` ✅. Single-repo push → `syncPush` — no alias error ✅.
+
+**Build result:** No new type errors. All `npm run build` failures are pre-existing piece-32 errors. SDK compiles cleanly.
+
+---
+
+### 2026-06-06: Gate Decision — Piece 33 (sync-from-registry)
+
+**Date:** 2026-06-06  
+**Gate:** Constraint-Compliance — final gate before piece 33 completion  
+**Commit under review:** `b1f2da98`  
+**Branch:** `squad/piece-33-sync-from-registry`  
+**Verdict:** PASS
+
+**Kill-List Checklist (all passing):**
+1. config.json demoted to fallback — NOT primary when registry entry matches cwd ✅
+2. TEAM_ROOT = `path.dirname(entry.path)` — `.squad` itself never passed ✅
+3. Transport helper bodies and signatures byte-identical to 32.5 base ✅
+4. No hydrateWorkRootProjection / WORK_SQUAD_DIR / WORK_ROOT writes / `.gitignore` edits / runBind / bind.ts / SquadDirConfig augmentation / OrphanBranchBackend ✅
+5. Single-repo push routes to `syncPush` (not `publishTeamRootToInbox`) when `teamRoot` absent ✅
+6. Alias-chain precedence: --developer > SQUAD_DEVELOPER_ALIAS > registry developerAlias > exit 1; whitespace-only trims to missing ✅
+7. Registry-miss on push exits 1 naming `squad assign` ✅
+8. SQUAD_TEAM_ROOT override precedes registry; single-repo (config.json present, no registry entry) still works ✅
+
+**Test Results:** 66/66 tests pass
+- cli-command-wiring.test.ts: 37 ✅
+- sync-registry-resolution.test.ts: 13 ✅
+- cross-repo-sync.test.ts: 16 ✅
+
+**Process Hygiene:** 6-file commit (sync.ts, cli-entry.ts, two test files, cli-command-wiring.test.ts, .changeset/sync-from-registry.md). No .squad/ files. No package-lock.json. Changeset is `patch` for @bradygaster/squad-cli. No push to origin.
+
+**Disposition:** Work is complete. Piece 34 may branch off `squad/piece-33-sync-from-registry`. EECOM is not locked out. No revision required.

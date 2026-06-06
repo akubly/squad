@@ -8,7 +8,20 @@
 
 📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
 
-## Learnings
+## Learnings Archive — Historical Context (summarized)
+
+Previous learnings from pieces 04, 08a, 19, 21, 25, 32 documented: SDK boundary discipline, casting-engine orphaning, resolver parity, registry preservation mechanics, error-code naming conventions, subpath export contracts, config-sync design, path-utils canonicalization, TypeScript build integration. See `.squad/decisions.md` for decisions; `orchestration-log/` for execution traces.
+
+## Recent Learnings
+
+### 2026-06-06: Piece 33 adversarial SDK contract review — sync-from-registry
+
+Performed adversarial SDK contract review of piece 33 (commit `0ce892e2`). All six contract checks passed: imports canonical, entry shape correct, clone matching normalized, helper signatures matched, sessionId generation correct, remote names platform-agnostic. TEAM_ROOT resolution chains correctly (SQUAD_TEAM_ROOT env > registry > config.json). Alias resolution chains correctly (--developer > SQUAD_DEVELOPER_ALIAS > registry developerAlias). Verdict: APPROVE. 
+
+**SDK contract patterns reinforced:** 
+- `loadRegistryFromDisk` return destructuring pattern is correct; consumers must destructure `{ registry, warnings }`.
+- Env-var overrides (SQUAD_TEAM_ROOT) bypass registry entirely; callers must supply explicit options or accept defaults.
+- Registry path uniqueness enforced at load time; `registry.squads.find()` returns first (and only) matching entry.
 
 ### 2026-03-14: WSL Transient API Error Investigation (Issue #363)
 
@@ -36,6 +49,24 @@
 3. **Copilot API platform** (upstream) — source of transient errors and rate limits
 
 Squad operates at layer #1, so issues at layers #2-3 are outside our control.
+
+### 2026-06-05: Piece 32.5 — State Transport Helpers Adversarial Review
+
+**Context:** EECOM implemented `publishTeamRootToInbox` and `hydrateTeamRootFromStateRef` in `packages/squad-cli/src/cli/commands/sync.ts` (uncommitted working-tree changes on `squad/piece-32.5-state-transport-helpers`).
+
+**Findings (all checks against CONTRACT FACTS for piece 33):**
+
+1. **Signatures** — Exact byte-for-byte match. Parameter names, types, order, `export async function` keyword all correct.
+2. **DEVELOPER_ALIAS_RE import** — `import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation'`. Identical source to `assign.ts`. The `./validation` subpath export is present in `packages/squad-sdk/package.json`. Regex value `/^[a-z][a-z0-9-]{1,38}$/` matches canonical. ✅
+3. **No forbidden internal resolution** — Neither helper body calls `detectBackend`, reads `config.json`, queries the registry, or resolves env-vars for input. All parameters received from caller. ✅
+4. **teamRoot semantics** — `enumerateSquadFiles` builds `path.join(teamRoot, '.squad')` as the base dir. Index file at `path.join(teamRoot, '.git', ...)`. Hydrate git-dir at `path.join(teamRoot, '.git')`. All file writes via `path.join(teamRoot, filePath)`. Correct parent-dir treatment throughout. ✅
+5. **Build** — Build fails, but baseline (committed state) already had identical TypeScript errors in `assign.ts`, `doctor.ts`, `init.ts`, `unassign.ts`. No new errors introduced by `sync.ts`. ✅ (pre-existing debt)
+6. **Export vs invoke** — Both helpers are `export async function`. Neither is called from `runSync`. ✅
+
+**Advisory (non-blocking):** `publishTeamRootToInbox` throws (rather than silently skips) on any `.squad/` file outside the allowlist. On a live squad repo with `team.md`, `agents/`, `plans/` under `.squad/`, the first call will throw. Strict-guard design — confirm or switch to filter semantics before piece 33 integration.
+
+**Verdict: APPROVE**
+
 ## Core Context
 
 - **Project:** Squad — AI agent orchestration framework
