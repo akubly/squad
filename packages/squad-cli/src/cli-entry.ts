@@ -1449,6 +1449,17 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'install-fold-pipeline') {
+    const platform = args[1] as string | undefined;
+    if (platform !== 'github' && platform !== 'ado') {
+      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado>`);
+      return;
+    }
+    const { installFoldPipeline } = await import('./cli/commands/install-fold-pipeline.js');
+    await installFoldPipeline(platform, { cwd: getSquadStartDir() });
+    return;
+  }
+
   // Unknown command
   fatal(`Unknown command: ${cmd}\n       Run 'squad doctor' to check your setup, or 'squad help' for usage information.`);
 }

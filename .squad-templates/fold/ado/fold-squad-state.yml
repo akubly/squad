@@ -1,0 +1,223 @@
+# Squad fold pipeline — ADO variant
+# Folds Squad inbox branches into the Squad state branch.
+#
+# Trigger: push to any branch under refs/heads/squad/inbox/* (serialized by batch: true).
+# This pipeline is the sole writer to squad-state. Any concurrent inbox pushes are coalesced
+# by the batch trigger so runs are serialized and two runs on the same input produce the
+# same squad-state tip SHA.
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - refs/heads/squad/inbox/*
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: DELETE_FOLDED_REFS
+    value: 'false'
+
+jobs:
+  - job: fold
+    displayName: Fold Squad inbox into squad-state
+    steps:
+      # This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.
+
+      # Step 1 — Full-depth checkout (required for ancestry computation and read-tree).
+      # persistCredentials is required for subsequent git push steps on ADO.
+      - checkout: self
+        fetchDepth: 0
+        persistCredentials: true
+
+      # Step 2 — Enumerate all remote Squad inbox refs.
+      - bash: |
+          git fetch origin '+refs/heads/squad/inbox/*:refs/remotes/origin/squad/inbox/*' 2>/dev/null || true
+          INBOX_REFS=`git ls-remote --heads origin 'refs/heads/squad/inbox/*' | awk '{print $2}'`
+          INBOX_REFS_PIPE=`echo "$INBOX_REFS" | tr '\n' '|'`
+          echo "##vso[task.setvariable variable=inboxRefs;isOutput=true]${INBOX_REFS_PIPE%|}"
+        name: enumInbox
+        displayName: Enumerate Squad inbox refs
+
+      # Step 3 — Filter against publish-history.json foldedRefs; skip already-folded refs.
+      # Idempotency key is the inbox ref name (not a timestamp), immune to clock skew.
+      - bash: |
+          HISTORY_FILE=".squad/publish-history.json"
+          FOLDED_REFS=""
+          if [ -f "$HISTORY_FILE" ]; then
+            if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
+              echo "##vso[task.logissue type=error]$HISTORY_FILE is malformed JSON — aborting to prevent data loss."
+              exit 1
+            fi
+            FOLDED_REFS=`jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null || true`
+          fi
+
+          UNFOLDED=""
+          IFS='|' read -ra REFS <<< "$(enumInbox.inboxRefs)"
+          for REF in "${REFS[@]}"; do
+            [ -z "$REF" ] && continue
+            if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
+              echo "  Skipping $REF (already recorded in publish-history.json)"
+              continue
+            fi
+            UNFOLDED="${UNFOLDED}${REF}|"
+          done
+
+          if [ -z "$UNFOLDED" ]; then
+            echo "No unfolded refs — nothing to do."
+            echo "##vso[task.setvariable variable=hasWork;isOutput=true]false"
+          else
+            echo "##vso[task.setvariable variable=hasWork;isOutput=true]true"
+            echo "##vso[task.setvariable variable=unfoldedRefs;isOutput=true]${UNFOLDED%|}"
+          fi
+        name: filterRefs
+        displayName: Filter unfolded refs
+
+      # Step 4 — Sort unfolded refs deterministically.
+      # Primary key: timestamp segment <yyyyMMdd-HHmmss> from ref name.
+      # Secondary key: sessionId/developerAlias segment (ASCII lexicographic).
+      # Guarantees two pipeline runs on the same input produce the same squad-state tip SHA.
+      - bash: |
+          SORT_LIST=()
+          IFS='|' read -ra REFS <<< "$(filterRefs.unfoldedRefs)"
+          for REF in "${REFS[@]}"; do
+            [ -z "$REF" ] && continue
+            TS=`echo "$REF" | grep -oP '\d{8}-\d{6}' || echo "00000000-000000"`
+            SESSION=`echo "$REF" | sed 's|.*/||'`
+            SORT_KEY="${TS}"$'\t'"${SESSION}"$'\t'"${REF}"
+            SORT_LIST+=("$SORT_KEY")
+          done
+          SORTED_REFS=`printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f3 | tr '\n' '|'`
+          echo "##vso[task.setvariable variable=sortedRefs;isOutput=true]${SORTED_REFS%|}"
+        name: sortRefs
+        displayName: Sort inbox refs
+        condition: eq(variables['filterRefs.hasWork'], 'true')
+
+      # Step 5 — Checkout the current squad-state tip (or create orphan if branch is new).
+      - bash: |
+          if git ls-remote --exit-code origin refs/heads/squad-state >/dev/null 2>&1; then
+            git fetch origin squad-state
+            git checkout -B squad-state origin/squad-state
+          else
+            git checkout --orphan squad-state
+            git rm -rf . >/dev/null 2>&1 || true
+            git commit --allow-empty -m "Initialize Squad state branch"
+          fi
+        displayName: Checkout squad-state branch
+        condition: eq(variables['filterRefs.hasWork'], 'true')
+
+      # Step 6 — For each inbox ref (sorted): apply .squad/ subtree via git read-tree.
+      # Commits use publishedAt from inbox snapshot metadata — NOT pipeline run time —
+      # to keep fold ordering deterministic across retried runs.
+      - bash: |
+          FOLDED_ENTRIES="[]"
+
+          IFS='|' read -ra REFS <<< "$(sortRefs.sortedRefs)"
+          for REF in "${REFS[@]}"; do
+            [ -z "$REF" ] && continue
+            SHORT_REF="${REF#refs/heads/}"
+            echo "  Folding $REF ..."
+
+            REF_SHA=`git ls-remote origin "$REF" | awk '{print $1}'`
+            if [ -z "$REF_SHA" ]; then
+              echo "  WARNING: Cannot resolve $REF — skipping."
+              continue
+            fi
+
+            git fetch origin "+${REF}:refs/fold-tmp/inbox" 2>/dev/null
+
+            METADATA_SHA=`git ls-tree refs/fold-tmp/inbox .squad/publish-metadata.json 2>/dev/null | awk '{print $3}'`
+            PUB_AT="1970-01-01T00:00:00Z"
+            DEV_ALIAS="unknown"
+            if [ -n "$METADATA_SHA" ]; then
+              META_JSON=`git cat-file blob "$METADATA_SHA" 2>/dev/null || echo '{}'`
+              PUB_AT=`echo "$META_JSON" | jq -r '.publishedAt // "1970-01-01T00:00:00Z"'`
+              DEV_ALIAS=`echo "$META_JSON" | jq -r '.developerAlias // "unknown"'`
+            else
+              echo "  WARNING: Missing .squad/publish-metadata.json on $REF — using defaults."
+            fi
+
+            # Apply only the .squad/ subtree from the inbox snapshot via git read-tree.
+            # git read-tree applies the subtree without creating a merge commit.
+            INBOX_SQUAD_TREE=`git ls-tree refs/fold-tmp/inbox .squad 2>/dev/null | awk '{print $3}'`
+            if [ -z "$INBOX_SQUAD_TREE" ]; then
+              echo "  WARNING: No .squad/ subtree in $REF — skipping."
+              git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+              continue
+            fi
+
+            git read-tree --prefix=.squad/ -u "$INBOX_SQUAD_TREE"
+            git add .squad/
+
+            GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+              git commit \
+                --author="Squad Fold Pipeline <squad-fold@noreply>" \
+                -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
+
+            ENTRY=`jq -n \
+              --arg ref "$REF" \
+              --arg sha "$REF_SHA" \
+              --arg alias "$DEV_ALIAS" \
+              --arg pubAt "$PUB_AT" \
+              '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+            FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+
+            git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+          done
+
+          FINAL_SHA=`git rev-parse HEAD 2>/dev/null || echo ""`
+          FOLDED_ENTRIES_ONELINE=`echo "$FOLDED_ENTRIES" | tr '\n' ' '`
+          echo "##vso[task.setvariable variable=foldedEntries;isOutput=true]${FOLDED_ENTRIES_ONELINE}"
+          echo "##vso[task.setvariable variable=finalSha;isOutput=true]${FINAL_SHA}"
+        name: foldRefs
+        displayName: Fold each inbox ref into squad-state
+        condition: eq(variables['filterRefs.hasWork'], 'true')
+
+      # Step 7 — Update .squad/publish-history.json with a new fold record.
+      - bash: |
+          HISTORY_FILE=".squad/publish-history.json"
+          EXISTING="[]"
+          if [ -f "$HISTORY_FILE" ]; then
+            EXISTING=`cat "$HISTORY_FILE"`
+          fi
+
+          FOLD_TS=`date -u +"%Y-%m-%dT%H:%M:%SZ"`
+          FOLD_COMMIT_SHA="$(foldRefs.finalSha)"
+          FOLDED_ENTRIES="$(foldRefs.foldedEntries)"
+
+          NEW_RECORD=`jq -n \
+            --arg ts "$FOLD_TS" \
+            --arg sha "$FOLD_COMMIT_SHA" \
+            --argjson entries "$FOLDED_ENTRIES" \
+            '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}'`
+
+          echo "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]' > "$HISTORY_FILE"
+          git add "$HISTORY_FILE"
+          git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
+        displayName: Update publish-history.json
+        condition: eq(variables['filterRefs.hasWork'], 'true')
+
+      # Step 8 — Push squad-state with --force-with-lease.
+      # --force-with-lease is mandatory even when branch policy serializes the pipeline.
+      # OAuth token access is scoped to the push step only. Do not enable allowScripts at the pipeline or pool level.
+      - bash: |
+          git push origin HEAD:refs/heads/squad-state --force-with-lease
+        displayName: Push squad-state
+        condition: eq(variables['filterRefs.hasWork'], 'true')
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+      # Step 9 — Optional pruning: delete folded Squad inbox refs when DELETE_FOLDED_REFS is true.
+      # Deletion failures are non-fatal — log and continue.
+      - bash: |
+          IFS='|' read -ra REFS <<< "$(sortRefs.sortedRefs)"
+          for REF in "${REFS[@]}"; do
+            [ -z "$REF" ] && continue
+            echo "  Deleting folded Squad inbox ref: $REF"
+            git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to delete $REF — continuing."
+          done
+        displayName: Prune folded Squad inbox refs
+        condition: and(eq(variables['filterRefs.hasWork'], 'true'), eq(variables['DELETE_FOLDED_REFS'], 'true'))
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
