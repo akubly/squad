@@ -26,6 +26,7 @@ import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
+import { installCrossRepoHook } from '../cli/commands/install-hooks.js';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */
@@ -281,6 +282,8 @@ export interface SquadAssignOpts {
   stateBranch?: string;
   /** --developer-alias <alias>: per-developer namespace identifier for inbox branches. */
   developerAlias?: string;
+  /** @internal Injectable seam: override cross-repo hook installer. For testing only. */
+  _installCrossRepoHookFn?: (docsRepoPath: string) => void;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -383,7 +386,8 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   }
 
   // Warm path.
-  return _warmPath({ callsign: rawArg, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn });
+  const installCrossRepoHookFn = opts._installCrossRepoHookFn ?? installCrossRepoHook;
+  return _warmPath({ callsign: rawArg, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn, installCrossRepoHookFn });
 }
 
 interface _WarmCtx {
@@ -393,10 +397,11 @@ interface _WarmCtx {
   gitRootFn: (dir: string) => string | null;
   remotesFn: (dir: string) => string[];
   writeRegistryFn: (filePath: string, registry: Registry) => void;
+  installCrossRepoHookFn: (docsRepoPath: string) => void;
 }
 
 async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
-  const { callsign, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn } = ctx;
+  const { callsign, opts, resolvedTargetDir, gitRootFn, remotesFn, writeRegistryFn, installCrossRepoHookFn } = ctx;
   const warnings: string[] = [];
 
   const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
@@ -572,6 +577,20 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
       `Could not install Copilot payload: ${err instanceof Error ? err.message : String(err)}. ` +
       `Re-run "squad assign ${callsign}" after fixing the source or permissions.`,
     );
+  }
+
+  // Install cross-repo post-commit hook in the docs-repo clone when developerAlias is set.
+  // Degrades gracefully: a failure emits a warning and does not abort the assign command.
+  if (opts.developerAlias !== undefined) {
+    const docsRepoPath = path.dirname(entry.path);
+    try {
+      installCrossRepoHookFn(docsRepoPath);
+    } catch (err) {
+      warnings.push(
+        `Could not install cross-repo hook at "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
+        `Run 'squad assign ${callsign}' again after the docs-repo clone is available.`,
+      );
+    }
   }
 
   return {

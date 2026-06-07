@@ -373,3 +373,92 @@ describe('squad assign — piece-32 state fields (cold-start path)', () => {
     });
   });
 });
+
+// ─── Piece 34 — cross-repo hook installation ────────────────────────────────
+
+describe('squad assign — piece-34 cross-repo hook installation (warm path)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeTmpDir('p34');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  });
+
+  it('P34.A1 developerAlias set → installCrossRepoHook called with path.dirname(entry.path)', async () => {
+    const hostDir = path.join(dir, 'host');
+    const cloneDir = path.join(dir, 'clone');
+    fs.mkdirSync(cloneDir, { recursive: true });
+    const squadDir = makeSquadHost(hostDir, 'alpha');
+    const registryPath = path.join(dir, 'registry.json');
+    makeRegistry(registryPath, squadDir, 'alpha');
+
+    const hookCalls: string[] = [];
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      developerAlias: 'dev1',
+      getGitRoot: () => cloneDir,
+      getRemoteUrls: () => [],
+      _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
+    }));
+
+    // installCrossRepoHook must be called once with the docs-repo root (parent of .squad)
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]).toBe(hostDir);
+  });
+
+  it('P34.A2 developerAlias set but hook throws → warning emitted, assign succeeds (no throw)', async () => {
+    const hostDir = path.join(dir, 'host');
+    const cloneDir = path.join(dir, 'clone');
+    fs.mkdirSync(cloneDir, { recursive: true });
+    const squadDir = makeSquadHost(hostDir, 'alpha');
+    const registryPath = path.join(dir, 'registry.json');
+    makeRegistry(registryPath, squadDir, 'alpha');
+
+    const result = await runAssign(baseOpts({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      developerAlias: 'dev1',
+      getGitRoot: () => cloneDir,
+      getRemoteUrls: () => [],
+      _installCrossRepoHookFn: () => { throw new Error('simulated: not a git repo'); },
+    }));
+
+    // Assign must succeed
+    expect(result.kind).toBe('assigned');
+
+    // Warning must be emitted
+    if (result.kind === 'assigned' || result.kind === 'reactivated') {
+      expect(result.warnings.some(w => w.includes('simulated: not a git repo'))).toBe(true);
+    }
+  });
+
+  it('P34.A3 developerAlias not set → installCrossRepoHook not called', async () => {
+    const hostDir = path.join(dir, 'host');
+    const cloneDir = path.join(dir, 'clone');
+    fs.mkdirSync(cloneDir, { recursive: true });
+    const squadDir = makeSquadHost(hostDir, 'alpha');
+    const registryPath = path.join(dir, 'registry.json');
+    makeRegistry(registryPath, squadDir, 'alpha');
+
+    const hookCalls: string[] = [];
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      // developerAlias intentionally omitted
+      getGitRoot: () => cloneDir,
+      getRemoteUrls: () => [],
+      _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
+    }));
+
+    expect(hookCalls).toHaveLength(0);
+  });
+});

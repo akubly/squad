@@ -14,6 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -112,6 +113,27 @@ fi
 export interface InstallHooksOptions {
   force?: boolean;
 }
+
+/**
+ * Hook template for the cross-repo post-commit hook.
+ * Installed in the docs-repo clone's .git/hooks/post-commit by installCrossRepoHook.
+ * The SQUAD_SYNC_ACTIVE guard prevents infinite recursion when squad sync itself commits.
+ */
+const CROSS_REPO_POST_COMMIT_TEMPLATE = `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad cross-repo publish hook
+# Installed by: squad assign --developer-alias
+if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
+  export SQUAD_SYNC_ACTIVE=1
+  squad sync --push --quiet
+  unset SQUAD_SYNC_ACTIVE
+fi
+`;
+
+// TODO(piece-34-B): Copilot CLI external post-tool hook API not found at implementation time;
+// deferred to follow-up piece. See .squad/decisions/inbox/piece-34-B-deferred.md.
+// When the Copilot CLI exposes a file-based hook API, register a hook scoped to
+// TEAM_ROOT/.squad/** here that invokes `squad sync --push --quiet`.
 
 /**
  * Get the .git/hooks directory path for the repo.
@@ -221,6 +243,47 @@ export function installGitHooks(cwd: string, options: InstallHooksOptions = {}):
   }
 
   console.log(`\n${GREEN}${BOLD}Done.${RESET} Squad state will sync automatically on push/pull.\n`);
+}
+
+/**
+ * Install a post-commit hook in a docs-repo clone that invokes `squad sync --push --quiet`
+ * after each commit. Protected by the SQUAD_SYNC_ACTIVE recursion guard.
+ *
+ * The hook is installed in `docsRepoPath`'s .git/hooks/post-commit — NEVER in the
+ * product repo. Call with an explicit, registry-resolved docs-repo path; there is
+ * no CWD fallback.
+ *
+ * Idempotent: calling twice on the same repo does not duplicate the hook section.
+ *
+ * @param docsRepoPath - Absolute path to the docs-repo clone (path.dirname(registryEntry.path)).
+ * @param options - Hook install options.
+ * @throws {Error} if docsRepoPath is not a git repository.
+ */
+export function installCrossRepoHook(docsRepoPath: string, options: InstallHooksOptions = {}): void {
+  // Kill-list: must be an explicit git repo path — ERROR (not warning) if not a git repo.
+  // Also verifies docsRepoPath IS the repo root (not just inside one), to prevent accidentally
+  // targeting a parent git repo.
+  let gitRoot: string;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: docsRepoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    throw new Error(
+      `installCrossRepoHook: "${docsRepoPath}" is not a git repository. ` +
+      `Run 'squad assign' with a registered docs-repo clone path before installing hooks.`,
+    );
+  }
+  if (normalisedPathKey(path.resolve(docsRepoPath)) !== normalisedPathKey(gitRoot)) {
+    throw new Error(
+      `installCrossRepoHook: "${docsRepoPath}" is not a git repository root ` +
+      `(root is "${gitRoot}"). Pass the git root directory, not a subdirectory.`,
+    );
+  }
+
+  const hooksDir = getHooksDir(docsRepoPath);
+  fs.mkdirSync(hooksDir, { recursive: true });
+  installHook(hooksDir, 'post-commit', CROSS_REPO_POST_COMMIT_TEMPLATE, options.force ?? false);
 }
 
 /**

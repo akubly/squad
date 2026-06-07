@@ -1422,6 +1422,13 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'sync') {
+    const subCmd = args[1];
+    if (subCmd === 'status') {
+      const { runSyncStatus } = await import('./cli/commands/sync.js');
+      await runSyncStatus({ cwd: getSquadStartDir() });
+      return;
+    }
+
     const hasPush = args.includes('--push');
     const hasPull = args.includes('--pull');
     const hasBoth = args.includes('--both');
@@ -1435,9 +1442,10 @@ async function main(): Promise<void> {
     const developerIdx = args.indexOf('--developer');
     const developer = developerIdx !== -1 ? args[developerIdx + 1] : undefined;
     const syncQuiet = args.includes('--quiet');
+    const syncDryRun = args.includes('--dry-run');
 
     const { runSync } = await import('./cli/commands/sync.js');
-    await runSync({ direction, remote: syncRemote, developer, quiet: syncQuiet });
+    await runSync({ direction, remote: syncRemote, developer, quiet: syncQuiet, dryRun: syncDryRun });
     return;
   }
 

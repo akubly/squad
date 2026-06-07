@@ -30,6 +30,8 @@ export interface SyncOptions {
   quiet?: boolean;
   /** Developer alias for cross-repo inbox publish. Overrides env var and registry entry. */
   developer?: string;
+  /** Dry-run: print pending files and target branch info without publishing. */
+  dryRun?: boolean;
 }
 
 /**
@@ -245,7 +247,7 @@ const SESSION_ID_FORBIDDEN_RE = /[\x00-\x20\x7f~^:?*\[\\]|\.\.|\@\{|\/\/|^\/|^\-
  * Allowlisted paths within .squad/ that may be published.
  * Relative to teamRoot, forward-slash separated.
  */
-const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md'];
+const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md', '.squad/.last-publish'];
 const PUBLISH_ALLOWLIST_PREFIX = [
   '.squad/decisions/inbox/',
   '.squad/log/',
@@ -481,6 +483,101 @@ export const _transport = {
 };
 
 /**
+ * Write the publish timestamp to .squad/.last-publish in the given root.
+ * Called on successful push (cross-repo and single-repo paths). Best-effort.
+ */
+function writeLastPublish(root: string): void {
+  try {
+    const squadDir = path.join(root, '.squad');
+    fs.mkdirSync(squadDir, { recursive: true });
+    fs.writeFileSync(path.join(squadDir, '.last-publish'), new Date().toISOString() + '\n', 'utf-8');
+  } catch { /* best-effort — do not abort a successful sync */ }
+}
+
+/**
+ * Options for the `squad sync status` subcommand.
+ */
+export interface SyncStatusOptions {
+  cwd?: string;
+}
+
+/**
+ * Print a structured status summary for `squad sync status`.
+ *
+ * Six fields: Last published / Pending changes / State remote / State branch /
+ * Developer alias / Docs repo path.
+ *
+ * Reads .squad/.last-publish (ISO-8601) from the resolved TEAM_ROOT; shows "never"
+ * when absent. Registry-first resolution: team root and state fields come from the
+ * registry entry matching cwd. Config.json is a fallback for unregistered contexts.
+ */
+export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
+  const repoRoot = getRepoRoot(cwd);
+
+  let teamRoot: string | undefined;
+  let stateRemote: string | undefined;
+  let stateBranch: string | undefined;
+  let developerAlias: string | undefined;
+
+  const { registry } = loadRegistryFromDisk();
+  const normalizedRoot = normalisedPathKey(repoRoot);
+  const entry = registry?.squads.find(e =>
+    e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
+  );
+  if (entry) {
+    teamRoot = path.dirname(entry.path);
+    stateRemote = entry.stateRemote;
+    stateBranch = entry.stateBranch;
+    developerAlias = entry.developerAlias;
+  } else {
+    // Fallback: config.json for unregistered/single-repo contexts
+    const configPath = path.join(repoRoot, '.squad', 'config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        stateRemote = config.stateRemote;
+        stateBranch = config.stateBranch;
+        developerAlias = config.developerAlias;
+      } catch { /* ignore */ }
+    }
+  }
+
+  const effectiveRoot = teamRoot ?? repoRoot;
+
+  // Read .last-publish
+  const lastPublishPath = path.join(effectiveRoot, '.squad', '.last-publish');
+  let lastPublished = 'never';
+  try {
+    lastPublished = fs.readFileSync(lastPublishPath, 'utf-8').trim();
+  } catch { /* absent = never */ }
+
+  // Count pending changes (files modified since last publish)
+  const files = enumerateSquadFiles(effectiveRoot);
+  let pendingChanges: string;
+  if (lastPublished === 'never') {
+    pendingChanges = files.length === 0 ? 'none' : `${files.length} file${files.length === 1 ? '' : 's'} changed`;
+  } else {
+    const lastTime = new Date(lastPublished).getTime();
+    let changedCount = 0;
+    for (const f of files) {
+      const fullPath = path.join(effectiveRoot, f.replace(/\//g, path.sep));
+      try {
+        if (fs.statSync(fullPath).mtimeMs > lastTime) changedCount++;
+      } catch { /* skip unreadable */ }
+    }
+    pendingChanges = changedCount === 0 ? 'none' : `${changedCount} file${changedCount === 1 ? '' : 's'} changed`;
+  }
+
+  console.log(`Last published:    ${lastPublished}`);
+  console.log(`Pending changes:   ${pendingChanges}`);
+  console.log(`State remote:      ${stateRemote ?? '(not set)'}`);
+  console.log(`State branch:      ${stateBranch ?? '(not set)'}`);
+  console.log(`Developer alias:   ${developerAlias ?? '(not set)'}`);
+  console.log(`Docs repo path:    ${teamRoot ?? '(not bound)'}`);
+}
+
+/**
  * Main sync entrypoint.
  *
  * Resolution order (sub-proposal A):
@@ -588,6 +685,23 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend ?? 'orphan'})`);
 
+    // ── Dry-run: print pending info without publishing ─────────────────────────
+    if (options.dryRun) {
+      const files = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
+      const effectiveAlias = resolvedAlias ?? '(alias required)';
+      const effectiveRemote = stateRemote ?? 'squad-docs';
+      const effectiveBranch = stateBranch ?? 'squad-state';
+      console.log(`squad sync --dry-run`);
+      console.log(`  Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>`);
+      console.log(`  State remote:        ${effectiveRemote}`);
+      console.log(`  State branch:        ${effectiveBranch}`);
+      console.log(`  Pending files (${files.length}):`);
+      for (const f of files) {
+        console.log(`    ${f}`);
+      }
+      return;
+    }
+
     // ── Sub-proposal C: Pull path ──────────────────────────────────────────────
     if (isPull) {
       syncPull(repoRoot, remote, backend, quiet);
@@ -610,9 +724,13 @@ export async function runSync(options: SyncOptions): Promise<void> {
           resolvedAlias!,
           sessionId,
         );
+        // Write last-publish timestamp after successful cross-repo push.
+        writeLastPublish(teamRoot!);
       } else {
         // Single-repo path: unchanged
         syncPush(repoRoot, remote, backend, quiet);
+        // Write last-publish timestamp after successful single-repo push.
+        writeLastPublish(repoRoot);
       }
     }
   } finally {
