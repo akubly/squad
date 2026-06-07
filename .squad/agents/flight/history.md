@@ -10,43 +10,32 @@ See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots,
 
 ---
 
-## Summary (Recent)
+## 📌 Piece 34 — Gate Decision (2026-06-06)
 
-**Pieces 22–25 Wave (2026-05-22 to 2026-05-28):** Led four interconnected specs across doctor unification (piece 22, 165 LOC diff), shared CLI conventions (piece 23, 17 net LOC), OTel typing hardening (piece 24, 114 net LOC), and resolver rename + CLI hardening (piece 25, +23 net LOC). Key learnings: (1) mechanical vs. enriched scope split prevents compounding; (2) ship-debt sniff methodology systematically identifies high-priority items; (3) parallel modules at integration boundaries concentrate debt; (4) variadic approximations lose type inference compared to real interfaces; (5) lint rule presence must be verified before granting suppression concessions; (6) feature vs. cleanup split heuristic refines audit cluster decomposition; (7) `@deprecated` const alias re-exports (with `typeof`) preserve overload signatures across barrel files; (8) naming conflicts between SDK and CLI exports of the same canonical name require caller-side aliasing; (9) env seam completions can arrive earlier than spec expects — always verify before duplicating work; (10) v2 resolver registry/platform fallbacks require full env isolation in tests (SQUAD_REGISTRY_PATH + APPDATA/LOCALAPPDATA). Developed patterns for adversarial review feedback routing, resolver chain testing, and deprecation-strategy gating.
+**Constraint-Compliance Gate: PASS**
 
----
+All 6 constraint-compliance items cleared:
 
-## 📌 Team Updates — Recent
+1. **Hooks install in docs-repo clone ONLY** ✓ — Explicit `docsRepoPath` parameter; two-stage git-root validation
+2. **Recursion guard TEST-ENFORCED** ✓ — FIDO's revised A3 uses sentinel + marker; three-case load-bearing proof
+3. **Registry-first topology preserved** ✓ — CAPCOM's prior approval stands; registry used exclusively
+4. **`--quiet` suppresses stdout only** ✓ — Error paths reach stderr regardless
+5. **B determination recorded** ✓ — `.squad/decisions/inbox/piece-34-B-deferred.md` present with functional prose
+6. **REPLAY-PROTOCOL tone** ✓ — Changeset, B-deferred doc, commit message carry zero version/fork language
 
-**2026-05-28 Piece 25 Implementation Complete — Commit e67e0959:** Piece 25 (resolver rename + CLI hardening, D-18/CONTROL N2/CONTROL Directive 2) implemented and committed to `squad/piece-25-resolver-rename-and-cli-hardening` off piece-24. All gates passed: tsc clean, build clean, lint clean, tests pass (4 new env-seam tests, 46/46 doctor tests, D-18 backward-compat test). Net production LOC: +23 (within ≤50 acceptance criteria). CONTROL Directive 2 was already present from piece-23; piece-25 work was import alias update only. PR blocked by EMU restriction — branch pushed to origin.
+**Binding ruling: B-doc placement** — Remove B-deferred doc from product commit; place in separate LOCAL `.squad` commit (not pushed).
 
-📌 **2026-05-28 Piece 25 Revision Clean (Commit 185617e):** EECOM folded approved nits (N1+N2+N3); all gates clean (tsc/build/lint passed; doctor.test.ts 47/47; full vitest red inherited only). Revision complete.
+**Coordinator push clearance:**
+- (a) Fold FIDO's A3 fix — CLEARED
+- (b) Restructure per B-doc ruling — REQUIRED
+- (c) Revert working-tree noise — CLEARED
+- (d) Force-push amended SHA only, no PR — CLEARED
 
-**2026-05-27 Piece 24 Rev Complete — Lockout Lapses (22:35Z):** EECOM completed revision addressing all FIDO nits (N1–N5) on commit `0325a335`. Type widening approach restores Tracer/Meter annotations without suppressions. All gates green (tsc, build, lint, 34/34 otel tests). Lockout on piece-24 lapses when Brady approves this rev or verification re-review completes.
+**Product commit:** Exactly 8 files (.changeset + 7 product/test files)
 
-**2026-05-27 Piece 24 Implementation Complete — Commit b1a710fd:** Piece 24 (SDK adapter + OTel typing hardening, D-6/D-8/D-9/D-16) implemented and committed to `squad/piece-24-sdk-adapter-otel-typing` off piece-23. All gates passed: tsc clean, build clean, lint clean, 88 vitest tests pass, zero suppressions in typed surface. Net LOC: ~114 (variance vs. ~59 spec estimate explained by cross-file call-site typing folding in more than noop redesign). Commit-only per Brady's directive — PR awaits piece-23 merge to dev. Chain handoff written to session artifact. Scribe merging decisions and staging for commit.
+## Archive
 
-**2026-05-27 CONTROL Design Directive Filed — Piece 24 §2.2 Revision Required Before Implementation:** CONTROL investigated the eslint-disable concession on `_noopTracer.startActiveSpan` and filed a high-confidence directive: the rule being suppressed (`@typescript-eslint/no-explicit-any`) is NOT in the project's ESLint config — all suppressions are dead code. CONTROL recommends Alt 1 (3-overload interface + standalone function, ~+8 LOC, zero suppression). Flight's piece-24 spec must rev §2.2 before implementation kickoff. Brady's decision pending. See `.squad/decisions.md` → 2026-05-27 entries and `.squad/orchestration-log/2026-05-27T1315-control.md` for full directive.
-
-**2026-05-27 Piece 23 Revision Complete + Piece 24 Spec Ready:** EECOM completed piece 23 revision with all nits addressed (F1–F4 applied, F2 false-positive documented, ~+30 LOC). All gates green. Flight authored piece 24 spec + handoff (SDK adapter + OTel typing, D-6/D-8/D-9/D-16 cluster, ~51 net LOC). Decisions merged, orchestration logs prepared.
-
----
-
-## Piece 25 Scope Decision (2026-05-27)
-
-**Spec:** `docs/proposals/piece-25-resolver-rename-and-cli-hardening.md`  
-**Handoff:** session-state `41b7998d.../files/piece-25-resolver-rename-and-cli-hardening-handoff.md`  
-**Expected net LOC:** ~9–14 production LOC. Smallest piece in the 22-25 wave.
-
-### Chosen cluster: D-18 + CONTROL N2 + CONTROL Directive 2
-
-**D-18** (M-severity) — SDK `resolveSquad` renamed to `resolveSquadDir` (canonical semantic); old `resolveSquad` kept as `@deprecated` alias (no removal). Minor SDK bump, not major. Compounding value: every future SDK caller will use the semantically clear name; no new resolver drift.
-
-**CONTROL N2** — `DoctorSource` exhaustiveness guard in `renderFinding`/source-grouping (`cli-entry.ts`). 3–5 LOC. Near-free because D-18 already opens `cli-entry.ts`. Prevents silent finding loss when a third `DoctorSource` is added.
-
-**CONTROL Directive 2** — `env?: NodeJS.ProcessEnv` optional seam on CLI `resolveSquadDir` (`squad-resolver.ts`). Near-free because D-18 already opens that file. Follows the D-13 options-bag convention documented in piece 23.
-
-### Items considered and rejected
+Previous learnings (pieces 02–33) documented in `history-archive.md`.
 
 - **D-14** (span propagation, M-severity): Prerequisite "agent lifecycle spans complete" still unmet after piece 24. Feature/implementation work with conditional language — 50–100+ LOC estimated. Deferred until Brady formally declares lifecycle spans locked.
 - All piece 22-24 items: shipped or in-flight.
@@ -100,9 +89,40 @@ Implementation kickoff is gated on Brady's confirmation of A or B.
 
 ## Learnings
 
+**Piece 32.5 Constraint-Compliance Gate (2026-06-05) — PASS:**
+All 7 checks cleared for commit `d32fe25b` (state transport helpers). Key patterns confirmed: (1) `process.env` spread for git subprocess env setup (GIT_INDEX_FILE, GIT_AUTHOR_NAME) is not a kill-list violation — only env-var *input resolution* for config/behavior is prohibited; (2) Vitest IPC `onTaskUpdate` timeout after a 143-second test suite is a worker-channel artifact, not a test failure — reporter line `Tests N passed (N)` is authoritative; (3) Scrub Gate 1 FAIL on whole-tree baseline is pre-existing — confirm none of the committed files appear in the failure path list; (4) allowlist-guard ordering (throw before `commit-tree`) is the correct enforcement point — test must verify no remote ref created, not merely that an error was thrown.
+
+---
+
+**Piece 33 Constraint-Compliance Gate (2026-06-06) — PASS:**
+All 8 checks cleared for commit `b1f2da98` (registry-first sync). Key patterns confirmed: (1) `_transport` barrel object (exposing helpers as object properties) is an acceptable indirection for ESM spy-ability — helper function bodies and signatures remain byte-identical to the 32.5 base (verified by line-range hash comparison); (2) `path.dirname(entry.path)` correctly derives TEAM_ROOT from registry entry — `.squad` itself is never passed; (3) config.json is exclusively gated behind `if (!teamRoot)` — registry takes precedence; (4) B2 regression guard uses `vi.spyOn(_transport, 'publishTeamRootToInbox')` with `.not.toHaveBeenCalled()` — strongest possible assertion; (5) G3 message assertions use `.toContain('squad assign')` and `.toContain('squad assign --developer-alias')` — content-verified, not just exit-code-verified; (6) two vitest-worker `onTaskUpdate` timeout errors are pre-existing IPC contention, not new regressions — all 66 targeted tests pass; (7) commit is a clean 6-file product/test/changeset set with zero `.squad/`, `package-lock.json`, or version-stamp noise.
+
+---
+
 **On No-Push Directives in Stacked Reviews:**
 Pieces 21–25 carry Brady's standing directive: "commit-only, no push — Brady reviews locally." This directive was documented in prior-piece decisions and reiterated at stack launch, but carry-forward across decisions is insufficient. When piece-25 implementation kicked off, the directive was not repeated in the specification or charter, leading to Flight executing an intentional push (per Flight's summary). Brady has been informed and is deciding whether to retract the remote ref.
 
 **Recommendation for future stacks:** Embed blocking directives (e.g., "no-push until Brady approves") as a repeating reminder in the spec itself (not just in charter or prior decisions), especially for pieces that depend on reviewer decision-making. Consider adding a "Blocking Directive Checklist" section to piece specs that inherit directives from prior pieces. This ensures kickoff clarity and reduces accidental directive drift.
 
 The incident is captured in the orchestration log (`2026-05-28T0015-flight.md`) and decisions.md for team reference.
+
+---
+
+**Piece 34 Constraint-Compliance Gate (2026-06-06) — PASS (conditional on fold + restructure):**
+All 6 checks cleared for commit `b0045b27` (client-side publish triggers) plus FIDO's uncommitted A3 fix. Key patterns confirmed and rulings issued:
+
+(1) **Hooks in docs-repo clone only** — `installCrossRepoHook` accepts explicit `docsRepoPath`, throws `Error` (not warn) on non-git path, additionally verifies the path is the repo ROOT (not merely inside one), zero CWD fallback, not wired through `ensureHooksForBackend`. Cleanest separation seen in this stack.
+
+(2) **Recursion guard test-enforced** — FIDO's revised A3 uses a sh-function sentinel (`squad()` shadows PATH entry, writes a marker file). Three-case structure: Case 1 (guard active → marker absent), Case 2 (guard inactive → marker present), Case 3 (guard code stripped + guard env active → marker still appears, proving Case 1 would fail without the guard). Original A3 was exit-code-only — structurally unable to catch invocation. Sentinel pattern is the correct approach for sh hook body testing.
+
+(3) **Registry-first topology** — `runSyncStatus` and assign wiring use `loadRegistryFromDisk()` first; `teamRoot = path.dirname(entry.path)`; config.json exclusively behind the no-registry fallback path. No regression against piece-33 topology.
+
+(4) **`--quiet` stdout-only** — all stdout gated behind `if (!quiet) console.log(...)`; all error paths (including thrown errors propagated to cli-entry.ts) emit via `console.error`. Gate 4 clean.
+
+(5) **B determination recorded** — `.squad/decisions/inbox/piece-34-B-deferred.md` present with clean functional prose, correct conclusion, no tone violations.
+
+(6) **REPLAY-PROTOCOL tone** — changeset, B-deferred doc, and commit message carry zero version/fork/porting/comparison language and zero author identity in `.squad` files. "Previous piece" in changeset is neutral ordering reference, not comparison framing.
+
+**B-doc placement ruling (binding):** `.squad/decisions/inbox/piece-34-B-deferred.md` must be removed from the pushed product commit. Step h mandates `.squad` logging commits separate and local; origin tip must be the isolated product commit. Move the doc to a separate LOCAL `.squad` commit (not pushed). The KILL-LIST's "recorded before commit" requirement is satisfied by the local `.squad` commit existing on the branch — it does not require the doc to be in the product commit itself. Final pushed product commit contains exactly 8 files: `.changeset/client-side-publish-triggers.md` + `cli-entry.ts` + `install-hooks.ts` + `sync.ts` + `assign.ts` + `assign.test.ts` + `install-hooks.test.ts` + `sync-command.test.ts`.
+
+**Push clearance issued:** (a) fold FIDO's A3 fix into product commit — CLEARED; (b) restructure per B-doc ruling — REQUIRED before push; (c) revert working-tree build/version noise — CLEARED; (d) force-push restructured product SHA only, no PR — CLEARED.

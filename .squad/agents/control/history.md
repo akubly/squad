@@ -12,6 +12,66 @@
 
 ## Learnings
 
+### Piece 34 — Client-side publish triggers adversarial review (2026-06-06)
+
+**Verdict: ✅ APPROVE** — commit `b0045b27`, author EECOM.
+
+**Build (type-check):** `npx tsc --noEmit` exits code 2, but ALL errors in touched files (`cli-entry.ts`, `assign.ts`) are pre-existing SDK-mismatch failures carried forward from piece 32. `install-hooks.ts` and `sync.ts` introduce **zero new type errors**. Filtering output to the four touched files confirms no new diagnostics. The SDK (`packages/squad-sdk`) compiles cleanly.
+
+**Surface A — `installCrossRepoHook` / `InstallHooksOptions`:** Exported function signature `(docsRepoPath: string, options?: InstallHooksOptions): void` is clean. `InstallHooksOptions` reused correctly; `options.force ?? false` propagated to `installHook`. Error thrown (not warned) on non-git-root as kill-list requires. Normalization via `normalisedPathKey` before root comparison is correct. No `@ts-ignore`, no implicit `any`.
+
+**Surface B — `_installCrossRepoHookFn` seam / `SquadAssignOpts`:** Seam typed as `(docsRepoPath: string) => void`. TypeScript structural function subtyping: the real `installCrossRepoHook(docsRepoPath: string, options?: InstallHooksOptions): void` is assignable to that seam type (optional extra params do not break assignability). `opts._installCrossRepoHookFn ?? installCrossRepoHook` is well-typed. No `developerAlias` added to `RunAssignOpts` — the two interfaces remain non-conflated.  `RegistryEntry.developerAlias?: string` confirmed typed in SDK (`registry.ts:21`). All assignments `stateRemote = entry.stateRemote`, `developerAlias = entry.developerAlias` flow `string | undefined` to matching local types.
+
+**Surface C — `dryRun?: boolean` in `SyncOptions` / cli-entry dispatch:** Field optional, consumed with `if (options.dryRun)`. CLI picks it up via `args.includes('--dry-run')` → `boolean` → passed as `dryRun: syncDryRun`. Dry-run exits via `return` inside the `try/finally` recursion-guard block — `finally { delete process.env[SQUAD_SYNC_ENV] }` runs correctly on early return. Exit 0. `--quiet` flag does not suppress dry-run console output (all dry-run output goes through `console.log`, not the `quiet`-gated path). `status` subcommand dispatch: `args[1]` is `string | undefined` under `noUncheckedIndexedAccess`; comparing to `'status'` is valid.
+
+**Exit-code paths correct:** Non-git docsRepoPath → `installCrossRepoHook` throws `Error`; `_warmPath` catches, pushes to `warnings[]`, does NOT abort. Exit is 0. No silent swallowing of errors — they surface as printed warnings. `--dry-run` → return (exit 0). `--quiet` does not affect `process.exit(1)` calls in `runSync`; `quiet` gates only `console.log` not `console.error`.
+
+**EDGE CASE (non-blocking) — `alreadyAssigned` path misses hook install:** `_warmPath` Guard 6 returns `{ kind: 'alreadyAssigned' }` before reaching the hook install block. Running `squad assign <callsign> --developer-alias <alias>` on a repo already in `clones[]` returns `alreadyAssigned` and the cross-repo hook is silently not installed. Spec compliance maintained (spec says "after successful registry write" — Guard 6 skips the write). Practical workaround: `squad install-hooks` on the docs-repo path. Documented here for follow-up if EECOM extends `alreadyAssigned` handling.
+
+**EDGE CASE (non-blocking) — `runSyncStatus` has no git-root guard:** `getRepoRoot(cwd)` throws raw `execFileSync` error outside a git repo. Caller in `cli-entry.ts` has no try/catch; raw error surfaces to process exit. Consistent with `runSync` behavior in the same file. Not a regression, just a UX rough edge.
+
+**Pattern confirmed:** `args[1]` for subcommand dispatch is correct under `noUncheckedIndexedAccess: true` — `string | undefined` is a valid type for equality comparison against a string literal. The status subcommand early-return pattern before flag parsing prevents spurious `--direction` validation for `squad sync status`.
+
+### Piece 33 — Sync from registry adversarial review (2026-06-06)
+
+**Verdict: ✅ APPROVE** — commit `0ce892e2`, author EECOM.
+
+**Build:** `npm run build` exits code 2 on pre-existing piece-32 errors (assign.ts, doctor.ts, init.ts, unassign.ts, preset.ts, watch/startup.ts, migrations.ts, upgrade.ts, and pre-existing cli-entry.ts errors at lines 93–94/173/420/1034). Zero new type errors introduced in `sync.ts` or the sync dispatch section of `cli-entry.ts`. SDK compiles cleanly.
+
+**Type safety confirmed clean:** `strict: true` + `noUncheckedIndexedAccess: true` (confirmed in root tsconfig.json). No `@ts-ignore`, no implicit `any`, no unjustified casts. Two non-null assertions confirmed justified: `teamRoot!` gated by `crossRepo = teamRoot !== undefined` (TypeScript can't narrow through boolean alias); `resolvedAlias!` gated by preceding compound `process.exit(1)` guard. Both safe at runtime.
+
+**SyncOptions surface correct:** `developer?: string` added with JSDoc. All prior fields (`direction`, `remote?`, `cwd?`, `quiet?`) intact. CLI dispatch in `cli-entry.ts` uses `args.indexOf('--developer')` / `args[developerIdx + 1]` pattern — same as `--remote` and other flags in the same file. Type flows `string | undefined` → `developer?: string`. Under noUncheckedIndexedAccess, `args[developerIdx + 1]` is `string | undefined` at compile time; consistent with existing pattern.
+
+**Resolution-order branching correct:** SQUAD_TEAM_ROOT env → registry lookup → config.json fallback. Env truly bypasses registry (else branch not entered). Config.json only entered when `!teamRoot`. Alias chain: `options.developer !== undefined` → `process.env['SQUAD_DEVELOPER_ALIAS'] ?? registryAlias` — `??` on env var means empty string is NOT bypassed (passes as `""`, then caught by `!resolvedAlias` guard).
+
+**Exit-code paths correct:** Registry-miss + no config.json + push → `process.exit(1)` naming `squad assign`. Missing alias on `push && crossRepo` → `process.exit(1)` referencing `squad assign --developer-alias`. Both guards correctly require `isPush`; alias guard also requires `crossRepo`. Pull direction cannot trigger either exit.
+
+**MEDIUM NOTE — whitespace alias not trimmed:** `options.developer = " "`, `SQUAD_DEVELOPER_ALIAS = " "`, or a whitespace `developerAlias` from the registry all pass the `!resolvedAlias` guard and then throw inside `publishTeamRootToInbox` from `DEVELOPER_ALIAS_RE.test()` rather than producing the spec's `process.exit(1)` with "squad assign" guidance. Kickoff doc explicitly asked "trim before falsy check?" — answer is no. Inconsistent error path for whitespace-only values. Not blocking; edge case.
+
+**Pattern learned:** When a non-null assertion follows a compound guard (`if (A && B && C) { process.exit(1); }`), TypeScript's control-flow narrowing does not track the implication across later nested blocks. The `!` assertion is necessary AND safe. Always verify the guard covers all paths to the assertion site.
+
+### Piece 32.5 — State transport helpers adversarial review (2026-06-05)
+
+**Verdict: ✅ APPROVE** — uncommitted working-tree changes, author EECOM.
+
+**Build**: `npm run build` exits with code 2, but ALL errors are pre-existing from piece 32 SDK API changes in OTHER files (cli-entry.ts, preset.ts, etc.). `sync.ts` introduces zero new TypeScript errors. The SDK compiles cleanly.
+
+**Type-safety confirmed clean:** No new `any` leaks. EECOM's `hydrateTeamRootFromStateRef` error extraction uses the proper intersection type `NodeJS.ErrnoException & { stderr?: string }` rather than `as any`, which is an improvement over the pre-existing `syncPush` cast. No `@ts-ignore`. No unjustified non-null assertions. `noUncheckedIndexedAccess` respected — no numeric indexing on post-filter arrays in production code. `as string[]` cast on `readdirSync({ recursive: true })` is a necessary overload-inference workaround; `as Buffer` on `encoding: null` execFileSync is redundant but correct.
+
+**Timestamp formatter verified correct:** `iso.slice(0,4)+iso.slice(5,7)+iso.slice(8,10)+'-'+iso.slice(11,13)+iso.slice(14,16)+iso.slice(17,19)` on `"2026-06-05T17:05:43.000Z"` yields `"20260605-170543"`. UTC, 0-padded, no off-by-one.
+
+**pathHash normalization confirmed stable:** `replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()` — backslashes converted, drive letter lowercased, trailing slash removed. Same work-tree with or without trailing separator produces identical SHA-256 hash.
+
+**Allowlist prefix-collision SAFE:** All PUBLISH_ALLOWLIST_PREFIX entries carry trailing slashes. `.squad/logger/x` does NOT start with `.squad/log/`. Verified all boundary cases programmatically.
+
+**Isolated index confirmed safe:** `GIT_INDEX_FILE` env var applied to every staging operation (`hash-object`, `update-index`, `write-tree`). `git commit-tree` correctly uses `commitEnv` (identity only, does not read the index). `finally` block cleans up index file. Real `.git/index` is never touched.
+
+**Error ordering correct:** alias validation (Step 1) throws BEFORE `inboxBranch` is used, BEFORE any git object created. `git rev-parse HEAD` (Step 3) reads an existing ref but creates nothing. Allowlist guard (Step 4) fires before `hash-object -w` writes any blobs. Push is the final step.
+
+**MEDIUM FINDING — Idempotency guard is dead code:** `hydrateTeamRootFromStateRef` checks `headSha === fetchedSha` for early return, but the function never updates HEAD — it only writes files to the working tree via `cat-file` + `writeFileSync`. On every invocation, `headSha` (initial commit) will differ from `fetchedSha` (orphan publish commit), so the guard never fires. Files are re-written on every call. Outcome is still correct (same content); it is not a true no-op. Test 6 (`resolves.toBeUndefined()`) would pass regardless since all void functions resolve to `undefined`. The guard as written could only fire if the caller had previously checked out the orphan commit as HEAD — a scenario not part of the expected usage. Fix: use a sentinel file or a separate notes ref to record the last hydrated SHA; OR document that the function is idempotent-in-outcome but not a no-op. Not blocking since correctness is preserved.
+
+**Both functions confirmed NOT called from `runSync`.** Export-only. ✅
+
 ### Piece 32 — Registry state fields adversarial review (2026-06-05)
 
 **Verdict: ⚠️ APPROVE-WITH-NITS** — commit `f35fa9b5`, author EECOM.

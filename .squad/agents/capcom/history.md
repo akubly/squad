@@ -2,36 +2,25 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
-📌 **Team update (2026-06-05T12:54:00Z — Piece 32 Adversarial Review Complete):** CAPCOM conducted adversarial contract review of piece 32 (registry state fields, commit `f35fa9b5`). Core hypothesis: re-assign preservation mechanism verified SAFE on both warm and cold paths. Verification: (1) `...entry` spread precedes conditional overwrites, existing values survive when options absent; (2) test P32.A5 confirmed as genuine disk round-trip (writeRegistry → loadRegistryFromDisk → validate). Findings: 4 nits (maintenance risk on package.json indentation, spec defect on INVALID_ALIAS error code convention, coverage gap for cold-start re-assign test, doc placement issue on validation JSDoc). No blockers. Verdict: **APPROVE-WITH-NITS**. Decision drop merged to `.squad/decisions.md`.
+## Recent Work — Piece 34
 
-📌 **Team update (2026-05-19T22:30:35Z — Piece 19 Revision & Ship Complete):** CAPCOM completed two-round adversarial cycle for piece 19 (Copilot payload). Round 1: Identified 3 blocking SDK contract issues (`CopilotPayloadError` surface leak, symlink vulnerability, missing callsign guard). Round 2: Wrapped error surface in both paths, demoted `rewriteFrontmatterName` to internal API, added all 3 FIDO test gaps, verified 143/143 tests pass. Final: single amended commit `2377c3a8`, build CLEAN. ✅ Ship approved. EECOM locked out per Reviewer Rejection Protocol — GNC + CAPCOM (Round 2) owned revision.
+**2026-06-06: Piece 34 SDK Contract Review — APPROVE**
 
-📌 **Team update (2026-05-13T17:51:48Z — Phase B Piece 04 Complete):** CONTROL completed piece 04 (path-utils). SDK now exports `normalisedPathKey` + `pathsRefSameLocation` from barrel for general callers. `resolution-v2.ts` re-exports all three path helpers for resolver consumers. Verify downstream SDK-using pieces resolve these imports correctly via barrel or subpath.
+Performed adversarial SDK contract review of commit `b0045b27` (client-side publish triggers). All four contract checks passed:
 
-## Learnings Archive — Historical Context (summarized)
+1. **Registry-first resolution (PASS)** — Both `runSync` and `runSyncStatus` use `loadRegistryFromDisk()` → registry-resolved `teamRoot`. config.json in fallback only.
 
-Previous learnings from pieces 04, 08a, 19, 21, 25, 32 documented: SDK boundary discipline, casting-engine orphaning, resolver parity, registry preservation mechanics, error-code naming conventions, subpath export contracts, config-sync design, path-utils canonicalization, TypeScript build integration. See `.squad/decisions.md` for decisions; `orchestration-log/` for execution traces.
+2. **`installCrossRepoHook` signature (PASS)** — Explicit `docsRepoPath` parameter. Warm-path call-site registry-resolved. Injectable seam `_installCrossRepoHookFn` follows piece-32 pattern.
 
-## Recent Learnings
+3. **HookPipeline non-conflation (PASS)** — SDK HookPipeline not referenced. Sub-proposal B cleanly deferred with TODO stub and decision record.
 
-### 2026-06-06: Piece 33 adversarial SDK contract review — sync-from-registry
+4. **`.last-publish` write points (PASS)** — Written after cross-repo and single-repo syncs complete. Best-effort wrapper cannot abort successful sync. Added to `PUBLISH_ALLOWLIST_EXACT`.
 
-Performed adversarial SDK contract review of piece 33 (commit `0ce892e2`). All six contract checks passed: imports canonical, entry shape correct, clone matching normalized, helper signatures matched, sessionId generation correct, remote names platform-agnostic. TEAM_ROOT resolution chains correctly (SQUAD_TEAM_ROOT env > registry > config.json). Alias resolution chains correctly (--developer > SQUAD_DEVELOPER_ALIAS > registry developerAlias). Verdict: APPROVE. 
+**Verdict:** APPROVE — no changes requested. Registry topology intact; all contract checks pass.
 
-**SDK contract patterns reinforced:** 
-- `loadRegistryFromDisk` return destructuring pattern is correct; consumers must destructure `{ registry, warnings }`.
-- Env-var overrides (SQUAD_TEAM_ROOT) bypass registry entirely; callers must supply explicit options or accept defaults.
-- Registry path uniqueness enforced at load time; `registry.squads.find()` returns first (and only) matching entry.
+## Previous Work (Pieces 04–33)
 
-### 2026-03-14: WSL Transient API Error Investigation (Issue #363)
-
-**Context:** User reported "Request failed due to a transient API error" on Ubuntu WSL with Copilot CLI v1.0.4, eventually hitting rate limits.
-
-**Investigation findings:**
-- Squad SDK already implements robust retry logic with exponential backoff (1s → 2s → 4s)
-- Retry logic in `adapter/client.ts:820-880` handles transient connection errors (ECONNREFUSED, ECONNRESET, EPIPE)
-- Rate limit detection in `adapter/errors.ts:229-245` with retry-after awareness
-- Error originates **upstream** from Copilot CLI/API platform, not Squad
+See history-archive.md for detailed SDK contract reviews and pattern learnings.
 - Copilot CLI v1.0.4 internal retry behavior triggers the rate limiting before Squad is invoked
 - Squad only interacts with CLI via `@github/copilot-sdk` adapter after CLI is already running
 
