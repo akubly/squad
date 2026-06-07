@@ -126,3 +126,26 @@ All 6 checks cleared for commit `b0045b27` (client-side publish triggers) plus F
 **B-doc placement ruling (binding):** `.squad/decisions/inbox/piece-34-B-deferred.md` must be removed from the pushed product commit. Step h mandates `.squad` logging commits separate and local; origin tip must be the isolated product commit. Move the doc to a separate LOCAL `.squad` commit (not pushed). The KILL-LIST's "recorded before commit" requirement is satisfied by the local `.squad` commit existing on the branch — it does not require the doc to be in the product commit itself. Final pushed product commit contains exactly 8 files: `.changeset/client-side-publish-triggers.md` + `cli-entry.ts` + `install-hooks.ts` + `sync.ts` + `assign.ts` + `assign.test.ts` + `install-hooks.test.ts` + `sync-command.test.ts`.
 
 **Push clearance issued:** (a) fold FIDO's A3 fix into product commit — CLEARED; (b) restructure per B-doc ruling — REQUIRED before push; (c) revert working-tree build/version noise — CLEARED; (d) force-push restructured product SHA only, no PR — CLEARED.
+
+---
+
+**Piece 35 Constraint-Compliance Gate (2026-06-06) — GO:**
+All 7 gate items + 3 additional checks cleared for SHA `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` (fold pipeline templates + install-fold-pipeline command). Key patterns confirmed:
+
+(1) **File scope correct** — 8 files in commit: `.changeset/`, `.squad-templates/fold/{github,ado}/`, `packages/squad-cli/src/{cli-entry.ts,cli/commands/install-fold-pipeline.ts}`, `test/cli/`, `test/squad-templates/`. Zero product `.github/workflows/` or `.azure-pipelines/` entries.
+
+(2) **Single-writer comment verbatim** — Exact string `# This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.` confirmed at top of `steps:` in both templates by direct regex match.
+
+(3) **--force-with-lease in both** — GitHub Step 8 and ADO Step 8 push steps both carry the flag.
+
+(4) **No pr:/pull_request: triggers** — Both templates confirmed clean; test assertions also enforce this (FIDO GREEN).
+
+(5) **Registry-first resolution** — `loadRegistryFromDisk()` + `normalisedPathKey()` → `path.dirname(entry.path)` primary; config.json behind `if (!docsRepoPath)`. Pattern mirrors piece-33 and piece-34 topology exactly. Test D7 explicitly catches config.json-primary regression.
+
+(6) **Idempotency + conflict-guard** — Tests D2 (idempotent re-run), D3 (conflict exits 1 with path), D4/D6 (missing dir exits 1) all present and FIDO-confirmed GREEN.
+
+(7) **Scrub gate: zero new violations** — Gate 1 baseline unchanged (no piece-35 paths in strip list). Gates 2, 5, 6, 7, 9 PASS. Gate 8 SKIP in script (template at `.squad-templates/fold/ado/` not `.squad-templates/ado/`); manually verified all 8 `$(...)` expressions match `[A-Za-z][A-Za-z0-9._]*`. ADO test Gate 8 assertion also confirms. Warnings (Gates 3, 4) are pre-existing .squad/ state references — baseline.
+
+**Additional checks:** No banned porting language (TCP `port` in cli-entry.ts pre-existing; piece-35 delta is 11 clean routing lines). No external product names in template comments. Changeset: `@bradygaster/squad-cli: minor` only, no SDK entry.
+
+**Structural note for future pieces:** Scrub gate Gate 8 targets `.squad-templates/ado/` specifically. Templates nested under `.squad-templates/fold/ado/` (or other sub-paths) will be SKIPPED by the script. Always run manual Gate 8 verification when ADO templates are in a non-root `.squad-templates/` subdirectory.

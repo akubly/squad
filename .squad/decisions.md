@@ -397,6 +397,486 @@ The `detectBackend` function definition is retained in sync.ts (unused by runSyn
 7. Registry-miss on push exits 1 naming `squad assign` ✅
 8. SQUAD_TEAM_ROOT override precedes registry; single-repo (config.json present, no registry entry) still works ✅
 
+---
+
+### 2026-06-06: Piece-35 Kickoff Authoring — Procedures Reconciliation Notes
+
+**Date:** 2026-06-06  
+**Filed by:** Procedures
+
+## Summary
+
+Authored the piece-35 kickoff at session-state files. Three reconciliations required relative to the raw spec text.
+
+## Reconciliation 1 — Topology still stale in piece 35
+
+Sub-proposal C step 1 in the piece-35 spec reads: "Resolve the docs-repo clone path from the squad config (`stateRemote` remote URL or a `docsRepoPath` config field set by piece 32's `squad connect`)."
+
+This is dead topology for the same reason caught in piece 34. Ground truth confirmed at repo tip `763c2451`:
+
+- `docsRepoPath` is NOT a `RegistryEntry` field (confirmed via `registry.ts` probe).
+- `.squad/config.json` contains only `{"version":1,"defaultModel":"claude-sonnet-4.6"}` — no transport metadata.
+- Docs-repo clone path = `path.dirname(entry.path)` from `loadRegistryFromDisk()` + `normalisedPathKey()`.
+
+Kickoff directs the installer to reuse the exact import/lookup pattern from `runSyncStatus` in `sync.ts` (lines 20–21 imports, lines 523–529 lookup). Config.json is fallback for unregistered/single-repo contexts ONLY.
+
+## Reconciliation 2 — Archived fold source is absent
+
+The spec states: "The fold algorithm itself is not new — it was established in an earlier cross-repo design as part of an ADO-only template. Piece 35 reuses that algorithm..."
+
+Probed at authoring time. Findings:
+
+- `.squad-templates/fold/` — does not exist.
+- No `fold-squad-state`, `publish-history.json`, `read-tree` fold logic present anywhere in the working tree.
+- No ADO cross-repo templates from the pieces-26–30 lineage present.
+- `.squad-templates/workflows/` exists (squad CI templates), but contains no fold algorithm.
+
+There is no source to copy or adapt. The implementing team authors the fold algorithm from scratch using the spec's numbered step list (steps 1–9 of sub-proposals A and B).
+
+REPLAY-PROTOCOL tone constraint baked into kickoff: no "port," "fork," "porting," or "adapted from" language in any shipped artifact.
+
+## Reconciliation 3 — CLI path conventions confirmed
+
+`install-fold-pipeline.ts` belongs at `packages/squad-cli/src/cli/commands/install-fold-pipeline.ts` (consistent with `install-hooks.ts` at the same path). Dispatch in `cli-entry.ts` uses the `if (cmd === 'install-fold-pipeline')` pattern, inserted before line 1452 (Unknown command fatal), with `args[1]` as the platform argument. Import from `./cli/commands/install-fold-pipeline.js`.
+
+## Additional probe results baked into kickoff
+
+- `yaml@2.8.3` available — do not re-add.
+- `install-fold-pipeline` — 0 occurrences in `cli-entry.ts` (not yet wired).
+- `test/squad-templates/` directory absent — must be created.
+- All three test files absent — all must be created fresh.
+- Both template paths absent — both must be created.
+
+---
+
+### 2026-06-07: CAPCOM Review — Piece 35 SDK Contract
+
+**Reviewer:** CAPCOM (SDK Expert)  
+**Reviewed commit:** 64eecd475605a8f9cc1d6f9707d6ae72f055d59a  
+**Branch:** squad/piece-35-fold-pipeline-in-docs-repo  
+**Date:** 2026-06-07  
+
+## Review Scope
+
+SDK/registry contract verification for `packages/squad-cli/src/cli/commands/install-fold-pipeline.ts` against committed SHA. Read-only review against four critical checkpoints specified in the kickoff brief (Piece 35, "Spawn shape & gates → CAPCOM" section).
+
+## Checkpoint Results
+
+### (a) Import paths match sync.ts EXACTLY
+
+**Finding:** ✅ PASS
+
+- **sync.ts lines 20–21:**
+  - `import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';`
+  - `import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';`
+
+- **install-fold-pipeline.ts lines 21–22:**
+  - `import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';`
+  - `import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';`
+
+**Verdict:** Byte-for-byte identical. No path aliases, no variations. Import contract satisfied.
+
+---
+
+### (b) RegistryEntry field names are VALID
+
+**Finding:** ✅ PASS
+
+- **Fields accessed in install-fold-pipeline.ts:**
+  - Line 63: `e.clones?.some(c => normalisedPathKey(c) === normalizedRoot)`
+  - Line 68: `docsRepoPath = path.dirname(entry.path)`
+
+- **Validation against RegistryEntry schema (packages/squad-sdk/src/registry.ts lines 9–23):**
+  - `entry.path` — Line 11, type `string` (required field) ✅
+  - `entry.clones` — Line 13, type `string[]` (optional field) ✅
+
+- **Fields NOT accessed (but valid in schema):**
+  - `entry.stateRemote` — Line 18, type `string` (optional field) — correctly unused by installer
+  - `docsRepoPath` — NOT a RegistryEntry field; kickoff confirmed absent; code does not access it on entry ✅
+
+**Verdict:** All accessed fields are valid RegistryEntry fields. No invented fields. No references to non-existent `docsRepoPath` on entry object. Schema contract satisfied.
+
+---
+
+### (c) path.dirname(entry.path) derivation matches runSyncStatus
+
+**Finding:** ✅ PASS
+
+- **install-fold-pipeline.ts lines 57–68 (registry lookup pattern):**
+  ```typescript
+  const repoRoot = getRepoRoot(cwd);
+  const { registry } = loadRegistryFromDisk();
+  const normalizedRoot = normalisedPathKey(repoRoot);
+  const entry = registry?.squads.find(e =>
+    e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
+  );
+  let docsRepoPath: string | undefined;
+  if (entry) {
+    docsRepoPath = path.dirname(entry.path); // entry.path ends in .squad
+  }
+  ```
+
+- **sync.ts lines 523–529 (runSyncStatus pattern — referenced in kickoff as authoritative):**
+  ```typescript
+  const { registry } = loadRegistryFromDisk();
+  const normalizedRoot = normalisedPathKey(repoRoot);
+  const entry = registry?.squads.find(e =>
+    e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
+  );
+  if (entry) {
+    teamRoot = path.dirname(entry.path);
+  ```
+
+**Pattern analysis:**
+1. `loadRegistryFromDisk()` call ✅
+2. `normalisedPathKey()` normalization on `repoRoot` ✅
+3. `registry?.squads.find()` lookup ✅
+4. Conditional on `e.clones?.some()` with normalized comparison ✅
+5. Derivation via `path.dirname(entry.path)` on match ✅
+6. Comment confirms entry.path ends in `.squad` (validated by registry.ts lines 94–95) ✅
+
+**Verdict:** Verbatim pattern match. Registr-resolved docs-repo path derivation is identical to runSyncStatus. Topology contract satisfied.
+
+---
+
+### (d) No regression to config.json-primary
+
+**Finding:** ✅ PASS
+
+- **Registry-first phase (lines 62–69):**
+  ```typescript
+  const entry = registry?.squads.find(e =>
+    e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
+  );
+  let docsRepoPath: string | undefined;
+  if (entry) {
+    docsRepoPath = path.dirname(entry.path);
+  }
+  ```
+  When a matching registry entry exists, `docsRepoPath` is immediately set.
+
+- **Fallback phase (lines 71–82):**
+  ```typescript
+  // Fallback for unregistered/single-repo contexts: read config.json stateLocation
+  if (!docsRepoPath) {
+    const configPath = path.join(repoRoot, '.squad', 'config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        if (typeof config['stateLocation'] === 'string') {
+          docsRepoPath = config['stateLocation'];
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  ```
+  Config.json is accessed ONLY if no registry entry was found (`!docsRepoPath`).
+
+- **Comment documentation:** Line 71 explicitly labels this phase "Fallback for unregistered/single-repo contexts," confirming intended semantics.
+
+- **Kickoff constraint verification (piece-35-kickoff.md):**
+  - Line 71–73: "Never primary from config.json when a registry entry matches."
+  - Line 408: "Never primary when a registry entry matches."
+  - Kill-list line 460: "Regressing against piece-33/34 topology is a disqualifying defect."
+
+**Verdict:** Registry-first topology correctly preserved. Config.json is fallback only. No regression. Pieces 33–34 contract honored. Kill-list constraint satisfied.
+
+---
+
+## Summary
+
+All four critical checkpoints pass without exception:
+
+| Checkpoint | Result | Evidence |
+|---|---|---|
+| Import paths match sync.ts | ✅ PASS | Byte-for-byte identical; no path aliases |
+| RegistryEntry fields valid | ✅ PASS | All accessed fields in schema; no invented fields |
+| path.dirname pattern matches | ✅ PASS | Verbatim pattern from runSyncStatus lines 523–529 |
+| Registry-first preserved | ✅ PASS | Registry attempted first; config.json fallback only |
+
+## Verdict
+
+**APPROVE**
+
+Commit `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` passes all SDK contract checkpoints. No changes requested. Registry topology intact. Import contract clean. Path derivation pattern valid. Registry-first semantics preserved.
+
+Safe to proceed to next reviewer stage (FIDO, CONTROL, Flight).
+
+---
+
+**Review method:** Adversarial static analysis (read-only commit SHA verification).  
+**Review tools:** git show, grep, LSP hover, manual schema comparison.  
+**Logged to:** .squad/agents/capcom/history.md (Piece 35 entry appended).
+
+---
+
+### 2026-06-06: CONTROL — Piece 35 Type Review
+
+**By:** CONTROL  
+**What:** Type and exit-code review of `install-fold-pipeline.ts` and the cli-entry.ts dispatch block against commit `64eecd47`.
+
+**Verdict: ✅ APPROVE**
+
+All five gates passed with no defects.
+
+**(a) `InstallFoldPipelineOptions`:** `{ cwd?: string; force?: boolean }` — exact match to kickoff signature. No extra fields, no widened types.
+
+**(b) Platform union tightness:** `installFoldPipeline` signature uses `platform: 'github' | 'ado'` as a literal union throughout. `platformDirMap` is `Record<'github' | 'ado', string>` — no string widening. In cli-entry.ts, `fatal(): never` + the double inequality guard narrows `string | undefined` to `'github' | 'ado'` via TypeScript CFA. No type error at the call site — confirmed by build.
+
+**(c) cli-entry.ts dispatch:** Dynamic import uses `.js` extension (ESM-correct). `installFoldPipeline` is the correct export. Options `{ cwd: getSquadStartDir() }` is structurally valid.
+
+**(d) Exit-code paths:** All four failure modes exit 1 with error messages — missing target directory, content conflict, unresolvable docs-repo path, template not found. Invalid platform arg hits `fatal()` before the import. No silent exit 0 on any failure path.
+
+**(e) Build:** `npm run build` produces errors exclusively in pre-existing files (verified at 763c2451 base). Zero new type errors in `install-fold-pipeline.ts` or the piece-35 cli-entry.ts additions (lines 1452–1465).
+
+**Registry API note:** `registry?.squads.find(...)` is the correct field (`squads: RegistryEntry[]`). Implementation does NOT use the non-existent `.entries` field. Registry-first topology preserved.
+
+---
+
+### 2026-06-07: FIDO Review — Piece 35 Fold Pipeline in Docs Repo
+
+**Date:** 2026-06-07  
+**Author:** FIDO  
+**Status:** APPROVED — ready for Phase C
+
+---
+
+## Decision
+
+SHA `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` on branch
+`squad/piece-35-fold-pipeline-in-docs-repo` passes all FIDO acceptance gates.
+Sub-proposals A (GitHub Actions fold template), B (ADO fold template), and C
+(`squad install-fold-pipeline` installer) are accepted without mandatory rework.
+
+---
+
+## Evidence
+
+### Tests run
+
+| Suite | Result |
+|---|---|
+| `test/squad-templates/fold-github.test.ts` | 10/10 PASS |
+| `test/squad-templates/fold-ado.test.ts` | 10/10 PASS |
+| `test/cli/install-fold-pipeline.test.ts` | 7/7 PASS |
+| `test/cli/install-hooks.test.ts` (piece-34 regression) | 6/6 PASS, 1 pre-existing SKIP |
+| `test/cli/sync-command.test.ts` (piece-34 regression) | 6/6 PASS |
+
+### Assertion quality
+
+All spec-required assertions are REAL:
+- `not.toHaveProperty('pull_request')` / `not.toHaveProperty('pr')` — parsed YAML object (not raw grep).
+- `permissions.contents === 'write'` — parsed YAML object.
+- `allowScripts` absence at pool level — parsed YAML object.
+- Single-writer invariant comment — raw string (correct; YAML parser strips comments).
+- `--force-with-lease` — raw string (correct; bash content is a YAML string value, not a parsed key).
+
+### Registry-first correctness confirmed
+
+- D7 writes a wrong `stateLocation` in config.json; verifies registry-derived path is used; verifies wrong path is NOT written. Strong adversarial test.
+- Implementation uses `registry?.squads.find(...)` — matches actual `Registry` interface (`squads` field, registry.ts:27). Kickoff brief example used `entries` (stale); implementation is correct.
+
+---
+
+## Non-blocking notes
+
+1. **Idempotency key (ref-name, not SHA):** Spec step 3 says filter by `foldedRefs[].sha`. Templates use `.[].foldedRefs[].ref` (ref-name). This matches the ref-membership-fold-idempotency skill and is the correct approach. Spec wording was superseded by team canon.
+
+2. **Pipeline bash logic not unit-tested:** Clock skew handling, malformed-JSON abort, prune step, and orphan-branch creation are correct in template but not exercised by the test suite. This is an inherent limitation of template unit tests (no bash execution environment). Non-blocking.
+
+3. **`--force-with-lease` raw check:** Could be fooled by a comment. Flag is confirmed in the push command. Acceptable.
+
+---
+
+## Binding standards reaffirmed for piece 35
+
+- **YAML comment assertions must use `raw.toContain()`** — YAML parser strips comments from parsed object; this is the ONLY valid assertion for comment presence.
+- **Registry-first adversarial test pattern:** Pre-write wrong config path, verify registry-derived path wins, verify wrong path NOT written. Required for all registry-first resolution tests going forward.
+
+---
+
+### 2026-06-06: Flight Constraint-Compliance Gate — Piece 35 (fold pipeline in docs repo)
+
+**Date:** 2026-06-06  
+**Filed by:** Flight  
+**SHA reviewed:** `64eecd475605a8f9cc1d6f9707d6ae72f055d59a`  
+**Branch:** `squad/piece-35-fold-pipeline-in-docs-repo`
+
+---
+
+## Gate Results
+
+### Gate 1 — No automation targeting product repo ✅ PASS
+
+`git show --name-only 64eecd47` output — 8 files committed:
+
+```
+.changeset/fold-pipeline-in-docs-repo.md
+.squad-templates/fold/ado/fold-squad-state.yml
+.squad-templates/fold/github/fold-squad-state.yml
+packages/squad-cli/src/cli-entry.ts
+packages/squad-cli/src/cli/commands/install-fold-pipeline.ts
+test/cli/install-fold-pipeline.test.ts
+test/squad-templates/fold-ado.test.ts
+test/squad-templates/fold-github.test.ts
+```
+
+Zero files under `.github/workflows/` or `.azure-pipelines/`. All paths are under `.squad-templates/fold/`, `packages/squad-cli/src/`, `test/`, and `.changeset/`. **PASS.**
+
+---
+
+### Gate 2 — Single-writer invariant comment VERBATIM in both templates ✅ PASS
+
+Exact string checked: `# This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.`
+
+- GitHub template (`fold/github/fold-squad-state.yml`): at top of `steps:` block — **VERBATIM MATCH**
+- ADO template (`fold/ado/fold-squad-state.yml`): at top of `steps:` block — **VERBATIM MATCH**
+
+PowerShell regex match confirmed: both templates return PASS.
+
+---
+
+### Gate 3 — `--force-with-lease` present in both templates ✅ PASS
+
+- GitHub Step 8 (`Push squad-state`): `git push origin HEAD:refs/heads/squad-state --force-with-lease` — **PRESENT**
+- ADO Step 8 (`Push squad-state`): `git push origin HEAD:refs/heads/squad-state --force-with-lease` — **PRESENT**
+
+PowerShell match confirmed on both.
+
+---
+
+### Gate 4 — No `pr:` / `pull_request:` trigger in either template ✅ PASS
+
+Direct grep on committed content:
+- GitHub template: No `pull_request:` key at any level; no `pr:` key. `on:` block has only `push:`. **PASS**
+- ADO template: No `pr:` key. `trigger:` block only. **PASS**
+
+Test assertions in `fold-github.test.ts` and `fold-ado.test.ts` also confirm this (FIDO: 27/27 GREEN).
+
+---
+
+### Gate 5 — Registry-first docs-path resolution in installer ✅ PASS
+
+Code in `install-fold-pipeline.ts` (lines confirmed):
+```typescript
+const { registry } = loadRegistryFromDisk();
+const normalizedRoot = normalisedPathKey(repoRoot);
+const entry = registry?.squads.find(e =>
+  e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
+);
+
+let docsRepoPath: string | undefined;
+if (entry) {
+  docsRepoPath = path.dirname(entry.path); // registry-first
+}
+
+// Fallback only when registry returns no match
+if (!docsRepoPath) {
+  // config.json stateLocation fallback
+}
+```
+
+`path.dirname(entry.path)` is the primary resolution path. `config.json` is behind `if (!docsRepoPath)` — never primary when a registry entry matches. **PASS.**
+
+Test D7 (`registry-first docs-repo path resolution`) explicitly sets a wrong config.json path and verifies the registry-derived path is used. FIDO confirmed this test GREEN.
+
+---
+
+### Gate 6 — Idempotency + conflict-guard tests confirmed ✅ PASS
+
+`test/cli/install-fold-pipeline.test.ts` contains:
+- **D2** (`is idempotent — second run exits 0 and produces no file change`) — idempotency case ✅
+- **D3** (`conflict guard — existing file with different content exits 1 with path in message`) — conflict guard + path-in-message ✅
+- **D4** and **D6** — missing target directory → exit 1 ✅
+- **D7** — registry-first verification ✅
+
+FIDO confirmed 27/27 tests GREEN.
+
+---
+
+### Gate 7 — Zero NEW scrub-gate violations ✅ PASS
+
+Scrub gate run: `git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/_scrub-gate.ps1 | pwsh -Command -`
+
+Results:
+```
+[1/6] Strip-listed paths... FAIL  (pre-existing whole-tree baseline — see below)
+[2/6] wifi-aware mentions... PASS
+[3/6] akubly mentions... WARN    (pre-existing .squad/ state files)
+[4/6] Microsoft/internal mentions... WARN  (pre-existing)
+[5/6] ADO fixture audit... PASS
+[6/6] Changed file count... PASS (13 files)
+[7] User-path segments in config/metadata... PASS
+[8] ADO variable syntax in .squad-templates/ado/... SKIP (path mismatch — manually verified below)
+[9] developerAlias format validation... PASS
+```
+
+**Gate 1 baseline confirmation:** Strip-list failures are all pre-existing paths (`docs/_internal/`, `packages/squad-cli/templates/casting/`, etc.). Zero piece-35 file paths appear in the strip list. None of the 8 committed files match any strip-list entry. Baseline unchanged.
+
+**Gate 8 manual verification (scrub gate SKIP due to template at `.squad-templates/fold/ado/` not `.squad-templates/ado/`):**  
+All `$(...)` expressions in the ADO template verified against `[A-Za-z][A-Za-z0-9._]*`:
+- `$(enumInbox.inboxRefs)` ✅
+- `$(filterRefs.unfoldedRefs)` ✅
+- `$(sortRefs.sortedRefs)` ✅ (×2)
+- `$(foldRefs.finalSha)` ✅
+- `$(foldRefs.foldedEntries)` ✅
+- `$(System.AccessToken)` ✅ (×2)
+
+All 8 expressions SAFE. ADO test `fold-ado.test.ts` also asserts Gate 8 compliance (FIDO confirmed GREEN).
+
+---
+
+### Additional Checks
+
+**Banned porting language** (`port`/`fork`/`porting`/`adapted from`): The 7 piece-35-authored files contain zero porting language. The single match in `cli-entry.ts` is the pre-existing TCP port code (`--port` flag, `portIdx`, `runStart({ port, ... })`) — networking port, not porting language. The piece-35 delta in `cli-entry.ts` is exactly 11 new lines adding `install-fold-pipeline` command routing; none contain porting language. **PASS.**
+
+**No external product names in template YAML comments:** GitHub template header: `# Squad fold pipeline — GitHub variant`. ADO template header: `# Squad fold pipeline — ADO variant`. Neither contains "GitHub Actions", "Azure DevOps", or "Azure Pipelines". Test assertions in both test files confirm this. **PASS.**
+
+**Changeset classification:** `.changeset/fold-pipeline-in-docs-repo.md` contains `"@bradygaster/squad-cli": minor`. No `@bradygaster/squad-sdk` entry present. **PASS.**
+
+---
+
+## Verdict
+
+**GO**
+
+All 7 gate items PASS. All 3 additional checks PASS. Coordinator is cleared to push SHA `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` to the remote branch (`squad/piece-35-fold-pipeline-in-docs-repo`) with `--force-with-lease`. No PR to be opened.
+
+---
+
+### 2026-06-06: Piece 35 — Sub-proposal Triage Decision
+
+**Date:** 2026-06-06  
+**Author:** EECOM  
+**Piece:** 35 — fold pipeline in docs repo
+
+---
+
+## Triage Outcome
+
+All three sub-proposals accepted. No deferrals.
+
+| Sub-proposal | Classification | Decision | Rationale |
+|---|---|---|---|
+| **A** — GitHub Actions `fold-squad-state.yml` | S0 — non-deferrable | ✅ Accepted | Primary hosting platform; arc unusable without it. Template authored from spec algorithm steps 1–9. |
+| **B** — ADO Pipelines `fold-squad-state.yml` | S0 — non-deferrable | ✅ Accepted | Architectural constraint confirmed: no unexpected complexity. ADO syntax differences are well-understood (batch serialization, persistCredentials, System.AccessToken scoping per-step). `$(System.AccessToken)` satisfies Gate 8 pattern. All `$(...)` expressions verified. |
+| **C** — `squad install-fold-pipeline` installer | S1 — required | ✅ Accepted | Sub-proposal B revealed no blocking complexity. Registry-first docs-path resolution pattern is established in sync.ts and directly reusable. |
+
+## Verify-first probe results
+
+All six probes matched pre-confirmed expected values:
+1. All target files absent — CREATE actions confirmed.
+2. `yaml` at `2.8.3` — present, do not add again.
+3. `install-fold-pipeline` occurrences in cli-entry.ts: 0; total lines: 1468 — dispatch not yet wired.
+4. No archived fold source found — algorithm authored from spec.
+5. Registry helper import paths confirmed at sync.ts lines 20–21 and 523–529.
+6. cli-entry.ts insertion point confirmed at line 1452 (`// Unknown command`).
+
+## Topology reconciliations applied
+
+- **Reconciliation 1 (docs-repo path):** `docsRepoPath` resolved from `path.dirname(entry.path)` via `loadRegistryFromDisk` + `normalisedPathKey`. config.json is fallback only. Never primary.
+- **Reconciliation 2 (no archived source):** Fold algorithm authored from scratch using spec steps 1–9.
+
 **Test Results:** 66/66 tests pass
 - cli-command-wiring.test.ts: 37 ✅
 - sync-registry-resolution.test.ts: 13 ✅

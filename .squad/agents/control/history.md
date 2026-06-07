@@ -12,6 +12,24 @@
 
 ## Learnings
 
+### Piece 35 — Fold pipeline installer adversarial review (2026-06-06)
+
+**Verdict: ✅ APPROVE** — commit `64eecd47`, author EECOM.
+
+**Build (type-check):** `npm run build` exits code 2 with many errors — all pre-existing from piece-32/33/34 SDK-mismatch failures (cli-entry.ts lines 93/173/420/1034, assign.ts, doctor.ts, init.ts, unassign.ts, preset.ts, watch/startup.ts, migrations.ts, upgrade.ts, squad-resolver.ts). Verified same errors exist at 763c2451 base. `install-fold-pipeline.ts` introduces **zero new type errors**. The piece-35 cli-entry.ts changes (lines 1452–1465) also introduce zero new type errors.
+
+**Gate (a) — `InstallFoldPipelineOptions`:** Interface is `{ cwd?: string; force?: boolean }`. Exactly matches kickoff signature. Both fields optional with correct primitive types. PASS.
+
+**Gate (b) — `platform: 'github' | 'ado'` union tightness:** `installFoldPipeline` signature uses `platform: 'github' | 'ado'` literally (no widening). `platformDirMap: Record<'github' | 'ado', string>` is tight — no `string` widening. In cli-entry.ts: `platform` is cast `as string | undefined`, narrowed by the inequality guard (`!== 'github' && !== 'ado'`) backed by `fatal()` which returns `never` — TypeScript CFA narrows the fall-through to `'github' | 'ado'`, confirmed by no type error at the call site. PASS.
+
+**Gate (c) — cli-entry.ts dispatch typing:** Dynamic import uses `.js` extension for ESM compatibility. Destructured `installFoldPipeline` exists in the source file. Options object `{ cwd: getSquadStartDir() }` is structurally valid for `InstallFoldPipelineOptions`. PASS.
+
+**Gate (d) — exit-code paths:** Missing target directory → `process.exit(1)` + `console.error`. Conflict (existing file with different content) → `process.exit(1)` + actionable message naming the path. Invalid platform arg → `fatal()` (returns `never` → `process.exit(1)`). Could not resolve docs-repo path → `process.exit(1)`. Template not found → `process.exit(1)`. All `process.exit(1)` calls followed by `return;` for TypeScript control-flow safety. No path silently swallows an error or exits 0 on failure. PASS.
+
+**Registry API correct:** `registry?.squads.find(...)` matches the actual `Registry` type (`squads: RegistryEntry[]`). `clones?: string[]` on `RegistryEntry` is correct. `path.dirname(entry.path)` matches the registry-first pattern from sync.ts. PASS.
+
+**Pattern confirmed:** `fatal(): never` + inequality narrowing of `string | undefined` to `'github' | 'ado'` is a valid TypeScript CFA pattern. Verified build produces no type error at the dispatch call site. Reusable pattern for future platform-literal dispatch blocks.
+
 ### Piece 34 — Client-side publish triggers adversarial review (2026-06-06)
 
 **Verdict: ✅ APPROVE** — commit `b0045b27`, author EECOM.
@@ -83,5 +101,24 @@
 **Conditional spread JSON-absence confirmed:** `...(x !== undefined ? { key: x } : {})` correctly omits the key entirely from `JSON.stringify` output when the flag is not supplied. Property is truly absent (not `undefined`-valued). `toMatchObject` and `.not.toHaveProperty()` in Vitest cover this correctly.
 
 **Build emit verification process:** After adding a new subpath export, the required verification is: (1) `npm run build` exits 0, (2) `dist/<name>.js` exists, (3) `dist/<name>.d.ts` exists and exports the correct symbol, (4) JSON structure of package.json `exports` is valid via `node -e "require('./package.json')"`. All four passed for `./validation`.
+
+### Piece 35 — Fold pipeline installer adversarial review (2026-06-07)
+
+**Verdict: ✅ APPROVE** — commit `64eecd47`, author EECOM.
+
+**Pattern reusable:** `fatal(): never` + inequality narrowing of `string | undefined` to `'github' | 'ado'` is a valid TypeScript CFA pattern for platform-literal dispatch. No type errors at call site; confirmed by clean build on piece-35 files. Registry API correct: `registry?.squads.find(...)` matches actual type; `path.dirname(entry.path)` matches registry-first pattern from sync.ts.
+
+**All five gates passed:**
+1. InstallFoldPipelineOptions signature exact
+2. Platform union tight (`'github' | 'ado'`)
+3. cli-entry.ts dispatch typing clean
+4. All exit-code paths route to process.exit(1)
+5. Zero new build errors
+
+**Key learnings stored for future pieces:**
+- YAML comment assertion must use `raw.toContain()` — parser strips comments
+- Registry-first adversarial test: pre-write wrong config, verify registry wins
+- fatal():never + inequality guard is reusable CFA pattern for literal unions
+
 
 

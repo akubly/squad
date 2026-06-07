@@ -103,6 +103,43 @@ The `writeLastPublish(repoRoot)` call is inserted after `syncPush()` on the sing
 
 ---
 
+## Piece 35 Review — Fold Pipeline in Docs Repo (2026-06-07)
+
+**SHA reviewed:** `64eecd475605a8f9cc1d6f9707d6ae72f055d59a`  
+**Branch:** `squad/piece-35-fold-pipeline-in-docs-repo`  
+**Verdict:** **APPROVE**
+
+### What passed
+
+| Check | Result |
+|---|---|
+| (a) `pull_request`/`pr` absence — parsed YAML in both template tests | ✅ PASS — `not.toHaveProperty` on parsed object, not raw grep |
+| (b) Single-writer invariant comment — exact verbatim string in both tests | ✅ PASS — raw.toContain appropriate (comments stripped by YAML parser) |
+| (c) Installer: github→.github/workflows/, ado→.azure-pipelines/, idempotent, conflict→exit 1+path, missing dir→exit 1 | ✅ PASS — D1–D6 all GREEN |
+| (d) Registry-first D7: entry.path ends in .squad; docsRepoPath = path.dirname; config.json wrong-path not used | ✅ PASS — adversarially strong (writes wrong path, proves it's not used) |
+| (e) Piece-34 regression guard: install-hooks + sync-command | ✅ PASS — 12 GREEN, 1 pre-existing SKIP, zero new failures |
+| (f) New test files 27/27 | ✅ PASS |
+| (g) --force-with-lease in both templates + tests; permissions.contents=write parsed; no allowScripts at pool | ✅ PASS — permissions/allowScripts are REAL parsed-object assertions |
+
+### Adversarial findings — no blockers
+
+**Registry field name:** kickoff brief example used `registry?.entries.find(...)` but actual `Registry` type (registry.ts line 27) has `squads: RegistryEntry[]`. Implementation correctly uses `registry?.squads.find(...)`. Tests match. Not a defect — brief example was stale.
+
+**`--force-with-lease` raw check:** `raw.toContain('--force-with-lease')` could be fooled by a comment-only occurrence. Actual templates have the flag in the push command, not a comment. Acceptable: bash script content is a YAML string; parsed-object assertion is not meaningful here.
+
+**Idempotency key: ref-name vs SHA:** Spec step 3 says "skip refs whose SHA appears as `foldedRefs[].sha`". Templates use `.[].foldedRefs[].ref` (ref-name membership) instead. This is the **correct** approach per the ref-membership-fold-idempotency skill (immune to clock skew, immune to same-second ties). Deviation from spec wording is a deliberate improvement consistent with team canon.
+
+**Non-blocking gap (same as piece 34):** No pipeline-execution-level test for fold bash logic (clock skew, malformed JSON abort, prune step). Template tests are structural only. Not a blocker for merge — bash execution testing would require a real git environment and is out of scope for unit test suite.
+
+### Learnings
+
+- **Raw string assertions for YAML comments are correct:** YAML `parse()` strips comments from the parsed object. `raw.toContain(...)` is the only valid assertion for comment presence. Don't downgrade these to "weak."
+- **`Registry.squads` is the array field name** (not `entries`). The kickoff brief example used `entries` — that was an error in the brief. Always verify against `packages/squad-sdk/src/registry.ts` interface.
+- **Registry-first adversarial test pattern proven:** D7 pre-writes a wrong `stateLocation` in config.json, then verifies the registry-derived path is used and the config.json path is NOT. This is the gold-standard pattern for registry-first regression tests. Carry forward.
+- **`process.exit` spy pattern for CLI commands:** `vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error(...) })` is the correct pattern for testing CLI exit codes without actually terminating the test process. EECOM applied it correctly in D3/D4/D6.
+
+---
+
 ## History Summary (2026-05-13 — 2026-06-05)
 
 FIDO reviewed six pieces (24, 25, 32, 32-nits, 32-verify, 32.5) across May–June 2026. Key review patterns:

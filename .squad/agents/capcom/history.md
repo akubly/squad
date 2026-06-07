@@ -141,3 +141,19 @@ Performed peer-adversarial SDK contract review of piece 32 (stateRemote/stateBra
 - Subpath export contract = `package.json` export map entry + tsconfig coverage + dist file existence. All three must be verified independently.
 - Additive merge on registry entries requires `...existingEntry` spread as the FIRST element of the new-entry object literal. Order matters — later spreads silently override earlier ones.
 - Error code naming in a typed union (`AssignErrorCode`) creates a forward-compat surface. Convention breaks in the union propagate to every downstream switch statement. Name before first consumer.
+
+## Recent Work — Piece 35
+
+**2026-06-07: Piece 35 SDK Contract Review — APPROVE**
+
+Performed read-only adversarial SDK contract review of commit `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` (fold pipeline installer) against the committed SHA. All four contract checkpoints passed without exception:
+
+1. **Import paths exact match (PASS)** — `install-fold-pipeline.ts` lines 21–22 import `loadRegistryFromDisk` from `@bradygaster/squad-sdk/registry` and `normalisedPathKey` from `@bradygaster/squad-sdk/path-utils`. Byte-for-byte identical to sync.ts lines 20–21. No variations, no path aliases.
+
+2. **RegistryEntry field validity (PASS)** — Code accesses `entry.path` and `e.clones` (lines 63, 68). Both are valid RegistryEntry fields defined in `packages/squad-sdk/src/registry.ts` (lines 11 and 13 respectively). No invented fields; no references to non-existent `docsRepoPath` field that kickoff correctly identified as absent from schema.
+
+3. **path.dirname(entry.path) derivation matches runSyncStatus (PASS)** — Line 68 `docsRepoPath = path.dirname(entry.path)` exactly mirrors sync.ts line 529 `teamRoot = path.dirname(entry.path)`. Identical lookup pattern at lines 57–64 vs sync.ts lines 523–529: `loadRegistryFromDisk()` → `normalisedPathKey()` → `registry?.squads.find()` → `e.clones?.some()` match. Comment at line 58 confirms "Exact pattern from runSyncStatus."
+
+4. **Registry-first topology preserved (PASS)** — Lines 66–82 implement registry-first fallback correctly. Registry entry resolution attempted first (lines 62–69). Only when `!entry` does code attempt config.json fallback (lines 72–82). Comment at line 71 correctly labels this "Fallback for unregistered/single-repo contexts." No regression to config.json-primary when registry entry exists. Kickoff kill-list constraint honored: registry-first is binding and non-negotiable; this code does not violate it.
+
+**Verdict:** APPROVE — no changes requested. SDK import contract clean; RegistryEntry field access valid; path derivation pattern verbatim match; registry-first topology intact. All four critical gates pass. Commit is safe to proceed to next reviewer stage.
