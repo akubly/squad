@@ -21,8 +21,8 @@ git init
 npm init -y
 
 # Install both packages
-npm install --save-dev @bradygaster/squad-cli
-npm install @bradygaster/squad-sdk
+npm install --save-dev @wifi-aware/squad-cli
+npm install @wifi-aware/squad-sdk
 ```
 
 Set ESM mode in `package.json`:
@@ -94,7 +94,7 @@ import {
   loadConfig,
   CastingEngine,
   onboardAgent,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 
 // Step 1: Find .squad/ from current directory
 const squadPath = resolveSquad();
@@ -146,7 +146,7 @@ Names are deterministic. Same universe, same roles, same names every time.
 Create `src/session.ts`:
 
 ```typescript
-import { SquadClient } from '@bradygaster/squad-sdk';
+import { SquadClient } from '@wifi-aware/squad-sdk';
 
 // Create a client — connects to the Squad runtime
 const client = new SquadClient({
@@ -186,7 +186,7 @@ Governance isn't prompt engineering. It's code that runs before and after every 
 Create `src/governed.ts`:
 
 ```typescript
-import { HookPipeline } from '@bradygaster/squad-sdk';
+import { HookPipeline } from '@wifi-aware/squad-sdk';
 
 // Create a pipeline with multiple governance rules
 const pipeline = new HookPipeline({
@@ -252,7 +252,7 @@ What this buys you:
 Create `src/cost-aware.ts`:
 
 ```typescript
-import { CostTracker, EventBus } from '@bradygaster/squad-sdk';
+import { CostTracker, EventBus } from '@wifi-aware/squad-sdk';
 
 const bus = new EventBus();
 const costTracker = new CostTracker();
@@ -311,7 +311,7 @@ import {
   CostTracker,
   CastingEngine,
   StreamingPipeline,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 
 // --- Infrastructure ---
 const bus = new EventBus();
@@ -383,7 +383,7 @@ Ralph is a persistent monitor that subscribes to the event bus and watches every
 Create `src/monitored.ts`:
 
 ```typescript
-import { RalphMonitor, EventBus } from '@bradygaster/squad-sdk';
+import { RalphMonitor, EventBus } from '@wifi-aware/squad-sdk';
 
 const bus = new EventBus();
 
@@ -457,6 +457,31 @@ npx squad init --mode remote /path/to/shared-team
 
 This creates a dual-root setup: project-specific state lives in `.squad/`, but team identity (charters, casting, routing) lives in the shared location. Multiple repos share one team.
 
+### Shared-squad sync (build 12+)
+
+Once you have a docs-repo clone registered with `squad assign`, you can sync squad state to a remote:
+
+```bash
+# Push from any registered consumer repo
+squad sync --push --developer <your-alias>
+
+# Pull state into the docs-repo clone
+squad sync --pull
+
+# Check sync status
+squad sync status
+
+# Install CI fold pipeline in the docs-repo clone
+squad install-fold-pipeline github
+```
+
+Set `SQUAD_DEVELOPER_ALIAS` in your shell profile so you don't have to pass `--developer` every time:
+
+```bash
+export SQUAD_DEVELOPER_ALIAS=acarter
+squad sync --push
+```
+
 ---
 
 ## Putting It All Together
@@ -474,7 +499,7 @@ import {
   CastingEngine,
   RalphMonitor,
   StreamingPipeline,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 
 // Resolve and configure
 const squadPath = resolveSquad();

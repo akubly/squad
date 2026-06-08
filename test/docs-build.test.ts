@@ -435,6 +435,25 @@ describe('CLI reference and shared-squad guide', () => {
     expect(content).toContain('dev.azure.com/contoso/MyProject');
   });
 
+  it('CLI reference documents squad sync and install-fold-pipeline commands', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('### squad sync');
+    expect(content).toContain('squad sync status');
+    expect(content).toContain('--push');
+    expect(content).toContain('--pull');
+    expect(content).toContain('--developer <alias>');
+    expect(content).toContain('--dry-run');
+    expect(content).toContain('### squad install-fold-pipeline');
+    expect(content).toContain('squad install-fold-pipeline github');
+    expect(content).toContain('squad install-fold-pipeline ado');
+  });
+
+  it('CLI reference documents developer-alias flag on squad assign', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('--developer-alias <alias>');
+  });
+  });
+
   it('CLI reference does not document the removed register command as available', () => {
     const content = readFile(cliRefPath);
     const commandTable = extractMarkdownTable(content, '| Command | Description |');
@@ -447,6 +466,15 @@ describe('CLI reference and shared-squad guide', () => {
     const content = readFile(sharedSquadPath);
     expect(content).toContain('squad init --callsign');
     expect(content).toContain('squad assign <url> --clone-to <path>');
+  });
+
+  it('shared-squad guide documents sync flow and fold pipeline', () => {
+    expect(existsSync(sharedSquadPath)).toBe(true);
+    const content = readFile(sharedSquadPath);
+    expect(content).toContain('squad sync');
+    expect(content).toContain('squad sync status');
+    expect(content).toContain('squad install-fold-pipeline');
+    expect(content).toContain('SQUAD_DEVELOPER_ALIAS');
   });
 
   it('shared-squad guide explains Copilot payload delivery', () => {

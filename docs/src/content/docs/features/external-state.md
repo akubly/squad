@@ -293,3 +293,9 @@ Show me the external state path
 ```
 
 Prints the platform-specific global directory path.
+
+---
+
+## Related
+
+For **multi-developer shared squads** where state needs to travel across repos and developers, see [Sync state with your team](../guide/shared-squad.md#sync-state-with-your-team). The `squad sync` transport mechanism operates on the docs-repo clone that serves as the shared team root — a different topology from the per-user external state described on this page.

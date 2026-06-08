@@ -75,6 +75,139 @@ Squad clones the host to `<path>`, registers it, and binds the current product r
 
 ---
 
+## Sync state with your team
+
+Once you have a shared squad, use `squad sync` to push or pull the `.squad/` state snapshot to and from a remote.
+
+**Synopsis:**
+
+```text
+squad sync [--push | --pull | --both] [options]
+squad sync status
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--push` | Push squad state to the remote |
+| `--pull` | Pull squad state from the remote |
+| `--both` | Push then pull (default when no direction flag is given) |
+| `--remote <name>` | Remote name to sync with (default: resolved from current branch, then `origin`) |
+| `--developer <alias>` | Developer alias for the cross-repo inbox push (overrides env var and registry) |
+| `--quiet` | Suppress output |
+| `--dry-run` | Print pending files and target inbox branch without pushing |
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `SQUAD_TEAM_ROOT` | Override the resolved team root path |
+| `SQUAD_DEVELOPER_ALIAS` | Developer alias fallback (used when `--developer` is absent and no registry alias is set) |
+| `COPILOT_SESSION_ID` | Session ID used in the inbox branch name for cross-repo pushes |
+
+**Examples:**
+
+```bash
+# Push state to the default remote
+squad sync --push
+
+# Pull state from a specific remote
+squad sync --pull --remote squad-docs
+
+# Push with an explicit developer alias
+squad sync --push --developer acarter
+
+# Preview what would be published without pushing
+squad sync --push --dry-run
+```
+
+**How TEAM_ROOT is resolved:** `squad sync` uses a registry-first strategy:
+
+1. `SQUAD_TEAM_ROOT` environment variable (explicit override)
+2. Registry entry whose `clones[]` list contains the current git root
+3. Fallback to `WORK_ROOT/.squad/config.json` for single-repo or unregistered contexts
+
+If none of these resolve a team root and you're pushing, `squad sync` exits 1 and directs you to run `squad assign`.
+
+**How developer alias is resolved** (push path only):
+
+1. `--developer <alias>` CLI flag
+2. `SQUAD_DEVELOPER_ALIAS` environment variable
+3. `developerAlias` field on the matching registry entry
+
+If none of these resolve and you're doing a cross-repo push, `squad sync` exits 1 and directs you to run `squad assign --developer-alias` or set `SQUAD_DEVELOPER_ALIAS`.
+
+> ⚠️ The alias must match `^[a-z][a-z0-9-]{1,38}$` — lowercase, starts with a letter, hyphens allowed, max 39 characters.
+
+---
+
+## Check sync status
+
+To inspect the current sync configuration, run:
+
+```bash
+squad sync status
+```
+
+This prints six fields:
+
+| Field | Description |
+|-------|-------------|
+| Last published | ISO-8601 timestamp from `.squad/.last-publish`, or `never` |
+| Pending changes | Count of `.squad/` files modified since last publish |
+| State remote | The configured git remote for state sync |
+| State branch | The orphan branch used as the state target |
+| Developer alias | The alias used to namespace your inbox branch |
+| Docs repo path | The resolved team-root path (docs-repo clone or current repo) |
+
+---
+
+## Enable auto-publish on commit
+
+To publish state automatically every time you commit in the docs-repo clone, you need a developer alias persisted in the registry. Run `squad assign` with `--developer-alias`:
+
+```bash
+# Set developer alias when assigning (installs post-commit hook automatically)
+squad assign <callsign> --developer-alias <alias>
+```
+
+When `--developer-alias` is provided, `squad assign` installs a `post-commit` git hook in the docs-repo clone. After each commit, the hook runs `squad sync --push --quiet` — protected by the `SQUAD_SYNC_ACTIVE` recursion guard to prevent loops.
+
+> ⚠️ **Note (build 12):** The `--developer-alias` flag is implemented in `runAssign` but is not yet exposed through the CLI dispatch layer. As a workaround, set `SQUAD_DEVELOPER_ALIAS` in your shell profile and call `squad sync --push` manually, or use `squad sync --push --developer <alias>` per session.
+
+A `.squad/.last-publish` marker file is written on every successful push (both cross-repo and single-repo paths). `squad sync status` reads this file to display the last-published timestamp and pending-change count.
+
+---
+
+## Install the fold pipeline
+
+In a shared-squad setup, the docs-repo clone can run a CI workflow that folds the published inbox state into the canonical state branch. Install the template for your platform:
+
+```bash
+# GitHub Actions
+squad install-fold-pipeline github
+
+# Azure DevOps Pipelines
+squad install-fold-pipeline ado
+```
+
+This command:
+1. Resolves the docs-repo path from the registry (or `.squad/config.json` fallback)
+2. Copies `fold-squad-state.yml` into `.github/workflows/` (GitHub) or `.azure-pipelines/` (ADO)
+
+**Idempotency behavior:**
+
+| Situation | Result |
+|-----------|--------|
+| File absent | Template installed |
+| File present and matches template | No-op (exits 0, logs "already installed and up to date") |
+| File present with different content | Exit 1 with a message naming the conflicting file — review and delete it, then re-run |
+
+> The command fails fast if the target workflow directory doesn't exist. Create the `.github/workflows/` or `.azure-pipelines/` directory in the docs repo before running this command.
+
+---
+
 ## Check health
 
 After assigning, verify everything is working:
@@ -135,5 +268,6 @@ When you run `squad unassign`, Squad removes only those callsign-prefixed items.
 
 ## See also
 
-- [CLI reference](../reference/cli.md) — full flag reference for `init`, `assign`, `unassign`, and `doctor`
+- [CLI reference](../reference/cli.md) — full flag reference for `init`, `assign`, `unassign`, `sync`, `install-fold-pipeline`, and `doctor`
 - [Personal squad](./personal-squad.md) — use Squad across projects with a global squad directory
+- [External state storage](../features/external-state.md) — keep `.squad/` outside your working tree

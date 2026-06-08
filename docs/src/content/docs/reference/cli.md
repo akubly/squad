@@ -11,10 +11,10 @@ Everything you need to run Squad from the command line — commands, shell inter
 
 ```bash
 # Global install (recommended)
-npm install -g @bradygaster/squad-cli
+npm install -g @wifi-aware/squad-cli
 
 # One-off with npx
-npx @bradygaster/squad-cli init
+npx @wifi-aware/squad-cli init
 
 # Latest from GitHub (bleeding edge)
 squad init
@@ -22,7 +22,7 @@ squad init
 
 ---
 
-## CLI Commands (17 commands)
+## CLI Commands (19 commands)
 
 | Command | Description | Requires `.squad/` |
 |---------|-------------|:------------------:|
@@ -71,6 +71,9 @@ squad init
 | `squad nap` | Context hygiene (compress, prune, archive .squad/ state) | Yes |
 | `squad nap --deep` | Thorough cleanup with recursive descent | Yes |
 | `squad nap --dry-run` | Preview cleanup actions without changes | Yes |
+| `squad sync` | Synchronize squad state with remote (push/pull/both) | Yes |
+| `squad sync status` | Print sync status: last published, pending changes, remote/branch, alias, docs path | Yes |
+| `squad install-fold-pipeline <github\|ado>` | Install fold pipeline CI template into the docs-repo clone | Yes |
 | `squad scrub-emails [directory]` | Remove email addresses from Squad state files (default: `.squad/`) | No |
 | `squad --version` | Print installed version | No |
 
@@ -128,7 +131,7 @@ Bind the current product repository to a registered squad host. Also installs th
 **Synopsis:**
 
 ```text
-squad assign <callsign> [--target-dir <path>] [--registry-path <file>]
+squad assign <callsign> [--developer-alias <alias>] [--target-dir <path>] [--registry-path <file>]
 squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
 ```
 
@@ -138,6 +141,7 @@ squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [
 |------|-------------|
 | `--clone-to <path>` | Clone the host from `<url>` to this path before assigning |
 | `--callsign <name>` | Override the callsign when assigning by URL |
+| `--developer-alias <alias>` | Set the developer alias for cross-repo state publish (persisted to registry; also installs a `post-commit` hook in the docs-repo clone) |
 | `--skills-from <callsign>` | Install skills, agents, and MCP entries from the named host's `.copilot/` directory |
 | `--target-dir <path>` | Resolve the product repo from a specific path |
 | `--registry-path <file>` | Use an alternate registry file |
@@ -323,6 +327,136 @@ squad doctor --normalize-callsigns --apply
 
 - **Refused purge** — `squad doctor --purge` refuses to remove an entry that still has active consumers. Run `squad unassign` in each consumer repo first, then retry the purge.
 - **Conflicting flags** — `--normalize-callsigns` and `--purge` are mutually exclusive. Run them as separate commands.
+
+---
+
+### squad sync
+
+Synchronize squad state branches between your local repo and a remote. In shared-squad setups, the push path publishes an allowlisted `.squad/` snapshot to a per-session inbox branch on the remote; the pull path fetches and fast-forwards local state branches.
+
+**Synopsis:**
+
+```text
+squad sync [--push | --pull | --both] [options]
+squad sync status
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--push` | Push squad state to remote |
+| `--pull` | Pull squad state from remote |
+| `--both` | Push then pull (default when no direction flag is supplied) |
+| `--remote <name>` | Remote to sync with (default: resolved from current branch, then `origin`) |
+| `--developer <alias>` | Developer alias for cross-repo inbox publish (overrides `SQUAD_DEVELOPER_ALIAS` and registry) |
+| `--quiet` | Suppress output |
+| `--dry-run` | Print pending `.squad/` files and target inbox branch name without publishing |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Sync succeeded or no-op |
+| 1 | No registry entry or config.json found (push); invalid alias; git push rejected |
+
+**`squad sync status`** — prints six fields about the current sync configuration:
+
+| Field | Description |
+|-------|-------------|
+| Last published | ISO-8601 timestamp from `.squad/.last-publish`, or `never` |
+| Pending changes | Count of `.squad/` files modified since last publish |
+| State remote | Configured git remote for state sync |
+| State branch | Orphan branch used as the canonical state target |
+| Developer alias | Alias used to namespace inbox branches |
+| Docs repo path | Resolved team-root path (docs-repo clone or current repo) |
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `SQUAD_TEAM_ROOT` | Explicit override for team root path |
+| `SQUAD_DEVELOPER_ALIAS` | Developer alias fallback |
+| `COPILOT_SESSION_ID` | Session ID embedded in the inbox branch name |
+
+**TEAM_ROOT resolution order:**
+
+1. `SQUAD_TEAM_ROOT` env var (explicit override)
+2. Registry entry whose `clones[]` contains the current git root
+3. `WORK_ROOT/.squad/config.json` fallback for single-repo or unregistered contexts
+4. Neither present + push direction → exit 1, run `squad assign`
+
+**Developer alias resolution order (push + cross-repo only):**
+
+1. `--developer <alias>` flag
+2. `SQUAD_DEVELOPER_ALIAS` env var
+3. `developerAlias` field on the matching registry entry
+4. None resolved → exit 1, set `SQUAD_DEVELOPER_ALIAS` or run `squad assign --developer-alias`
+
+**Examples:**
+
+```bash
+# Push state to the default remote
+squad sync --push
+
+# Pull state, then push
+squad sync --both
+
+# Push with an explicit developer alias
+squad sync --push --developer acarter
+
+# Preview what would be published
+squad sync --push --dry-run
+
+# Show sync configuration
+squad sync status
+```
+
+---
+
+### squad install-fold-pipeline
+
+Install the fold pipeline CI template into the docs-repo clone for your CI platform. The workflow folds per-session inbox branches into the canonical state branch.
+
+**Synopsis:**
+
+```text
+squad install-fold-pipeline <github|ado>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `github` | Copy template to `.github/workflows/fold-squad-state.yml` in the docs-repo |
+| `ado` | Copy template to `.azure-pipelines/fold-squad-state.yml` in the docs-repo |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Installed, or already installed and up to date |
+| 1 | Target directory does not exist; template not found; existing file differs from template; docs-repo path unresolvable |
+
+**Idempotency:**
+
+| Situation | Result |
+|-----------|--------|
+| File absent | Template installed |
+| File present, matches template | No-op (exits 0) |
+| File present, differs from template | Exit 1 — review and delete the file, then re-run |
+
+> The docs-repo's `.github/workflows/` or `.azure-pipelines/` directory must already exist before running this command.
+
+**Examples:**
+
+```bash
+# Install for GitHub Actions
+squad install-fold-pipeline github
+
+# Install for Azure DevOps
+squad install-fold-pipeline ado
+```
 
 ---
 
@@ -603,6 +737,9 @@ First match wins.
 |----------|---------|--------|
 | `SQUAD_CLIENT` | Detected client platform | `cli`, `vscode` |
 | `COPILOT_TOKEN` | Copilot auth token (SDK usage) | Token string |
+| `SQUAD_TEAM_ROOT` | Override resolved team root for `squad sync` | Absolute path |
+| `SQUAD_DEVELOPER_ALIAS` | Developer alias for cross-repo inbox publish | Lowercase alias string |
+| `COPILOT_SESSION_ID` | Session ID embedded in inbox branch name | Opaque string |
 
 ---
 
@@ -654,10 +791,10 @@ The doctor exits with code 1 when it finds error-severity issues; otherwise it e
 ## Version Management
 
 ```bash
-squad --version                              # Check version
-npm install -g @bradygaster/squad-cli@latest # Update
-npm install -g @bradygaster/squad-cli@1.2.3  # Pin version
-npm install -g @bradygaster/squad-cli@insider # Dev-channel prerelease builds
+squad --version                            # Check version
+npm install -g @wifi-aware/squad-cli@latest # Update
+npm install -g @wifi-aware/squad-cli@1.2.3  # Pin version
+npm install -g @wifi-aware/squad-cli@insider # Dev-channel prerelease builds
 ```
 
 ---
@@ -667,3 +804,4 @@ npm install -g @bradygaster/squad-cli@insider # Dev-channel prerelease builds
 - [SDK Reference](./sdk.md) — Programmatic API
 - [Recipes & Advanced Scenarios](../cookbook/recipes.md) — Prompt-driven cookbook
 - [Adding Squad to an Existing Repo](../scenarios/existing-repo.md) — Getting started walkthrough
+- [Shared squads](../guide/shared-squad.md#sync-state-with-your-team) — Sync flow walkthrough
