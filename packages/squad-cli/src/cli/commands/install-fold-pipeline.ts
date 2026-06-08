@@ -24,8 +24,10 @@ import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Templates root: 5 levels up from packages/squad-cli/src/cli/commands/ (or dist equivalent)
-const TEMPLATES_ROOT = path.resolve(__dirname, '../../../../../.squad-templates');
+// Templates root: package-local templates/fold/ directory.
+// In compiled output, __dirname is dist/cli/commands/; ../../../templates/fold reaches
+// packages/squad-cli/templates/fold/ (three levels up from dist/cli/commands/ → package root).
+const TEMPLATES_ROOT = path.resolve(__dirname, '../../../templates/fold');
 
 const GREEN = '\x1b[32m';
 const RESET = '\x1b[0m';
@@ -108,7 +110,7 @@ export async function installFoldPipeline(
   }
 
   // ── Source template path ───────────────────────────────────────────────────
-  const templatePath = path.join(TEMPLATES_ROOT, 'fold', platform, 'fold-squad-state.yml');
+  const templatePath = path.join(TEMPLATES_ROOT, platform, 'fold-squad-state.yml');
   if (!fs.existsSync(templatePath)) {
     console.error(
       `✗ Template not found: ${templatePath}\n` +

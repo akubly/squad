@@ -335,6 +335,7 @@ async function main(): Promise<void> {
       console.log(`  --both              Push and pull (default)`);
       console.log(`  --remote <name>     Remote name (default: origin)`);
       console.log(`  --developer <alias> Developer alias for cross-repo inbox publish`);
+      console.log(`  --dry-run           Print pending files and target inbox branch without publishing`);
       console.log(`  --quiet             Suppress output\n`);
       console.log(`Environment:`);
       console.log(`  SQUAD_TEAM_ROOT          Override team root path`);
@@ -1306,7 +1307,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir } = parseAssignArgs(args.slice(1));
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, developerAlias, stateRemote, stateBranch } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1315,6 +1316,10 @@ async function main(): Promise<void> {
         callsign,
         registryPath,
         targetDir,
+        skillsFrom,
+        developerAlias,
+        stateRemote,
+        stateBranch,
         cwd: getSquadStartDir(),
       });
       // Emit warnings only on result kinds that carry them.

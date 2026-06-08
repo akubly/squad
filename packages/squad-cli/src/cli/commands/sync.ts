@@ -279,11 +279,19 @@ function enumerateSquadFiles(teamRoot: string): string[] {
   return result;
 }
 
-/** Format a Date as yyyyMMdd-HHmmss from its UTC representation. */
+/** Format a Date as yyyyMMdd-HHmmssSSS (with milliseconds) from its UTC representation. */
 function formatPublishTimestamp(date: Date): string {
   const iso = date.toISOString();
-  return `${iso.slice(0, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}`;
+  const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
+  return `${iso.slice(0, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}${ms}`;
 }
+
+// Per-process monotonic counter for sub-millisecond branch-name uniqueness.
+// Guarantees distinct branch names even when two publishes occur within the same millisecond
+// (same-session rapid-fire scenario). The counter is appended between timestamp and sessionId.
+// The resulting branch pattern squad/inbox/<alias>/<ts>-<seq>-<sessionId> still satisfies
+// the squad/inbox/** trigger glob.
+let _publishSeq = 0;
 
 /**
  * Publish a snapshot of TEAM_ROOT/.squad/ (allowlisted subtree) to a
@@ -312,25 +320,20 @@ export async function publishTeamRootToInbox(
     );
   }
 
-  // Step 2: Build inbox branch name
+  // Step 2: Build inbox branch name (monotonic seq suffix guarantees uniqueness below ms)
   const ts = formatPublishTimestamp(new Date());
-  const inboxBranch = `squad/inbox/${developerAlias}/${ts}-${sessionId}`;
+  const seq = _publishSeq++;
+  const inboxBranch = `squad/inbox/${developerAlias}/${ts}-${seq}-${sessionId}`;
 
   // Step 3: Resolve base commit
   const baseStateCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
 
-  // Step 4: Enumerate files and enforce allowlist BEFORE any git object is created
-  const squadFiles = enumerateSquadFiles(teamRoot);
-  for (const relPath of squadFiles) {
-    if (!isAllowlisted(relPath)) {
-      throw new Error(
-        `Publish blocked: path "${relPath}" is outside the allowed .squad/ subtree. ` +
-        `Only decisions.md, decisions/inbox/**, log/**, orchestration-log/**, sessions/**, and identity/** may be published.`,
-      );
-    }
-  }
+  // Step 4: Enumerate files and filter to allowlist BEFORE any git object is created.
+  // Non-allowlisted paths are silently excluded; they do not abort the publish.
+  const allSquadFiles = enumerateSquadFiles(teamRoot);
+  const squadFiles = allSquadFiles.filter(relPath => isAllowlisted(relPath));
 
   // Step 5: Build snapshot via git plumbing with isolated index
   const indexFile = path.join(
@@ -435,15 +438,17 @@ export async function hydrateTeamRootFromStateRef(
     cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
 
-  // Step 3: Idempotency — skip if HEAD already matches the fetched commit
-  let headSha: string | null = null;
+  // Step 3: Idempotency — skip if we already applied this exact snapshot.
+  // HEAD cannot be used as a sentinel because teamRoot is a product repo whose HEAD
+  // is its own working-branch tip, never equal to the orphan state-branch SHA.
+  // Instead, write the applied SHA to a local sentinel file after each hydration.
+  const sentinelPath = path.join(teamRoot, '.squad', '.last-hydrate-sha');
+  let lastAppliedSha: string | null = null;
   try {
-    headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-  } catch { /* empty repo or detached HEAD — proceed */ }
+    lastAppliedSha = fs.readFileSync(sentinelPath, 'utf-8').trim();
+  } catch { /* sentinel absent — proceed */ }
 
-  if (headSha === fetchedSha) return;
+  if (lastAppliedSha === fetchedSha) return;
 
   // Step 4: Write state branch tree files into TEAM_ROOT (does not alter HEAD).
   // Uses ls-tree + cat-file blob to enumerate and write files directly — avoids
@@ -468,6 +473,12 @@ export async function hydrateTeamRootFromStateRef(
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, content);
   }
+
+  // Write sentinel so next call can skip re-hydration when snapshot unchanged.
+  try {
+    fs.mkdirSync(path.join(teamRoot, '.squad'), { recursive: true });
+    fs.writeFileSync(sentinelPath, fetchedSha + '\n', 'utf-8');
+  } catch { /* best-effort — do not abort a successful hydration */ }
 }
 
 // ─── End piece 32.5 ──────────────────────────────────────────────────────────
@@ -655,7 +666,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
     }
 
     // No registry match AND no config.json AND push direction → error
-    if (!teamRoot && !configJsonPresent && isPush) {
+    if (!teamRoot && !configJsonPresent && isPush && !options.dryRun) {
       console.error(
         `squad sync: no registry entry found for ${repoRoot}.\n` +
         `  Run 'squad assign' to register this repo before syncing.`,
@@ -674,18 +685,8 @@ export async function runSync(options: SyncOptions): Promise<void> {
         : (process.env['SQUAD_DEVELOPER_ALIAS'] ?? registryAlias);
     const resolvedAlias = rawAlias?.trim() || undefined;
 
-    if (!resolvedAlias && isPush && crossRepo) {
-      console.error(
-        `squad sync: developer alias is required for --push.\n` +
-        `  Pass --developer <alias>, set SQUAD_DEVELOPER_ALIAS, or run ` +
-        `'squad assign --developer-alias <alias>' to persist the alias.`,
-      );
-      process.exit(1);
-    }
-
-    if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend ?? 'orphan'})`);
-
     // ── Dry-run: print pending info without publishing ─────────────────────────
+    // Must run before alias guard so developers can preview without a configured alias.
     if (options.dryRun) {
       const files = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
       const effectiveAlias = resolvedAlias ?? '(alias required)';
@@ -702,6 +703,16 @@ export async function runSync(options: SyncOptions): Promise<void> {
       return;
     }
 
+    if (!resolvedAlias && isPush && crossRepo) {
+      console.error(
+        `squad sync: developer alias is required for --push.\n` +
+        `  Pass --developer <alias>, set SQUAD_DEVELOPER_ALIAS, or run ` +
+        `'squad assign --developer-alias <alias>' to persist the alias.`,
+      );
+      process.exit(1);
+    }
+
+    if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend ?? 'orphan'})`);
     // ── Sub-proposal C: Pull path ──────────────────────────────────────────────
     if (isPull) {
       syncPull(repoRoot, remote, backend, quiet);

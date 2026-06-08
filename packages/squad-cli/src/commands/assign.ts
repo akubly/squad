@@ -581,7 +581,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
 
   // Install cross-repo post-commit hook in the docs-repo clone when developerAlias is set.
   // Degrades gracefully: a failure emits a warning and does not abort the assign command.
-  if (opts.developerAlias !== undefined) {
+  if (opts.developerAlias) {
     const docsRepoPath = path.dirname(entry.path);
     try {
       installCrossRepoHookFn(docsRepoPath);

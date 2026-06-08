@@ -280,8 +280,8 @@ describe('publishTeamRootToInbox', { timeout: 60_000 }, () => {
     ).rejects.toThrow(/Invalid developerAlias/);
   });
 
-  it('8. path outside allowlist (.squad/config.json) causes error BEFORE any commit on remote', async () => {
-    const base = makeTmpDir('allowlist-guard');
+  it('8. non-allowlisted paths (.squad/config.json) are silently filtered — publish succeeds with allowlisted subset', async () => {
+    const base = makeTmpDir('allowlist-filter');
     const bare = path.join(base, 'bare.git');
     const repo = path.join(base, 'work');
 
@@ -289,16 +289,23 @@ describe('publishTeamRootToInbox', { timeout: 60_000 }, () => {
     initWorkingRepo(repo, 'origin', bare);
     setupSquadDir(repo);
 
-    // Plant a non-allowlisted file
+    // Plant a non-allowlisted file alongside the allowlisted ones
     fs.writeFileSync(path.join(repo, '.squad', 'config.json'), '{"stateBackend":"worktree"}');
 
-    await expect(publishTeamRootToInbox(repo, 'origin', 'dev1', 'sess-y')).rejects.toThrow(
-      /outside the allowed/,
-    );
+    // Publish must succeed (no throw) even though config.json is not allowlisted
+    await expect(publishTeamRootToInbox(repo, 'origin', 'dev1', 'sess-y')).resolves.not.toThrow();
 
-    // No commit objects should have been pushed
+    // An inbox ref must have been created
     const refs = listBareRefs(bare);
-    expect(refs.filter(r => r.includes('/squad/inbox/'))).toHaveLength(0);
+    const inboxRefs = refs.filter(r => r.includes('/squad/inbox/dev1/'));
+    expect(inboxRefs).toHaveLength(1);
+
+    // decisions.md (allowlisted) must be in the snapshot
+    const metaRaw = showBareFile(bare, `${inboxRefs[0]}:.squad/decisions.md`);
+    expect(metaRaw).toContain('# Decisions');
+
+    // config.json (non-allowlisted) must NOT be in the snapshot tree
+    expect(() => showBareFile(bare, `${inboxRefs[0]}:.squad/config.json`)).toThrow();
   });
 });
 
@@ -330,7 +337,7 @@ describe('hydrateTeamRootFromStateRef', { timeout: 60_000 }, () => {
     expect(fs.readFileSync(decisionsPath, 'utf-8')).toBe('# Decisions\n');
   });
 
-  it('6. hydrateTeamRootFromStateRef is idempotent — second call when HEAD equals the state commit SHA is a true no-op (no fs writes)', async () => {
+  it('6. hydrateTeamRootFromStateRef is idempotent — second call when sentinel matches the fetched SHA is a true no-op (no fs writes)', async () => {
     const base = makeTmpDir('idempotent');
     const bare = path.join(base, 'bare.git');
     const publishRepo = path.join(base, 'publisher');
@@ -349,15 +356,10 @@ describe('hydrateTeamRootFromStateRef', { timeout: 60_000 }, () => {
     initWorkingRepo(hydrateRepo, 'origin', bare);
     await hydrateTeamRootFromStateRef(hydrateRepo, 'origin', stateBranch);
 
-    // Explicitly set hydrateRepo's HEAD to the fetched state commit so the idempotency
-    // guard (Step 3: HEAD == fetchedSha → return early) fires on the second call.
-    // This simulates a session where the tree was already applied and HEAD recorded.
-    const fetchedSha = execFileSync('git', ['rev-parse', `refs/remotes/origin/${stateBranch}`], {
-      cwd: hydrateRepo, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
-    execFileSync('git', ['update-ref', 'HEAD', fetchedSha], {
-      cwd: hydrateRepo, stdio: 'pipe',
-    });
+    // After the first hydration, .squad/.last-hydrate-sha sentinel is written.
+    // A second call should read the sentinel, find it matches fetchedSha, and return early.
+    const sentinelPath = path.join(hydrateRepo, '.squad', '.last-hydrate-sha');
+    expect(fs.existsSync(sentinelPath)).toBe(true);
 
     // Spy on fs.writeFileSync to assert that no writes occur on the idempotent call.
     const writeSpy = vi.spyOn(fs, 'writeFileSync');

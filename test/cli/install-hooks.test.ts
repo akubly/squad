@@ -77,7 +77,7 @@ describe('installCrossRepoHook', () => {
     expect(fs.existsSync(productHookPath)).toBe(false);
   });
 
-  it('A2: hook template contains SQUAD_SYNC_ACTIVE guard', () => {
+  it('A2: hook template contains SQUAD_SYNC_ACTIVE guard but does NOT export it (runSync owns the guard)', () => {
     const docsRepo = makeTmpDir('docs-repo-guard');
     initGitRepo(docsRepo);
 
@@ -88,9 +88,12 @@ describe('installCrossRepoHook', () => {
       'utf-8',
     );
 
+    // Guard check must be present so hook skips when runSync is already active
     expect(hookContent).toContain('SQUAD_SYNC_ACTIVE');
     expect(hookContent).toContain('[ -z "$SQUAD_SYNC_ACTIVE" ]');
-    expect(hookContent).toContain('export SQUAD_SYNC_ACTIVE=1');
+    // runSync owns the guard — the hook must NOT pre-set SQUAD_SYNC_ACTIVE
+    // (pre-setting it caused every hook-invoked sync to no-op immediately)
+    expect(hookContent).not.toContain('export SQUAD_SYNC_ACTIVE=1');
     expect(hookContent).toContain('squad sync --push --quiet');
   });
 

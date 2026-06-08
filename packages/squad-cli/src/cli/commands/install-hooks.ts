@@ -117,16 +117,14 @@ export interface InstallHooksOptions {
 /**
  * Hook template for the cross-repo post-commit hook.
  * Installed in the docs-repo clone's .git/hooks/post-commit by installCrossRepoHook.
- * The SQUAD_SYNC_ACTIVE guard prevents infinite recursion when squad sync itself commits.
+ * runSync owns the SQUAD_SYNC_ACTIVE guard internally; the hook must not pre-set it.
  */
 const CROSS_REPO_POST_COMMIT_TEMPLATE = `#!/bin/sh
 ${SQUAD_HOOK_MARKER}
 # Squad cross-repo publish hook
 # Installed by: squad assign --developer-alias
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
-  export SQUAD_SYNC_ACTIVE=1
   squad sync --push --quiet
-  unset SQUAD_SYNC_ACTIVE
 fi
 `;
 
