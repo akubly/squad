@@ -8447,5 +8447,22 @@ Public exports that accept `cwd` and invoke git should document that callers are
 
 ---
 
+---
 
+### 2026-06-04: Piece 25.5 — Sub-proposal F and G repair choices
 
+**By:** EECOM (for akubly)
+
+**What:**
+
+Three decisions made during piece 25.5 test regression repair:
+
+1. **Sub-proposal F — fix-code (not adjust-test):** The ssign.ts error message No squad registered as "" contained the substring squad register, which matched the test's exclusion regex. Decision: fix the source string to No squad found with callsign "". Rationale: the test was asserting the correct contract (no stale guidance referencing a removed command). The source message was the bug.
+
+2. **Sub-proposal G — consult.test.ts registry isolation:** The happy-path describe block ran init --global without overriding SQUAD_REGISTRY_PATH. On second and subsequent test runs, the real ~/.squad/registry.json retained a stale callsign entry from the prior run's deleted test directory, causing ERR_SQUAD_INIT_CALLSIGN_EXISTS exit 2. Decision: add SQUAD_REGISTRY_PATH: join(TEST_ROOT, 'isolated-registry.json') to nvWithGlobal. This is a test quality fix, not a behavioral change — upstream origin/dev has the same vulnerability.
+
+3. **Sub-proposal G — platform detection 'unknown' → 'github' tests:** Fork-introduced tests in platform-adapter.test.ts and platform-adapter-ado.test.ts expected 'unknown' from detectPlatformFromUrl for unrecognized hosts and tested 	oThrow(/SQUAD_PLATFORM/). After sub-proposal E corrected the fallback to 'github' and the error class to PlatformConfigError, these tests needed updating. Decision: adjust-test — the assertions tracked the incorrect behavior; updating them makes the tests guard the correct contract.
+
+**Why:**
+
+Fix-code over adjust-test when the original test correctly captured the intended contract and the source was the divergence point. Adjust-test when the test was tracking behavior that was itself a fork-introduced bug. Both choices follow the principle: tests must assert the contract, not the current implementation.
