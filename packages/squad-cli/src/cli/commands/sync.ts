@@ -16,9 +16,9 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
 import { SquadError } from '../core/errors.js';
 
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';

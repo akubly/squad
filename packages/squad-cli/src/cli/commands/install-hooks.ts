@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';

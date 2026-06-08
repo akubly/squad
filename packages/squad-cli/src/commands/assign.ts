@@ -25,7 +25,7 @@ import { getTemplatesDir } from '../cli/core/templates.js';
 import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
-import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
+import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
 
