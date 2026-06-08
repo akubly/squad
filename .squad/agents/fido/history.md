@@ -6,6 +6,12 @@
 
 Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPECTED_FEATURES, EXPECTED_SCENARIOS, etc.) MUST stay in sync with files on disk. When reviewing PRs with CI failures, always check if dev branch has the same failures — don't block PRs for pre-existing issues. 3,931 tests passing, 149 test files, ~89s runtime.
 
+## Learnings — Dotfile Flow Bug Audit & Piece 34–35 Gates (Summarized 2026-06-08)
+
+Quality gates across pieces 32–35 completed. Critical findings archived to `history-archive.md`. Summary: Registry mock scope mismatch (4 test files, SDK rescope), allowlist hard-guard too strict (blocks real docs-repos), 4 flag-wiring class bugs (--developer-alias, --state-remote, --state-branch, --skills-from). Piece 34 A3 recursion-guard test revised (sentinel function). All pieces achieved APPROVE verdicts after fixes.
+
+**Key Patterns:** Scope mismatch kills all registry mocks; hard-throw guards preclude real-world use until changed to filter; exit-0 guard tests fail when last command is cleanup (unset/trap/exec); recursion guards need invocation-detection, not exit-code assertion.
+
 ## Current Session — Piece 34 Review Cycle (2026-06-06)
 
 ### Piece 34 Adversarial Review & A3 Test Standard

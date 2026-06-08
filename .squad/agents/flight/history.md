@@ -6,11 +6,25 @@
 
 ## Archive
 
-See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots, crash recovery, dual-doctor unification, shared CLI conventions, OTel typing hardening).
+See history-archive.md for learnings from pieces 02–24 (wave 1-phase B pilots, crash recovery, dual-doctor unification).
 
 ---
 
-## 📌 Piece 34 — Gate Decision (2026-06-06)
+## 📌 Piece 36 Scope Decision (2026-06-08)
+
+Nine defects in the cross-repo assign→commit→publish→fold loop are upstream defects (sub-proposals A–I). All accepted for implementation. One class of defect explicitly excluded: test import scope mismatch (fork-local concern from SDK package rename on this branch). Per scrub-gate Gate 2, scope names must not appear in spec — only neutral behavior description allowed.
+
+**Critical set (loop-blocking):** A (assign flag wiring), C (recursion-guard bug), D (allowlist throw vs. filter), E (template resolution path).
+
+**Binding note:** Scrub gate Gate 2 is a simple text scan — it treats any occurrence of target scope names as a failure, with no allowlist for documentation contexts. When writing specs involving SDK rescope, describe desired behavior without naming the scope.
+
+---
+
+## Piece 34–35 Gate Decisions (2026-06-06)
+
+**Piece 34 (client-side publish triggers):** PASS conditional on fold + restructure. B-doc placement ruling: `.squad/decisions/inbox/piece-34-B-deferred.md` must be LOCAL `.squad` commit (not pushed), per step h mandate (logging commits separate from product commits).
+
+**Piece 35 (fold pipeline in docs repo):** GO. All 7 gate items + 3 additional checks cleared for SHA `64eecd475605a8f9cc1d6f9707d6ae72f055d59a`. Scope correct (8 files), single-writer comment verbatim, --force-with-lease present, no pr: triggers, registry-first resolution clean, idempotency tests present, scrub gate 7/7 checks PASS.
 
 **Constraint-Compliance Gate: PASS**
 
@@ -149,3 +163,16 @@ All 7 gate items + 3 additional checks cleared for SHA `64eecd475605a8f9cc1d6f97
 **Additional checks:** No banned porting language (TCP `port` in cli-entry.ts pre-existing; piece-35 delta is 11 clean routing lines). No external product names in template comments. Changeset: `@bradygaster/squad-cli: minor` only, no SDK entry.
 
 **Structural note for future pieces:** Scrub gate Gate 8 targets `.squad-templates/ado/` specifically. Templates nested under `.squad-templates/fold/ado/` (or other sub-paths) will be SKIPPED by the script. Always run manual Gate 8 verification when ADO templates are in a non-root `.squad-templates/` subdirectory.
+
+---
+
+## Learnings
+
+**Piece 36 Scope Decision (2026-06-08):**
+
+Nine defects in the cross-repo assign→commit→publish→fold loop are upstream defects (sub-proposals A–I) — they exist in the product source and will affect any consumer. One class of defect was explicitly excluded: test import specifiers that reference the wrong package scope in test files are a working-branch-local concern caused by the branch's SDK package rename and must not be named in the upstream spec (naming an alternate package scope would violate Gate 2 of the scrub gate). The replay implementer is directed neutrally to align new test imports with the existing test files' package scope, without any scope name appearing in the spec or kickoff prompt.
+
+Critical set (loop-blocking): sub-proposals A (assign flag wiring), C (recursion-guard bug in hook body), D (allowlist throw vs. filter), E (template resolution path in published package). All four must be resolved before the cross-repo loop can complete a single end-to-end cycle.
+
+**Scrub gate scope-naming constraint:**
+The scrub gate (Gate 2) treats any occurrence of `wifi-aware`, `wifi.aware`, or `@wifi-aware` as a hard failure regardless of context — including as a negative example or a quoted package name. When writing specs or kickoff prompts that involve SDK package scope, describe the desired behavior (e.g., "align with the existing test files' import pattern") without naming the alternate scope. The Gate 2 check is a simple text scan with no allowlist for documentation contexts.

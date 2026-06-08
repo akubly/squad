@@ -2,13 +2,15 @@
 
 > Control System Engineer
 
-📌 **Team update (2026-06-05T12:54:00Z — Piece 32 Adversarial Review Complete):** CONTROL conducted adversarial type-system and build-pipeline review of piece 32 (registry state fields, commit `f35fa9b5`). Core hypothesis: regex statefulness verified SAFE — `/^[a-z][a-z0-9-]{1,38}$/` has no flags, repeated `.test()` calls return consistent results. Verification: SDK tsc exit 0 (clean under strict+noUncheckedIndexedAccess), CLI tsc exit 2 but all failures pre-existing (stale node_modules), piece 32 introduces zero new type errors. Build emit verified: both `dist/validation.js` and `dist/validation.d.ts` exist. All 79 SDK tests pass. Findings: 5 nits (forward-risk from trailing/consecutive hyphen acceptance for piece 33/34 branch naming, DRY violation in error message, JSDoc misplacement, package.json indentation cosmetic, test coverage gap for trailing-hyphen contract). No blockers. Verdict: **APPROVE-WITH-NITS**. Decision drop merged to `.squad/decisions.md`.
+## Archive — 2026-06-08 (History Summarized)
 
-📌 **Team update (2026-05-19 — Piece 18 Revision Complete):** Piece 18 doctor enhancements (EECOM implementation) revised by CONTROL per adversarial review (F1–F7, N1–N5). All 33 unit tests and 7 CLI-layer subprocess tests pass. CRLF normalization applied to cli-entry.ts. Branch `akubly/upstream-18-doctor-enhancements` force-pushed to `c515745b`.
+Detailed learnings from pieces 18, 32–35 archived to `history-archive.md` to preserve context. This file now contains current & forward-looking patterns only.
 
-## Archive — Older Learnings (see `history-archive.md` for pre-2026-06-05 full details)
+---
 
-📌 **2026-06-05: Specs 32-35 staged on akubly/upstream-specs (commit 211102b4). New cross-repo arc kickoff is piece 32 (off piece 25.5). Replaces archived pieces 26-31. See upstream specs for design + prompts at _planning/prompts/.**
+📌 **SUMMARIZED (2026-06-05–06): Pieces 18, 32–35 Adversarial Review Cycle Completed**
+
+Adversarial reviews across five pieces. Core patterns reusable: regex flag statefulness (no /g confirmed), conditional-spread JSON absence, CFA non-null assertion pattern, platform literal-union dispatch. All verdicts issued. Piece 35 confirmed zero new type errors.
 
 ## Learnings
 
