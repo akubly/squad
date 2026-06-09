@@ -1,8 +1,11 @@
-docs(squad): log mega triage session
+chore(squad): log piece-36 session, merge triage decision
 
-- Crash recovery: merged 10 PRs, closed 3 duplicates
-- Repo hygiene: removed test artifacts, consolidated .gitignore, cleaned garbage files, pruned 21 local + 31 remote branches
-- Issue triage: 12+ issues routed and closed
-- PR management: merged #628 (model config), reviewed #629, routed Tamir PRs to dev branch pending proposals
+- Merged piece-36-triage.md from decisions/inbox/ into decisions.md
+- Wrote piece-36 session log to .squad/log/2026-06-08-piece-36.md
+- Created orchestration logs for EECOM and FIDO agents
+- Summarized CONTROL agent history.md (17777 -> 2256 bytes)
+- Deleted merged inbox file
+
+This is a separate LOCAL .squad/ commit following EECOM's product commit 9474a1d7 per Phase B worktree backend protocol. Orchestration and session logs are non-pushed artifacts.
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

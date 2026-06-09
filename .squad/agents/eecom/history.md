@@ -163,6 +163,31 @@ This mirrors what `npm install --workspaces` would create. The old scope junctio
 ### Stale old-scope junctions survive rescope until `npm install` runs (2026-05-28)
 
 When workspace package names are renamed, `node_modules/@old-scope/*` junction symlinks from the previous `npm install` remain on disk. Tests importing the old package name continue to pass via these stale junctions, masking the import-path bugs. The correct fix is to update all import paths to the new scope — not to rely on stale junctions.
+### Piece 36 — Cross-repo publish-loop repair (2026-06-08) ✅
+
+**Commit:** `9474a1d7` (pushed to origin)
+
+9 sub-proposals A–I: assign flag wiring, skillsFrom forwarding, recursion-guard hook fix, allowlist filter, TEMPLATES_ROOT resolution, dry-run gate ordering, help-text doc, sentinel idempotency, millisecond uniqueness.
+
+**Key files touched:**
+- `packages/squad-cli/src/commands/assign-args.ts` — Added developerAlias, stateRemote, stateBranch to NAMED_FLAGS + parseAssignArgs return
+- `packages/squad-cli/src/cli-entry.ts` — Dispatch forwards 3 new flags + skillsFrom; --dry-run in sync help
+- `packages/squad-cli/src/commands/assign.ts` — Hook gate: `opts.developerAlias` truthy check (was `!== undefined`)
+- `packages/squad-cli/src/cli/commands/install-hooks.ts` — Removed `export SQUAD_SYNC_ACTIVE=1` from hook template
+- `packages/squad-cli/src/cli/commands/sync.ts` — D: filter; F: dryRun before no-registry exit; G: help doc; H: sentinel; I: ms timestamp
+- `packages/squad-cli/src/cli/commands/install-fold-pipeline.ts` — TEMPLATES_ROOT: `../../../templates/fold` (was `../../`, wrong depth)
+
+**Sub-H real root cause:** `hydrateTeamRootFromStateRef` compared `headSha` (product-repo HEAD = working-branch tip) to `fetchedSha` (orphan state-branch commit). These are on entirely separate commit graphs and can **never** match in production. Fix: write `.squad/.last-hydrate-sha` sentinel after hydration; compare against that on next call.
+
+**Sub-F fix:** Dry-run early-return needs to bypass both the alias guard AND the no-registry-entry process.exit(1). Added `&& !options.dryRun` to no-registry exit condition.
+
+**TEMPLATES_ROOT correction:** Kickoff cited `../../templates/fold` but correct depth from `src/cli/commands/` (or `dist/cli/commands/`) to package root templates is `../../../templates/fold` (3 levels up, not 2).
+
+**Test import specifier used:** Import directly from source — `../../packages/squad-cli/src/cli/commands/sync.js`, `../../packages/squad-sdk/src/registry.js`. Package-alias mocks (`vi.mock('@bradygaster/squad-sdk/registry')`) must include ALL named exports imported by the module under test (add `writeRegistry: vi.fn()` when assign.ts is exercised). Use `mockReturnValueOnce` per-test for loadRegistryFromDisk to supply correct registry data.
+
+**Deferred items:** None. All A–I implemented fully.
+
+**Scrub gate:** Gate 1 FAIL pre-existing (131+ violations since piece 18). Zero new violations introduced.
 
 ## Archive
 

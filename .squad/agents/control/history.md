@@ -11,18 +11,25 @@ Detailed learnings from pieces 18, 32–35 archived to `history-archive.md` to p
 📌 **SUMMARIZED (2026-06-05–06): Pieces 18, 32–35 Adversarial Review Cycle Completed**
 
 Adversarial reviews across five pieces. Core patterns reusable: regex flag statefulness (no /g confirmed), conditional-spread JSON absence, CFA non-null assertion pattern, platform literal-union dispatch. All verdicts issued. Piece 35 confirmed zero new type errors.
+📌 **Team update (2026-06-08 — Piece 36 Orchestration Complete):** Scribe session dispatched independent FIDO verification for piece 36 implementation (commit `9474a1d7`). CONTROL is on standby for post-verification TypeScript review if FIDO reports findings.
+
+📌 **Team update (2026-06-05T12:54:00Z — Piece 32 Adversarial Review Complete):** CONTROL conducted adversarial type-system and build-pipeline review of piece 32 (registry state fields, commit `f35fa9b5`). Core hypothesis: regex statefulness verified SAFE — `/^[a-z][a-z0-9-]{1,38}$/` has no flags, repeated `.test()` calls return consistent results. Verification: SDK tsc exit 0 (clean under strict+noUncheckedIndexedAccess), CLI tsc exit 2 but all failures pre-existing (stale node_modules), piece 32 introduces zero new type errors. Build emit verified: both `dist/validation.js` and `dist/validation.d.ts` exist. All 79 SDK tests pass. Findings: 5 nits (forward-risk from trailing/consecutive hyphen acceptance for piece 33/34 branch naming, DRY violation in error message, JSDoc misplacement, package.json indentation cosmetic, test coverage gap for trailing-hyphen contract). No blockers. Verdict: **APPROVE-WITH-NITS**. Decision drop merged to `.squad/decisions.md`.
+
+## Archive — Full Review History
+
+**SIZE REDUCTION (2026-06-08):** History exceeded 15360-byte threshold. Prior learnings from pieces 18, 32, 32.5, 33, 34, 35 archived. See `.squad/agents/control/history-archive.md` for complete piece-by-piece reviews and patterns learned.
 
 ## Learnings
 
-### Piece 35 — Fold pipeline installer adversarial review (2026-06-06)
+### Piece 36 — Adversarial Review Remediation (2026-06-08T15:19:27-07:00)
 
-**Verdict: ✅ APPROVE** — commit `64eecd47`, author EECOM.
+**Double-`fold` root cause:** `TEMPLATES_ROOT` already resolved to `templates/fold/`, so `path.join(TEMPLATES_ROOT, 'fold', platform, ...)` created a double-segment path `templates/fold/fold/<platform>/...` that doesn't exist. Stale comment said "two levels (`../../`)" while code correctly used three (`../../../`), masking the bug class. Fix: remove the extra `'fold'` segment and update the comment to accurately describe the 3-level resolution.
 
-**Build (type-check):** `npm run build` exits code 2 with many errors — all pre-existing from piece-32/33/34 SDK-mismatch failures (cli-entry.ts lines 93/173/420/1034, assign.ts, doctor.ts, init.ts, unassign.ts, preset.ts, watch/startup.ts, migrations.ts, upgrade.ts, squad-resolver.ts). Verified same errors exist at 763c2451 base. `install-fold-pipeline.ts` introduces **zero new type errors**. The piece-35 cli-entry.ts changes (lines 1452–1465) also introduce zero new type errors.
+**Tautological test pattern corrected:** E1/E2 originally checked only that template files existed on disk and that the source comment resolution math was correct — they passed even while `installFoldPipeline` was broken. The corrected E1/E2 invoke `installFoldPipeline` against a real fixture and assert process.exit is NOT called. This pattern (file-exists check ≠ function-executes-correctly) is the canonical tautological test anti-pattern. The config.json fallback approach (setting `stateLocation` in clone's `.squad/config.json`) was used for fixture simplicity, bypassing the registry lookup while still exercising the full template-resolution and file-copy paths. Similarly, B1/B2 tested `parseAssignArgs` (which already returned `skillsFrom` before the fix) — added B3 as a source-level dispatch verification that reads cli-entry.ts and asserts `skillsFrom` appears within the `runAssign({...})` call.
 
-**Gate (a) — `InstallFoldPipelineOptions`:** Interface is `{ cwd?: string; force?: boolean }`. Exactly matches kickoff signature. Both fields optional with correct primitive types. PASS.
+**DEFECT-2 (C) E2E approach:** True hook execution (install hook → real git commit → observe hook fire → observe publish) was impractical in the Windows test sandbox under vitest. Instead, used a two-phase test: Phase 1 = outer `runSync` with full registry publishes once (spy confirms 1 call); Phase 2 = re-entrant `runSync` with `SQUAD_SYNC_ACTIVE` pre-set (simulating hook-triggered invocation) returns early with total call count still 1. This is the correct proxy for the real recursion path because `runSync` checks `process.env['SQUAD_SYNC_ACTIVE']` at entry (sync.ts:600) before any git or publish operations. Residual gap: true hook fire not exercised (documented in triage.md).
 
-**Gate (b) — `platform: 'github' | 'ado'` union tightness:** `installFoldPipeline` signature uses `platform: 'github' | 'ado'` literally (no widening). `platformDirMap: Record<'github' | 'ado', string>` is tight — no `string` widening. In cli-entry.ts: `platform` is cast `as string | undefined`, narrowed by the inequality guard (`!== 'github' && !== 'ado'`) backed by `fatal()` which returns `never` — TypeScript CFA narrows the fall-through to `'github' | 'ado'`, confirmed by no type error at the call site. PASS.
+**H sentinel staleness limitation:** `.squad/.last-hydrate-sha` is keyed on remote `fetchedSha` only. Local content drift (manual edits between two fetches of the same SHA) silently preserves local changes. Spec permits this (idempotency is perf-only). Added to `.gitignore` to prevent accidental commit. Documented in triage file.
 
 **Gate (c) — cli-entry.ts dispatch typing:** Dynamic import uses `.js` extension for ESM compatibility. Destructured `installFoldPipeline` exists in the source file. Options object `{ cwd: getSquadStartDir() }` is structurally valid for `InstallFoldPipelineOptions`. PASS.
 
@@ -160,6 +167,23 @@ Adversarial reviews across five pieces. Core patterns reusable: regex flag state
 - YAML comment assertion must use `raw.toContain()` — parser strips comments
 - Registry-first adversarial test: pre-write wrong config, verify registry wins
 - fatal():never + inequality guard is reusable CFA pattern for literal unions
+**ISSUE-4 (I) monotonic counter:** Added module-level `_publishSeq` counter appended between timestamp and sessionId in inbox branch name. Pattern `squad/inbox/<alias>/<ts>-<seq>-<sessionId>` still matches `squad/inbox/**` trigger glob. Counter resets on process restart — acceptable because same-ms cross-process collisions require identical timestamp AND sessionId (which includes per-session entropy). Makes I1 deterministic without any timing dependency.
 
+
+
+### Piece 36 follow-up (2026-06-08T15:19:27-07:00) — Behavioral test distinction + documented residuals
+
+**Source-text vs behavioral test distinction:**
+A source-level test reads the source file and checks that a key name (e.g., `skillsFrom`) appears in the call site. It passes as long as the string is present — it WILL NOT catch a wrong-value binding (e.g., `skillsFrom: someOtherVar` where `someOtherVar` is undefined). A behavioral test drives the real code path (`parseAssignArgs` → destructure → dispatch), captures the call with a spy/mock, and asserts the VALUE equals the exact CLI input. The behavioral test FAILS if `parseAssignArgs` returns undefined for the flag OR if the dispatch uses the wrong variable. Both tests are complementary: source-level catches key-name removal; behavioral catches wrong-value binding.
+
+**Documented residuals (triage.md):**
+- **H:** `.squad/.last-hydrate-sha` sentinel is keyed on `fetchedSha` only. Local content drift while SHA is unchanged silently skips re-hydration. Accepted per spec (perf-only idempotency). Future hardening: `fetchedSha + hash(localSquadTree)`.
+- **I:** `_publishSeq` counter prevents same-ms collisions within a single process; cross-process same-ms same-sessionId collision is a theoretical residual edge (Low severity, accepted).
+- **C:** A shell-hook → commit → publish non-reentry E2E is deferred as a GitHub CI follow-up. The scenario is flaky on Windows; Linux CI provides reliable execution. Proxy tests (C1/C2) validate the guard logic with pre-set env variable.
+
+
+- **TypeScript CFA with platform-literal dispatch:** `fatal(): never` + inequality guard (`!== 'github' && !== 'ado'`) narrows `string | undefined` to `'github' | 'ado'` safely.
+- **Conditional spreads in JSON:** `...(x !== undefined ? { key: x } : {})` correctly omits the property (not `undefined`-valued).
+- **Export verification:** After adding subpath export, check (1) build exits 0, (2) `dist/<name>.js` exists, (3) `dist/<name>.d.ts` exists and exports correctly, (4) package.json is valid JSON.
 
 
