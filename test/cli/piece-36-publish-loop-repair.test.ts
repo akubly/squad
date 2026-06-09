@@ -474,7 +474,7 @@ describe('E: installFoldPipeline resolves and copies templates correctly', { tim
     const base = makeTmpDir('e2-ado');
     const cloneDir = path.join(base, 'clone');
     const docsRepoDir = path.join(base, 'docs');
-    const pipelinesDir = path.join(docsRepoDir, '.azure-pipelines');
+    const pipelinesDir = path.join(docsRepoDir, '.azuredevops');
     fs.mkdirSync(pipelinesDir, { recursive: true });
 
     initWorkingRepo(cloneDir);

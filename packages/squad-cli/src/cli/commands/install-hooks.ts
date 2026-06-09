@@ -269,7 +269,7 @@ export function installCrossRepoHook(docsRepoPath: string, options: InstallHooks
   } catch {
     throw new Error(
       `installCrossRepoHook: "${docsRepoPath}" is not a git repository. ` +
-      `Run 'squad assign' with a registered docs-repo clone path before installing hooks.`,
+      `Run 'squad assign' with a registered shared-squad host clone path before installing hooks.`,
     );
   }
   if (normalisedPathKey(path.resolve(docsRepoPath)) !== normalisedPathKey(gitRoot)) {

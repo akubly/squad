@@ -585,7 +585,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
   console.log(`State remote:      ${stateRemote ?? '(not set)'}`);
   console.log(`State branch:      ${stateBranch ?? '(not set)'}`);
   console.log(`Developer alias:   ${developerAlias ?? '(not set)'}`);
-  console.log(`Docs repo path:    ${teamRoot ?? '(not bound)'}`);
+  console.log(`Host clone path:   ${teamRoot ?? '(not bound)'}`);
 }
 
 /**
@@ -609,6 +609,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
     return;
   }
   process.env[SQUAD_SYNC_ENV] = '1';
+
+  // Default remote for cross-repo state operations (sub-proposal B).
+  const DEFAULT_STATE_REMOTE = 'origin';
 
   try {
     const cwd = options.cwd ?? process.cwd();
@@ -690,7 +693,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
     if (options.dryRun) {
       const files = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
       const effectiveAlias = resolvedAlias ?? '(alias required)';
-      const effectiveRemote = stateRemote ?? 'squad-docs';
+      const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
       const effectiveBranch = stateBranch ?? 'squad-state';
       console.log(`squad sync --dry-run`);
       console.log(`  Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>`);
@@ -712,14 +715,17 @@ export async function runSync(options: SyncOptions): Promise<void> {
       process.exit(1);
     }
 
-    if (!quiet) console.log(`squad sync: ${options.direction} (remote: ${remote}, backend: ${backend ?? 'orphan'})`);
+    if (!quiet) {
+      const displayRemote = crossRepo ? (stateRemote ?? DEFAULT_STATE_REMOTE) : remote;
+      console.log(`squad sync: ${options.direction} (remote: ${displayRemote}, backend: ${backend ?? 'orphan'})`);
+    }
     // ── Sub-proposal C: Pull path ──────────────────────────────────────────────
     if (isPull) {
       syncPull(repoRoot, remote, backend, quiet);
       if (crossRepo) {
         await _transport.hydrateTeamRootFromStateRef(
           teamRoot!,
-          stateRemote ?? 'squad-docs',
+          stateRemote ?? DEFAULT_STATE_REMOTE,
           stateBranch ?? 'squad-state',
         );
       }
@@ -731,7 +737,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
         const sessionId = process.env['COPILOT_SESSION_ID'] ?? randomUUID();
         await _transport.publishTeamRootToInbox(
           teamRoot!,
-          stateRemote ?? 'squad-docs',
+          stateRemote ?? DEFAULT_STATE_REMOTE,
           resolvedAlias!,
           sessionId,
         );

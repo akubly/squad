@@ -157,7 +157,7 @@ describe('squad sync status', () => {
       expect(allOutput).toMatch(/State remote:\s+my-remote/);
       expect(allOutput).toMatch(/State branch:\s+my-branch/);
       expect(allOutput).toMatch(/Developer alias:\s+testdev/);
-      expect(allOutput).toMatch(/Docs repo path:\s+/);
+      expect(allOutput).toMatch(/Host clone path:\s+/);
     } finally {
       consoleSpy.mockRestore();
     }

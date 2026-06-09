@@ -195,27 +195,32 @@ describe('github platform', () => {
 // ─── Tests: ado platform ─────────────────────────────────────────────────────
 
 describe('ado platform', () => {
-  it('D5: copies template to <docsRepoPath>/.azure-pipelines/fold-squad-state.yml', async () => {
+  it('D5: copies template to <docsRepoPath>/.azuredevops/fold-squad-state.yml', async () => {
     const docsRepoDir = makeTmpDir('docs-ado');
     const cloneDir = makeTmpDir('clone-ado');
     const cloneRoot = initGitRepo(cloneDir);
-    const pipelinesDir = path.join(docsRepoDir, '.azure-pipelines');
+    const pipelinesDir = path.join(docsRepoDir, '.azuredevops');
     fs.mkdirSync(pipelinesDir, { recursive: true });
 
     setupRegistryEntry(docsRepoDir, cloneRoot);
 
-    await installFoldPipeline('ado', { cwd: cloneDir });
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
 
     const dest = path.join(pipelinesDir, 'fold-squad-state.yml');
     expect(fs.existsSync(dest)).toBe(true);
     expect(fs.readFileSync(dest, 'utf-8').length).toBeGreaterThan(0);
   });
 
-  it('D6: missing .azure-pipelines/ directory exits 1', async () => {
+  it('D6: missing .azuredevops/ directory exits 1', async () => {
     const docsRepoDir = makeTmpDir('docs-ado-nodir');
     const cloneDir = makeTmpDir('clone-ado-nodir');
     const cloneRoot = initGitRepo(cloneDir);
-    // Do NOT create .azure-pipelines/
+    // Do NOT create .azuredevops/
 
     setupRegistryEntry(docsRepoDir, cloneRoot);
 

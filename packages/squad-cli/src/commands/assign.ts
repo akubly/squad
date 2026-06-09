@@ -510,6 +510,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
 
   const originMatchingEntries = existingSquads.filter(e => {
     if (e.callsign === callsign) return false;
+    if (opts.callsign && e.callsign !== opts.callsign) return false;
     const entryOrigins = (e.origins ?? []).map(normalizeRemoteUrl);
     return normalizedNewOrigins.some(no => entryOrigins.includes(no));
   });
@@ -588,7 +589,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     } catch (err) {
       warnings.push(
         `Could not install cross-repo hook at "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
-        `Run 'squad assign ${callsign}' again after the docs-repo clone is available.`,
+        `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
       );
     }
   }

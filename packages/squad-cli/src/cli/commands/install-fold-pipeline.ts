@@ -85,7 +85,7 @@ export async function installFoldPipeline(
 
   if (!docsRepoPath) {
     console.error(
-      `✗ Could not resolve docs-repo path. Run 'squad assign' to register a docs-repo clone.`,
+      `✗ Could not resolve shared-squad host clone path. Run 'squad assign' to register a host clone.`,
     );
     process.exit(1);
     return; // unreachable — keeps TypeScript control-flow happy
@@ -94,16 +94,16 @@ export async function installFoldPipeline(
   // ── Platform → target directory mapping ───────────────────────────────────
   const platformDirMap: Record<'github' | 'ado', string> = {
     github: path.join(docsRepoPath, '.github', 'workflows'),
-    ado: path.join(docsRepoPath, '.azure-pipelines'),
+    ado: path.join(docsRepoPath, '.azuredevops'),
   };
   const targetDir = platformDirMap[platform];
 
   // Fail fast if the target directory does not exist.
-  // Do NOT create missing parent directories — docs repo must be bootstrapped first.
+  // Do NOT create missing parent directories — host clone must be bootstrapped first.
   if (!fs.existsSync(targetDir)) {
     console.error(
       `✗ Target directory does not exist: ${targetDir}\n` +
-      `  Bootstrap the docs-repo pipeline directory before running install-fold-pipeline.`,
+      `  Bootstrap the shared-squad host clone pipeline directory before running install-fold-pipeline.`,
     );
     process.exit(1);
     return;
@@ -142,4 +142,7 @@ export async function installFoldPipeline(
   // Absent — copy template.
   fs.writeFileSync(destPath, templateContent, 'utf-8');
   console.log(`${GREEN}✓${RESET} Installed fold pipeline template: ${destPath}`);
+  if (platform === 'ado') {
+    console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/fold-squad-state.yml in the portal.`);
+  }
 }
