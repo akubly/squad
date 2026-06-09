@@ -1651,3 +1651,211 @@ C1-Phase1 and the E2E tests prove that a real `runSync` call reaches `publishTea
 1. **npm install after scope-rename rebase** is required whenever workspace package names change scope. The workspace symlinks under `node_modules/@wifi-aware/` are not regenerated automatically by git operations.
 2. **union merge driver for `.squad/decisions.md` may not fire** on large files or files with encoding edge cases during `git stash apply`. Resolution: manually extract the new section from `git show "stash@{0}:.squad/decisions.md"` and append it to the working tree file.
 3. **Selective stash restore recipe:** Apply stash → restore `package.json` from HEAD → manually resolve any `.squad/decisions.md` binary-conflict → unstage all `.squad/` with `git reset HEAD -- .squad/` → do NOT drop stash.
+
+---
+
+## 📋 PIECE 37 CANDIDATE SCOPE — Dogfooding Q&A Findings + Design Decisions
+
+### 2026-06-09: FIDO Dogfooding Readiness (Piece-36 Repairs)
+
+**Date:** 2026-06-09  
+**Author:** FIDO (Quality Owner)  
+**Status:** ✅ CONDITIONAL GO — no reinstall needed; fix CI before PR
+
+The CLI is ready to dogfood with installed version `0.9.6-mc.preview.12` (all piece-36 A–I repairs included). **No rebuild or reinstall required.** CI shows 23 failures but all are from dead test mocks (non-blocking for dogfooding).
+
+**Verified Working:**
+- Build gate: ✅ exit 0
+- CLI version: ✅ 0.9.6-mc.preview.12
+- `--developer-alias` wired: ✅
+- `--state-remote`/`--state-branch` wired: ✅
+- `--skills-from` wired: ✅
+- Hook template SQUAD_SYNC_ACTIVE guard: ✅
+- Allowlist filter (not throw): ✅
+- Templates directory present: ✅
+- Sentinel idempotency (.last-hydrate-sha): ✅
+- Piece-36 tests: 21/23 pass ✅
+
+**Hard Blockers:** None. All prior BUG-level items (BUG-2 allowlist, BUG-3 --developer-alias) fixed by piece-36 A–D.
+
+**Non-Blockers (fix before PR, not before dogfooding):**
+1. **NB-1 — Test scope mismatch (B4):** 23 CI failures from 5 files importing @bradygaster/squad-sdk instead of @wifi-aware/squad-sdk. Mechanical rename required (~10 lines).
+2. **NB-2 — Changeset wrong scope:** `.changeset/piece-36-cross-repo-publish-loop-repair.md` references @bradygaster/squad-cli; rename to @wifi-aware/squad-cli.
+3. **NB-3 — install-hooks A1 flaky timeout (pre-existing):** Add `{ timeout: 15000 }` to test or investigate git init latency.
+
+---
+
+### 2026-06-09: PAO Docs Reconciliation (Piece-36 Shipped Behavior)
+
+**Date:** 2026-06-09  
+**Author:** PAO (Documentation)  
+**Commit:** b942dc2c
+
+Piece-36 shipped fixes for the shared-squad dotfile flow. Docs reconciliation pass reconciled prior workaround descriptions with actual shipped behavior.
+
+**Decisions Made:**
+1. Removed `⚠️ Note (build 12)` block from `shared-squad.md` — flag is fully wired; workaround false.
+2. Added `--state-remote` and `--state-branch` to CLI reference flags table for `squad assign` (parsed and forwarded but undocumented).
+3. Clarified `--dry-run` in both `shared-squad.md` and `cli.md`: "Works without a resolved developer alias" (matches gate-move behavior).
+4. Renamed section in `getting-started-journey.md` from "Shared-squad sync (build 12+)" to "Shared-squad sync"; rewrote to lead with `squad assign --developer-alias` as recommended path.
+5. No inbox branch format update needed (old `<ts>-<sessionId>` format not explicitly documented).
+6. No publish filter change docs needed; sentinel docs not required.
+
+**Test sync:** Two new assertions in `test/docs-build.test.ts` (same commit):
+- `shared-squad guide reflects piece-36 working auto-publish (no build-12 workaround)` ✅
+- `CLI reference documents --state-remote and --state-branch on squad assign` ✅
+
+---
+
+### 2026-06-09: EECOM Dogfooding Q&A Findings (Piece-37 Candidate Items)
+
+**Date:** 2026-06-09  
+**Author:** EECOM (Dev Lead)  
+**Scope:** 14 dogfood observations on branch `akubly/upstream-npm-release`, CLI `@wifi-aware/squad-cli@0.9.6-mc.preview.12` + 2 follow-up Q&A rounds.
+
+**Status:** Triage-ready — all items confirmed in source; no fixes applied (piece-37 scope candidate).
+
+#### BUGs (3 items)
+
+| # | ID | File:Line | Current | Desired |
+|---|-----|-----------|---------|---------|
+| 3 | `ERR_ASSIGN_ORIGIN_AMBIGUITY` message references `--callsign` but flag is dead in warm path | `packages/squad-cli/src/commands/assign.ts:519–523` | Error says "Use an explicit --callsign to disambiguate" but `opts.callsign` consumed only in `_coldStart` (line 624), not in `_warmPath`; passing `--callsign` has zero effect | Fix message to give actionable advice OR (preferred) make `--callsign` actually filter entries from `originMatchingEntries` in `_warmPath` |
+| 10 | Cross-repo post-commit hook installed in HOST only; product-repo workflow never triggers it | `packages/squad-cli/src/commands/assign.ts:585` | `docsRepoPath = path.dirname(entry.path)` = HOST root only | Install in BOTH host AND product clone (double-publish safe via idempotency) |
+| 12 | `install-fold-pipeline` absent from `squad --help` commands table | `packages/squad-cli/src/cli-entry.ts:213–252` | Command dispatches at line 1457 but no help entry | Add row to commands table |
+
+#### UX Items (4 items)
+
+| # | ID | Current | Desired |
+|---|-----|---------|---------|
+| 1 | **Terminology:** "docs-repo" used throughout | Rename to "shared-squad host clone" or agreed term |
+| 5 | `squad assign --help` falls through instead of showing assign-specific help | Add `cmd === 'assign'` branch at line 346 |
+| 6 | **"developer alias" terminology fragmented** — `DEVELOPER_ALIAS_RE`, `developerAlias`, `--developer-alias`, `SQUAD_DEVELOPER_ALIAS` | Decide canonical term (proposed: "inbox handle"); one-sweep rename across SDK + CLI + docs |
+| 8 | `stateRemote` default `'squad-docs'` wrong; hardcoded 3x at `sync.ts:693,722,734` | Change default to `'origin'`; extract to `DEFAULT_STATE_REMOTE` constant (fold templates hardcode `origin` → mismatch = silent pipeline failure) |
+| 13 | `squad --help` table column padding inconsistent (2 spaces, no alignment) | Pad to fixed-width column (e.g., 24 chars) |
+
+#### DESIGN Items (3 items)
+
+| # | ID | Description | Key File:Line |
+|---|-----|-------------|---------------|
+| 4 | **Alias at init-time gap** | `developerAlias` written only by `squad assign`; guard 3 (assign.ts:449–452) makes assign a no-op from host dir. Decision: should `squad init` accept `--developer-alias`? | `assign.ts:449–452` |
+| 9 | **Inbox branch pattern not configurable** | `squad/inbox/<alias>/<ts>-<seq>-<sessionId>` hardcoded at `sync.ts:326`. Decide if prefix should be overridable. | `sync.ts:326` |
+| 10 | **Hook placement: install in BOTH host AND product** | Confirmed recommendation: product hook = primary workflow (agent sessions → host `.squad/` writes → product commit triggers publish); host hook = secondary (host-direct edits). Double-publish safe. Install site: `assign.ts:585` (host, current) + `assign.ts:600-area` (product clone). | `assign.ts:585`; `install-hooks.ts:260` |
+
+#### Q6 Full Alias-Rename Surface
+
+| Surface | File:Line |
+|---------|-----------|
+| `DEVELOPER_ALIAS_RE` constant | `packages/squad-sdk/src/validation.ts:11` |
+| `developerAlias` registry field | `packages/squad-sdk/src/registry.ts:21,164–168,172` |
+| `AssignCliArgs.developerAlias` interface | `packages/squad-cli/src/commands/assign-args.ts:17` |
+| `--developer-alias` in NAMED_FLAGS | `packages/squad-cli/src/commands/assign-args.ts:28,69` |
+| `SquadAssignOpts.developerAlias` interface | `packages/squad-cli/src/commands/assign.ts:283,335` |
+| Hook install comment | `packages/squad-cli/src/cli/commands/install-hooks.ts:125` |
+| `SyncOptions.developer` interface | `packages/squad-cli/src/cli/commands/sync.ts:32` |
+| Alias resolution + error strings | `packages/squad-cli/src/cli/commands/sync.ts:680,708–710` |
+| `SQUAD_DEVELOPER_ALIAS` env var | `packages/squad-cli/src/cli/commands/sync.ts:685` |
+| CLI help text | `packages/squad-cli/src/cli-entry.ts:337,342` |
+| Docs reference/cli.md | lines 133,143,326,328,353,366–368,379,715 |
+| Docs guide/shared-squad.md | lines 99,106,118,133,136–139,168,171–172,175 |
+
+#### ANSWERED Items (no fix needed)
+
+- Q2: `squad upstream` from origin/dev, commit 3a53f823
+- Q3: `--callsign` works only in cold-start (URL) path; dead in warm-path
+- Q7: Before first `squad sync --push`: host has local `.squad/` but no remote state/inbox branches
+- Q8: `stateRemote` = WHERE (git remote); `stateBranch` = WHAT (branch name); fold templates hardcode `origin`
+- Q11: `--developer`/`--developer-alias` subsumed by DESIGN-6 rename
+- Q14: `squad scrub-emails` from origin/dev
+
+---
+
+### 2026-06-09: Flight Architectural Analysis + Host Publish Model (Piece-37 Design Inputs)
+
+**Date:** 2026-06-09  
+**Author:** Flight (Lead)  
+**Context:** Dogfooding analysis of shared-squad cross-repo flow vs. upstream inheritance feature. Advisory only.
+
+#### Q2: Upstream vs Shared-Squad Design
+
+**Genuine Overlap:**
+- Both involve consumer repo reading `.squad/` from a host/upstream repo
+- Both auto-clone git remote into local cache
+- Both surface skills, routing, decisions to coordinator at session start
+
+**Genuine Difference (the WRITE-BACK path):**
+- **`publishTeamRootToInbox`** (sync.ts) — no upstream equivalent
+- **Inbox branch isolation** — per-developer branches prevent concurrency collisions
+- **Fold pipeline** — sole writer to `squad-state`; upstream has no serialization
+- **Data type:** Upstream = CONFIGURATION (semi-static); shared-squad = LIVE STATE (continuously mutated)
+
+**Could shared-squad have leveraged upstream's resolver?**
+- **Read half: partially yes.** Upstream's `resolveUpstreams()` (resolver.ts:165+) could serve context read (skills, routing, wisdom) from host — avoiding ~30–50% of registry lookup code.
+- **Read half: NOT for state hydration.** Shared-squad's `hydrateTeamRootFromStateRef` reads from orphan `squad-state` branch (git plumbing); upstream's resolver always reads working tree.
+- **Write half: NO.** `publishTeamRootToInbox`, inbox branch format, allowlist, fold pipeline have no upstream analog.
+
+**Verdict:** Build parallel system — correct choice. Upstream = read-only hierarchical context. Shared-squad = bidirectional live state sync. Adjacent but not equivalent.
+
+**Piece-37 Consolidation Opportunity:** **Shared-squad's CONTEXT read path should be expressed as upstream local entry; STATE sync path remains inbox/fold pipeline.**
+- `squad assign` registers docs-repo as local upstream entry (upstream.json)
+- Upstream resolver handles skill/routing/wisdom inheritance
+- Registry+hydrate path handles only `squad-state` branch materialization
+- This split makes the architecture's seams legible
+
+---
+
+#### Q4: Host Self-Publish Model
+
+**Proposal:** Commit `.squad/` state changes through inbox→fold→squad-state path rather than directly to working branch. Makes inbox the universal ingress.
+
+**Coherence Analysis:**
+- **Architecturally coherent?** Yes. Flow:
+  ```
+  host working branch commit
+    → post-commit hook fires
+    → squad sync --push (SQUAD_SYNC_ACTIVE guard prevents recursion)
+    → inbox branch created + pushed
+    → fold pipeline triggered on inbox push
+    → fold pipeline reads inbox, writes squad-state
+    → DONE (no loop)
+  ```
+- **Recursion guard works?** Yes. `SQUAD_SYNC_ACTIVE=1` prevents fold pipeline's own commits from triggering another sync.
+
+**Tensions & Issues:**
+1. **Circular dependency concern:** Host hydrates FROM squad-state (as consumers do) → commits → inbox → fold → squad-state → host hydrates... Recursion guard prevents hook firing during hydration, but host working tree and squad-state need to stay in sync (non-trivial state management).
+
+2. **Bootstrap problem:** If host routes all commits through inbox, who seeds the first squad-state? Answer: `squad install-fold-pipeline` + one-time initial publish (setup step, not structural issue).
+
+3. **EECOM product-clone hook finding:** Piece-34 constraint: hooks install in docs-repo clone ONLY. If hooks go to product clone, they'd fire on product code commits (spurious publishes). **Fix:** Content-filter check (only publish if `git diff --name-only HEAD~1 | grep .squad/` has matches). Do NOT put hooks in both repos without this filter.
+
+**Alternatives to host-self-publish for PR cleanliness:**
+- **Orphan-branch backend** (already the model for registered repos): `.squad/` never on working branch — only on squad-state. Zero PR churn structurally.
+- **`.git/info/exclude` in host:** Add `.squad/` to host's `.git/info/exclude` (local-only, not a `.gitignore` change).
+- **Pre-push hook:** Filter `.squad/` from commits before they reach origin.
+
+**Recommendation:**
+> Do NOT implement host-self-publish as described yet. **First enforce the orphan-branch backend in the host.**
+>
+> Rationale: The orphan-branch backend already achieves the user's goal. `.squad/` never appears on working branch; squad-state is canonical. PR-cleanliness falls out structurally.
+>
+> If team still wants host-self-publish after trying orphan-branch-in-host:
+> - Implement as a **flag**: `"selfPublish": true` in host's registry entry
+> - Post-commit hook in docs-repo clone already present (piece-34)
+> - Fold pipeline already handles inbox → squad-state
+> - Gap: hydration on host side (host's working tree becomes write-only staging; must hydrate from squad-state on `squad sync --pull`)
+> - Guard: content-filter check before publishing — only publish if allowlisted `.squad/` files changed
+>
+> **On hooks in both repos:** No. Post-commit hook belongs in docs-repo clone (where Squad state is committed), NOT product clone. If ergonomic gap exists, enforce piece-29 TEAM_ROOT/WORK_ROOT write-rule protocol.
+
+---
+
+#### Piece-37 Design-Decision Inputs
+
+1. **Upstream as context read path:** Should `squad assign` register docs-repo as local upstream entry so upstream resolver handles skill/routing/wisdom inheritance? Consolidates context into upstream system; reduces registry+hydrate code.
+
+2. **Orphan-branch backend in host:** Should host docs-repo operate in orphan-branch mode (no `.squad/` on working branch)? Achieves PR-cleanliness structurally.
+
+3. **Host-self-publish as opt-in flag:** If orphan-branch backend insufficient, define `"selfPublish": true` on host's registry entry as opt-in. Requires bootstrap flow and hydration protocol spec.
+
+4. **Post-commit hook scope:** Confirm hook remains docs-repo-clone-only. If product-clone hooks added, mandate content-filter check (only publish if allowlisted `.squad/` files changed).
+
+5. **Upstream / shared-squad interface boundary:** Draw line explicitly: upstream = CONFIGURATION; shared-squad = STATE. Any content crossing this line needs explicit policy.
