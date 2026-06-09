@@ -457,13 +457,22 @@ npx squad init --mode remote /path/to/shared-team
 
 This creates a dual-root setup: project-specific state lives in `.squad/`, but team identity (charters, casting, routing) lives in the shared location. Multiple repos share one team.
 
-### Shared-squad sync (build 12+)
+### Shared-squad sync
 
-Once you have a docs-repo clone registered with `squad assign`, you can sync squad state to a remote:
+Set your developer alias when you assign to enable auto-publish on every commit:
+
+```bash
+# Assign with alias — installs a working post-commit hook automatically
+squad assign <callsign> --developer-alias <alias>
+```
+
+After each commit in the docs-repo clone, the hook runs `squad sync --push --quiet` automatically. No manual push required.
+
+You can also push manually or pull as needed:
 
 ```bash
 # Push from any registered consumer repo
-squad sync --push --developer <your-alias>
+squad sync --push
 
 # Pull state into the docs-repo clone
 squad sync --pull
@@ -475,9 +484,13 @@ squad sync status
 squad install-fold-pipeline github
 ```
 
-Set `SQUAD_DEVELOPER_ALIAS` in your shell profile so you don't have to pass `--developer` every time:
+For a per-session override or env-var fallback:
 
 ```bash
+# Per-session alias override
+squad sync --push --developer <your-alias>
+
+# Persistent env var fallback (if you skipped --developer-alias at assign time)
 export SQUAD_DEVELOPER_ALIAS=acarter
 squad sync --push
 ```

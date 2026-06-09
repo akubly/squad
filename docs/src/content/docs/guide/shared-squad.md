@@ -96,7 +96,7 @@ squad sync status
 | `--remote <name>` | Remote name to sync with (default: resolved from current branch, then `origin`) |
 | `--developer <alias>` | Developer alias for the cross-repo inbox push (overrides env var and registry) |
 | `--quiet` | Suppress output |
-| `--dry-run` | Print pending files and target inbox branch without pushing |
+| `--dry-run` | Print pending `.squad/` files and target inbox branch without pushing. Works without a resolved developer alias. |
 
 **Environment variables:**
 
@@ -172,9 +172,7 @@ To publish state automatically every time you commit in the docs-repo clone, you
 squad assign <callsign> --developer-alias <alias>
 ```
 
-When `--developer-alias` is provided, `squad assign` installs a `post-commit` git hook in the docs-repo clone. After each commit, the hook runs `squad sync --push --quiet` — protected by the `SQUAD_SYNC_ACTIVE` recursion guard to prevent loops.
-
-> ⚠️ **Note (build 12):** The `--developer-alias` flag is implemented in `runAssign` but is not yet exposed through the CLI dispatch layer. As a workaround, set `SQUAD_DEVELOPER_ALIAS` in your shell profile and call `squad sync --push` manually, or use `squad sync --push --developer <alias>` per session.
+When `--developer-alias` is provided, `squad assign` persists the alias to the registry and installs a `post-commit` git hook in the docs-repo clone. After each commit, the hook runs `squad sync --push --quiet` automatically.
 
 A `.squad/.last-publish` marker file is written on every successful push (both cross-repo and single-repo paths). `squad sync status` reads this file to display the last-published timestamp and pending-change count.
 

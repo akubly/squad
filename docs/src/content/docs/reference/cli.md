@@ -142,6 +142,8 @@ squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [
 | `--clone-to <path>` | Clone the host from `<url>` to this path before assigning |
 | `--callsign <name>` | Override the callsign when assigning by URL |
 | `--developer-alias <alias>` | Set the developer alias for cross-repo state publish (persisted to registry; also installs a `post-commit` hook in the docs-repo clone) |
+| `--state-remote <name>` | Override the git remote used for state sync (persisted to registry; default: `origin`) |
+| `--state-branch <name>` | Override the orphan branch used as the canonical state target (persisted to registry; default: `squad-state`) |
 | `--skills-from <callsign>` | Install skills, agents, and MCP entries from the named host's `.copilot/` directory |
 | `--target-dir <path>` | Resolve the product repo from a specific path |
 | `--registry-path <file>` | Use an alternate registry file |
@@ -351,7 +353,7 @@ squad sync status
 | `--remote <name>` | Remote to sync with (default: resolved from current branch, then `origin`) |
 | `--developer <alias>` | Developer alias for cross-repo inbox publish (overrides `SQUAD_DEVELOPER_ALIAS` and registry) |
 | `--quiet` | Suppress output |
-| `--dry-run` | Print pending `.squad/` files and target inbox branch name without publishing |
+| `--dry-run` | Print pending `.squad/` files and target inbox branch name without publishing. Works without a resolved developer alias. |
 
 **Exit codes:**
 

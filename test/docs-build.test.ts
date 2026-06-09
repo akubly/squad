@@ -477,6 +477,20 @@ describe('CLI reference and shared-squad guide', () => {
     expect(content).toContain('SQUAD_DEVELOPER_ALIAS');
   });
 
+  it('shared-squad guide reflects piece-36 working auto-publish (no build-12 workaround)', () => {
+    expect(existsSync(sharedSquadPath)).toBe(true);
+    const content = readFile(sharedSquadPath);
+    expect(content).not.toContain('Note (build 12)');
+    expect(content).not.toContain('not yet exposed');
+    expect(content).toContain('squad assign <callsign> --developer-alias <alias>');
+  });
+
+  it('CLI reference documents --state-remote and --state-branch on squad assign', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('--state-remote');
+    expect(content).toContain('--state-branch');
+  });
+
   it('shared-squad guide explains Copilot payload delivery', () => {
     expect(existsSync(sharedSquadPath)).toBe(true);
     const content = readFile(sharedSquadPath);
