@@ -2364,3 +2364,43 @@ One conflict class at commit 13/22 (`db15652b`), two files:
 - No push or PR created
 - stash@{0} not dropped
 - `.squad/` working-tree changes left uncommitted for Scribe
+
+### 2026-06-10: PAO Piece-38 Docs Reconciliation — Follow-up Decisions
+
+**Date:** 2026-06-10  
+**Author:** PAO (DevRel)  
+**Status:** Merged from inbox  
+**Branch:** akubly/upstream-npm-release (dogfooding)
+
+## Decision 1: Known flag inconsistency — `--inbox-handle` vs `--developer`
+
+**Observation:** `squad assign` uses `--inbox-handle` to set the per-developer inbox handle (piece-38 rename, confirmed at `assign-args.ts:28`). `squad sync` uses `--developer` to override the same value per-session (not renamed, confirmed at `cli-entry.ts:340,1465`). Both reference the same underlying `inboxHandle` registry field and `SQUAD_INBOX_HANDLE` env var.
+
+**User impact:** Moderate. Developers encounter two different flag names for conceptually identical values. Error messages in `sync.ts:733` already say `squad assign --inbox-handle`, which is correct — but the override flag at sync time is `--developer`, not `--inbox-handle`. This is a discoverability gap.
+
+**Documented in:** `shared-squad.md` (inconsistency callout after inbox-handle resolution section) and `cli.md` (after inbox-handle resolution order).
+
+**Recommended follow-up piece:** Rename `squad sync --developer` → `squad sync --inbox-handle`. Keep `--developer` as a deprecated alias for one release cycle. Update `cli-entry.ts:340`, `sync.ts` options interface, and all docs in the same commit.
+
+---
+
+## Decision 2: Residual "docs-repo" strings in `install-fold-pipeline.ts`
+
+**Observation:** 5 "docs-repo" strings remain in `install-fold-pipeline.ts` console output (approx. lines 89, 105). These are user-facing CLI messages that do not match the canonical term "shared-squad host clone" agreed in piece-37 triage (decisions.md UX-1).
+
+**User impact:** Low. CLI output says "docs-repo" but docs say "shared-squad host clone". Confused users may wonder which term is authoritative.
+
+**Docs cannot fix this** — it is code. PAO flagged in `shared-squad.md` See also section implicitly (canonical term is now "shared-squad host clone").
+
+**Recommended follow-up piece:** Update `install-fold-pipeline.ts` console strings to use "shared-squad host clone" (or "host clone" for brevity). No behavior change.
+
+---
+
+## Decision 3: Canonical page + link discipline enforced
+
+`shared-squad.md` is the one canonical page for shared-squad concepts. `cli.md` is reference only. `external-state.md` links to the canonical. `getting-started-journey.md` is internal only and updated.
+
+No new sub-pages created. Link-don't-duplicate maintained.
+
+
+---
