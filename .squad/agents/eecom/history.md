@@ -2,12 +2,12 @@
 
 > Environmental, Electrical, and Consumables Manager
 
-## Current Status (as of 2026-06-06)
+## Current Status (as of 2026-06-09)
 
-**Active Phase:** Phase B, Pieces 21-35 arc  
-**Latest completion:** Piece 34 (Client-side publish triggers) — Commit `b0045b27`  
-**Next piece:** Piece 35+  
-**Key dependencies:** Registry-first topology (piece 32–33), cross-repo hook surface (piece 34 A)
+**Active Phase:** Phase B, Pieces 36-38 arc  
+**Latest completion:** Piece 38 (Multi-clone publish model & Tier-2 completion) — pending commit  
+**Next piece:** Piece 39+  
+**Key dependencies:** Decoupled two-hook model (piece 38), inbox-handle rename (piece 38 J), orphan-backend enum (piece 38 O)
 
 **Core patterns maintained:**
 - Registry module = schema+disk-I/O boundary; resolver logic deferred downstream
@@ -20,7 +20,15 @@
 
 This history covers SDK lifecycle, registry schema, template propagation, cherry-pick rebases, and Phase B replay coordination. Core patterns: (1) Registry module as schema+disk-I/O boundary, resolver logic deferred to subsequent pieces. (2) Template sync via sync-templates.mjs covers .squad-templates/ but NOT .copilot/skills/ — manual propagation required for init-mode across packages. (3) Cherry-picks from insider branches to dev require dropping insider-only module references.
 
-## Recent Pieces (Pieces 33-34)
+## Recent Pieces (Pieces 33-38)
+
+### Piece 38 — Multi-clone publish model & Tier-2 completion (2026-06-09) ✅
+
+**Commit:** pending
+
+8 sub-proposals: J (inbox-handle rename), L (hardcoded prefix), M (sync-from-host guard), K (handle-only update from host), O (backend-enum reconciliation), two-hook decoupled model, product .squad/-forbid guard, N (dual-role registration).
+
+**Status:** All items implemented. 31 new tests GREEN. SDK/registry/validation tests pass. Pre-existing collection-failure suites updated but can't run (env debt). Scrub gate Gate 1 pre-existing baseline (not blocking).
 
 ### Piece 40 — Callsign-namespaced transport (2026-06-11) ✅
 
@@ -61,6 +69,24 @@ Sub-proposals A–D implemented (E deferred per triage):
 3 sub-proposals: A (RegistryEntry extension), B (assign flags + additive merge), C (DEVELOPER_ALIAS_RE validation).
 
 **Status:** FIDO re-verified complete. All nits addressed. 27/27 tests GREEN.
+
+## Learnings
+
+### Two-Hook Variant Detection (Piece 38)
+
+Host vs product clone detection for hook installation uses `fs.existsSync(path.join(repoPath, '.squad', 'team.md'))`. Host clone gets filtered post-commit (excludes .squad/-only commits via `git diff-tree --root`); product clone gets unfiltered post-commit. Both are independent try/catch — one failure cannot abort the other.
+
+### Source-File Assertions for Collection-Failing Suites (Piece 38)
+
+When a test file can't import from CLI commands (due to `@bradygaster/squad-sdk` package resolution debt), use source-file text assertions (`fs.readFileSync` + regex/string matching) to pin behavior. Not ideal but necessary until the package resolution is fixed.
+
+### Backend Enum Normalization Layer (Piece 38)
+
+`state-backend.ts` maintains a backward-compat normalization layer: accepts 'worktree' and normalizes to 'local'. The registry union (`registry.ts`) is stricter — only canonical values (`orphan | local | external | two-layer`). This two-layer validation (strict registry, lenient runtime) prevents data loss while enforcing forward progress.
+
+### Legacy Read-Compat Pattern (Piece 38)
+
+For field renames (e.g., `developerAlias` → `inboxHandle`): accept legacy key on READ via `value['inboxHandle'] ?? value['developerAlias']`, only EMIT canonical name. Add legacy key to `knownFields` set so it doesn't leak to unknown-fields warnings. Config fallback chain: `config.inboxHandle ?? config.developerAlias`.
 
 ## Key Learnings (Recent)
 

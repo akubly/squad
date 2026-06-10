@@ -60,3 +60,35 @@ CLI migrations live in `packages/squad-cli/src/cli/core/migrations.ts` as additi
 **Event:** Post-stack-review gate clearance — all five required fixes shipped.
 
 Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+---
+
+## Piece 38 Phase B Remediation — 2026-06-09T18:19:30-07:00
+
+GNC performed clean-room Phase B remediation of piece 38 (multi-clone publish model) after both review gates returned NO-GO. Five defects fixed.
+
+**BLOCKER 1 — Zero-residue developerAlias (acceptance #6):**
+- `packages/squad-sdk/src/registry.ts`: Removed two read-compat comment lines and the `?? value['developerAlias']` fallback from `rawHandle`. Removed `'developerAlias'` from `knownFields` Set.
+- `packages/squad-cli/src/cli/commands/sync.ts`: Removed `?? config.developerAlias` fallbacks at both config.json read sites (~line 552 and ~line 680).
+- `test/cli/piece-38-multi-clone-publish.test.ts` J2: Added `'developerAlias'` to the forbidden array (was gaming the guard by omission). J5: Updated to assert post-removal behavior (no migration; passes through as unknown field).
+- Ripgrep confirms zero residue in `packages/*/src`.
+
+**BLOCKER 2 — Cold-start installs no hooks (acceptance #8):**
+- `packages/squad-cli/src/commands/assign.ts`: Added `installCrossRepoHookFn` and `installProductSquadForbidHookFn` to `_ColdStartCtx` interface. Added `_installProductSquadForbidHookFn` to `SquadAssignOpts`. Updated `runAssign` cold-start dispatch to pass both fns. Added three-hook block (host post-commit, product post-commit, product forbid pre-commit in independent try/catch) after registry write+payload in `_coldStart`. 
+- Tests P38.CS1–CS4: source assertions verifying the code pattern (env-debt blocks behavioral spy test).
+
+**BLOCKER 3 — Missing E2E publish-model test (acceptance #4):**
+- Tests P38.PM1 and P38.PM2 added: PM1 verifies `publishTeamRootToInbox` is called with HOST teamRoot (not product dir) and SQUAD_SYNC_ACTIVE='1' at call time. PM2 verifies no new commit in product clone after sync.
+
+**BLOCKER 4 — Missing .squad/-forbid behavioral test (acceptance #5):**
+- Tests P38.FG3, FG4, FG5: behavioral tests executing the installed pre-commit hook via `sh`. FG3: staging .squad/ triggers exit-1 + error text. FG4: staging non-.squad/ exits 0. FG5: untracked .squad/ does NOT trip the guard. Skip pattern used if sh unavailable (but sh is available).
+
+**DEFECT 5 — Stale worktree assertions:**
+- `packages/squad-cli/src/commands/__tests__/assign.test.ts`: Changed fixture `stateBackend: 'worktree'` → `'orphan'` and assertion `.toBe('worktree')` → `.toBe('orphan')`.
+- `packages/squad-cli/src/commands/__tests__/unassign.test.ts`: Same change at 2 fixture + 2 assertion sites.
+
+**Key patterns learned:**
+- When removing compat/migration code, update ALL tests that asserted the compat behavior — not just the source.
+- Cold-start and warm-path must mirror each other for hook installation; injectable seams (`_installCrossRepoHookFn`, `_installProductSquadForbidHookFn`) in `_ColdStartCtx` enable spy-based testing once env-debt resolves.
+- Behavioral hook tests: install with `installProductSquadForbidHook`, then stage files with `git add`, exec hook with `sh [hookPath]` via `spawnSync`. Check `result.status` and `result.stderr`.
+- Registry `knownFields` inclusion of a field name suppresses its pass-through to `entry[key]`; removing a field name from knownFields makes it pass through as unknown — this is the round-trip fidelity contract.

@@ -38,3 +38,25 @@ Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-
 
 **Do NOT drop stash@{0}** — keep as safety net. User/Scribe will commit the `.squad/` changes in a separate commit.
 
+---
+
+## Learnings
+
+### Rebase-onto-piece-38 Pattern (2026-06-09)
+
+**Context:** `akubly/upstream-npm-release` (22 release/rescope/docs commits) rebased onto `squad/piece-38-multi-clone-publish-model`. merge-base was `feee37f7` (piece-36 HEAD — where npm-release was last rebased onto piece-36). piece-38 added 2 commits on top of that base: `deb94a26` (piece-37 dogfood fixes) and `ad239eeb` (piece-38 multi-clone publish model).
+
+**Outcome:** Rebase hit conflicts at commit 13/22 (`db15652b` — the npm-release rescope commit). Two files conflicted: `packages/squad-cli/src/cli/commands/sync.ts` and `packages/squad-cli/src/commands/assign.ts`. Conflict class: piece-38 (HEAD) used `INBOX_HANDLE_RE` from `@bradygaster/squad-sdk` while the npm-release rescope commit used `DEVELOPER_ALIAS_RE` from `@wifi-aware/squad-sdk`. Additionally, assign.ts HEAD included `installProductSquadForbidHook` which the npm-release side had dropped. Resolution: kept piece-38 wiring (`INBOX_HANDLE_RE`, `installProductSquadForbidHook`) and applied `@wifi-aware` scope. Commits 14–22 applied cleanly. Rebase succeeded.
+
+**Post-rebase scope-scrub:** `git grep -n "@bradygaster" -- "packages/**/src/**/*.ts"` returned **zero hits** — the 22 npm-release commits had already done a complete rescope of all TS source files. No separate scope-fix commit was needed. This is a well-worn pattern: the npm-release branch carries authoritative scope, and after conflict resolution at the rescope commit the rest of the source is already clean.
+
+**Scale:** 22 commits, 2 conflict files, 0 post-rebase stale imports. The conflict was entirely mechanical (symbol rename + scope rename at the same lines) — no genuine logic tangle.
+
+**npm install:** Run after rebase (as always) to regenerate `node_modules/@wifi-aware/` workspace symlinks before `SKIP_BUILD_BUMP=1 npm run build`. Build exited 0.
+
+### Stash@{0} — Clean Stash (2026-06-09)
+
+**Scenario:** stash@{0} ("WIP on squad/piece-38-multi-clone-publish-model") contained ONLY 2 files: `.squad/agents/eecom/history.md` and `.squad/agents/gnc/history.md`. No `package.json` churn, no version deltas. `git stash apply stash@{0}` applied with zero conflicts (union driver merged both history files cleanly). No NUL bytes in either file. No manual extraction required. Both files restored as working-tree-modified; not staged; left for Scribe to commit. stash@{0} retained as safety net.
+
+**Key insight:** When a stash is "clean" (only `.squad/` append-only files, no package.json churn), the apply is trivial. The complexity documented in the prior recipe (selective-restore + manual decisions.md extraction) only applies when the stash carries stale version bumps or large-file union-merge failures. Confirm stash contents before applying — `git stash show stash@{0}` tells you exactly what's inside.
+
