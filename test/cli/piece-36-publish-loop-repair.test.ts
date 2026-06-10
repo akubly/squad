@@ -3,7 +3,7 @@
  *
  * Targeted tests for sub-proposals A through I.
  *
- * A: assign flags wire correctly (developerAlias, stateRemote, stateBranch)
+ * A: assign flags wire correctly (inboxHandle, stateRemote, stateBranch)
  * B: skillsFrom forwarded to runAssign
  * C: hook template does not export SQUAD_SYNC_ACTIVE (runSync owns guard)
  * D: publish with realistic .squad/ (team.md + agents/) succeeds; non-allowlisted files filtered
@@ -141,7 +141,7 @@ beforeEach(() => {
   vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
   vi.mocked(normalisedPathKey).mockImplementation((p: string) => p.toLowerCase().replace(/\\/g, '/'));
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -152,7 +152,7 @@ afterEach(() => {
   }
   vi.clearAllMocks();
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -160,25 +160,25 @@ afterEach(() => {
 // ─── Sub-proposal A: Wire assign flags ───────────────────────────────────────
 
 describe('A: assign flags (developer-alias, state-remote, state-branch)', () => {
-  it('A1: parseAssignArgs returns developerAlias, stateRemote, stateBranch from CLI args', () => {
+  it('A1: parseAssignArgs returns inboxHandle, stateRemote, stateBranch from CLI args', () => {
     const result = parseAssignArgs([
       'my-squad',
-      '--developer-alias', 'alice',
+      '--inbox-handle', 'alice',
       '--state-remote', 'squad-docs',
       '--state-branch', 'squad-state',
     ]);
-    expect(result.developerAlias).toBe('alice');
+    expect(result.inboxHandle).toBe('alice');
     expect(result.stateRemote).toBe('squad-docs');
     expect(result.stateBranch).toBe('squad-state');
   });
 
   it('A1b: parseAssignArgs supports equals-delimited form for new flags', () => {
     const result = parseAssignArgs([
-      '--developer-alias=bob',
+      '--inbox-handle=bob',
       '--state-remote=origin',
       '--state-branch=my-branch',
     ]);
-    expect(result.developerAlias).toBe('bob');
+    expect(result.inboxHandle).toBe('bob');
     expect(result.stateRemote).toBe('origin');
     expect(result.stateBranch).toBe('my-branch');
   });
@@ -203,7 +203,7 @@ describe('A: assign flags (developer-alias, state-remote, state-branch)', () => 
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      developerAlias: 'dev-alice',
+      inboxHandle: 'dev-alice',
       stateRemote: 'squad-remote',
       stateBranch: 'squad-state',
       getGitRoot: () => cloneDir,
@@ -217,12 +217,12 @@ describe('A: assign flags (developer-alias, state-remote, state-branch)', () => 
 
     // The registry entry must carry the three new fields
     const registryEntry = writtenEntries.find((e: any) => e.callsign === 'alpha') as any;
-    expect(registryEntry?.developerAlias).toBe('dev-alice');
+    expect(registryEntry?.inboxHandle).toBe('dev-alice');
     expect(registryEntry?.stateRemote).toBe('squad-remote');
     expect(registryEntry?.stateBranch).toBe('squad-state');
   });
 
-  it('A3: hook install is skipped (no error) when no developerAlias is supplied', async () => {
+  it('A3: hook install is skipped (no error) when no inboxHandle is supplied', async () => {
     const dir = makeTmpDir('a3-no-alias');
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
@@ -242,7 +242,7 @@ describe('A: assign flags (developer-alias, state-remote, state-branch)', () => 
       callsignOrUrl: 'bravo',
       registryPath,
       cwd: cloneDir,
-      // developerAlias intentionally absent
+      // inboxHandle intentionally absent
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
@@ -252,7 +252,7 @@ describe('A: assign flags (developer-alias, state-remote, state-branch)', () => 
     expect(hookCalls).toHaveLength(0);
   });
 
-  it('A4: hook install is skipped when developerAlias is an empty string', async () => {
+  it('A4: hook install is skipped when inboxHandle is an empty string', async () => {
     const dir = makeTmpDir('a4-empty-alias');
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
@@ -274,7 +274,7 @@ describe('A: assign flags (developer-alias, state-remote, state-branch)', () => 
         callsignOrUrl: 'charlie',
         registryPath,
         cwd: cloneDir,
-        developerAlias: '',
+        inboxHandle: '',
         getGitRoot: () => cloneDir,
         getRemoteUrls: () => [],
         _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
@@ -298,12 +298,12 @@ describe('B: skillsFrom forwarded to runAssign', () => {
     const result = parseAssignArgs([
       'my-squad',
       '--skills-from', './skills.json',
-      '--developer-alias', 'alice',
+      '--inbox-handle', 'alice',
       '--state-remote', 'origin',
       '--state-branch', 'squad-state',
     ]);
     expect(result.skillsFrom).toBe('./skills.json');
-    expect(result.developerAlias).toBe('alice');
+    expect(result.inboxHandle).toBe('alice');
     expect(result.stateRemote).toBe('origin');
     expect(result.stateBranch).toBe('squad-state');
   });
@@ -355,12 +355,12 @@ describe('B: skillsFrom forwarded to runAssign', () => {
     //   2. destructure → call runAssign with destructured opts (same shape as dispatch)
     const {
       callsignOrUrl, cloneTo, callsign, registryPath, targetDir,
-      skillsFrom, developerAlias, stateRemote, stateBranch,
+      skillsFrom, inboxHandle, stateRemote, stateBranch,
     } = parseAssignArgs(['my-squad', '--skills-from', SKILLS_PATH]);
 
     await runAssignSpy({
       callsignOrUrl, cloneTo, callsign, registryPath, targetDir,
-      skillsFrom, developerAlias, stateRemote, stateBranch,
+      skillsFrom, inboxHandle, stateRemote, stateBranch,
       cwd: process.cwd(),
     } as SquadAssignOpts);
 
@@ -516,7 +516,7 @@ describe('F: --dry-run reachable without developer alias', () => {
         clones: [cloneRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        // developerAlias intentionally absent
+        // inboxHandle intentionally absent
       }]),
       warnings: [],
     });
@@ -579,7 +579,7 @@ describe('C: hook→publish chain with recursion guard (DEFECT-2)', { timeout: 6
         clones: [workRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'alice',
+        inboxHandle: 'alice',
       }]),
       warnings: [],
     });
@@ -745,7 +745,7 @@ describe('I: inbox branch-name uniqueness on rapid publish calls', { timeout: 60
 // ─── End-to-end loop test (acceptance gate criterion 3) ──────────────────────
 
 describe('End-to-end loop: assign → commit → hook → publish chain', { timeout: 60_000 }, () => {
-  it('E2E: runSync push with full registry (developerAlias + stateRemote + clones) calls publishTeamRootToInbox', async () => {
+  it('E2E: runSync push with full registry (inboxHandle + stateRemote + clones) calls publishTeamRootToInbox', async () => {
     const base = makeTmpDir('e2e-loop');
     const docsRemote = path.join(base, 'docs-remote.git');
     const docsRoot = path.join(base, 'docs-root');
@@ -765,7 +765,7 @@ describe('End-to-end loop: assign → commit → hook → publish chain', { time
         clones: [workRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'alice',
+        inboxHandle: 'alice',
       }]),
       warnings: [],
     });

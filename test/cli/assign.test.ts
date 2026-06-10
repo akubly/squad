@@ -104,7 +104,7 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
     expect(written[0]).toMatchObject({ stateBranch: 'my-state' });
   });
 
-  it('P32.A3 --developer-alias is accepted and persisted on the registry entry', async () => {
+  it('P32.A3 --inbox-handle is accepted and persisted on the registry entry', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -118,13 +118,13 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      developerAlias: 'dev1',
+      inboxHandle: 'dev1',
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'alpha')); writeRegistry(_fp, reg); },
     }));
 
-    expect(written[0]).toMatchObject({ developerAlias: 'dev1' });
+    expect(written[0]).toMatchObject({ inboxHandle: 'dev1' });
   });
 
   it('P32.A4 omitted flags leave stateRemote/stateBranch absent on fresh entry', async () => {
@@ -177,10 +177,10 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
     expect(written[0]).toMatchObject({ stateRemote: 'upstream' });
   });
 
-  it('P32.A6 invalid --developer-alias throws AssignError with INVALID_ALIAS before registry read', async () => {
+  it('P32.A6 invalid --inbox-handle throws AssignError with INVALID_ALIAS before registry read', async () => {
     await expect(runAssign(baseOpts({
       callsignOrUrl: 'alpha',
-      developerAlias: '--bad',
+      inboxHandle: '--bad',
       getGitRoot: () => null,
       getRemoteUrls: () => [],
     }))).rejects.toSatisfy((err: unknown) =>
@@ -188,10 +188,10 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
     );
   });
 
-  it('P32.A7 invalid --developer-alias uppercase throws INVALID_ALIAS', async () => {
+  it('P32.A7 invalid --inbox-handle uppercase throws INVALID_ALIAS', async () => {
     await expect(runAssign(baseOpts({
       callsignOrUrl: 'alpha',
-      developerAlias: 'BAD',
+      inboxHandle: 'BAD',
       getGitRoot: () => null,
       getRemoteUrls: () => [],
     }))).rejects.toSatisfy((err: unknown) =>
@@ -199,10 +199,10 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
     );
   });
 
-  it('P32.A8 invalid --developer-alias too long throws INVALID_ALIAS', async () => {
+  it('P32.A8 invalid --inbox-handle too long throws INVALID_ALIAS', async () => {
     await expect(runAssign(baseOpts({
       callsignOrUrl: 'alpha',
-      developerAlias: 'a'.repeat(40),
+      inboxHandle: 'a'.repeat(40),
       getGitRoot: () => null,
       getRemoteUrls: () => [],
     }))).rejects.toSatisfy((err: unknown) =>
@@ -210,7 +210,7 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
     );
   });
 
-  it('P32.A9 valid --developer-alias passes validation', async () => {
+  it('P32.A9 valid --inbox-handle passes validation', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -224,13 +224,13 @@ describe('squad assign — piece-32 state fields (warm path)', () => {
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      developerAlias: 'alice-2',
+      inboxHandle: 'alice-2',
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'alpha')); writeRegistry(_fp, reg); },
     }));
 
-    expect(written[0]).toMatchObject({ developerAlias: 'alice-2' });
+    expect(written[0]).toMatchObject({ inboxHandle: 'alice-2' });
   });
 });
 
@@ -298,7 +298,7 @@ describe('squad assign — piece-32 state fields (cold-start path)', () => {
     expect(written[0]).toMatchObject({ stateBranch: 'my-branch' });
   });
 
-  it('P32.B3 cold-start: --developer-alias persisted on new registry entry', async () => {
+  it('P32.B3 cold-start: --inbox-handle persisted on new registry entry', async () => {
     const cloneDir = path.join(dir, 'dest3');
     const productClone = path.join(dir, 'product3');
     fs.mkdirSync(productClone, { recursive: true });
@@ -314,18 +314,18 @@ describe('squad assign — piece-32 state fields (cold-start path)', () => {
       callsign: 'squad3',
       registryPath,
       cwd: productClone,
-      developerAlias: 'dev1',
+      inboxHandle: 'dev1',
       getGitRoot: () => productClone,
       getRemoteUrls: () => [],
       cloneCommand: fakeClone,
       _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'squad3')); writeRegistry(_fp, reg); },
     }));
 
-    expect(written[0]).toMatchObject({ developerAlias: 'dev1' });
+    expect(written[0]).toMatchObject({ inboxHandle: 'dev1' });
   });
 
   // P32.B4
-  it('P32.B4 cold-start re-assign (reactivating) without state flags preserves existing stateRemote/stateBranch/developerAlias', async () => {
+  it('P32.B4 cold-start re-assign (reactivating) without state flags preserves existing stateRemote/stateBranch/inboxHandle', async () => {
     // Reactivation scenario: registry already has an entry for this callsign (with state
     // fields set) but the clone directory no longer exists. Re-running with --clone-to
     // re-clones and must preserve the existing state fields on the merged entry.
@@ -345,14 +345,14 @@ describe('squad assign — piece-32 state fields (cold-start path)', () => {
         path: preSeedSquadDir,
         stateRemote: 'upstream',
         stateBranch: 'my-state',
-        developerAlias: 'alice',
+        inboxHandle: 'alice',
         status: 'inactive' as const,
       }],
     });
 
     const written: unknown[] = [];
 
-    // Re-assign (reactivating) WITHOUT --state-remote / --state-branch / --developer-alias.
+    // Re-assign (reactivating) WITHOUT --state-remote / --state-branch / --inbox-handle.
     await runAssign(baseOpts({
       callsignOrUrl: 'https://example.com/squad4.git',
       cloneTo: cloneDir,
@@ -369,7 +369,7 @@ describe('squad assign — piece-32 state fields (cold-start path)', () => {
     expect(written[0]).toMatchObject({
       stateRemote: 'upstream',
       stateBranch: 'my-state',
-      developerAlias: 'alice',
+      inboxHandle: 'alice',
     });
   });
 });
@@ -387,7 +387,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
     fs.rmSync(TMP_ROOT, { recursive: true, force: true });
   });
 
-  it('P34.A1 developerAlias set → installCrossRepoHook called with path.dirname(entry.path)', async () => {
+  it('P34.A1 inboxHandle set → installCrossRepoHook called with path.dirname(entry.path)', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -401,7 +401,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      developerAlias: 'dev1',
+      inboxHandle: 'dev1',
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
@@ -412,7 +412,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
     expect(hookCalls[0]).toBe(hostDir);
   });
 
-  it('P34.A2 developerAlias set but hook throws → warning emitted, assign succeeds (no throw)', async () => {
+  it('P34.A2 inboxHandle set but hook throws → warning emitted, assign succeeds (no throw)', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -424,7 +424,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      developerAlias: 'dev1',
+      inboxHandle: 'dev1',
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _installCrossRepoHookFn: () => { throw new Error('simulated: not a git repo'); },
@@ -439,7 +439,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
     }
   });
 
-  it('P34.A3 developerAlias not set → installCrossRepoHook not called', async () => {
+  it('P34.A3 inboxHandle not set → installCrossRepoHook not called', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -453,7 +453,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
       callsignOrUrl: 'alpha',
       registryPath,
       cwd: cloneDir,
-      // developerAlias intentionally omitted
+      // inboxHandle intentionally omitted
       getGitRoot: () => cloneDir,
       getRemoteUrls: () => [],
       _installCrossRepoHookFn: (p) => { hookCalls.push(p); },

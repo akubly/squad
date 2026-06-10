@@ -83,7 +83,7 @@ beforeEach(() => {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
   vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -94,7 +94,7 @@ afterEach(() => {
   }
   vi.clearAllMocks();
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -133,7 +133,7 @@ describe('TEAM_ROOT / registry resolution (sub-proposal A)', { timeout: 60_000 }
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
-        developerAlias: 'dev1',
+        inboxHandle: 'dev1',
       }]),
       warnings: [],
     });
@@ -146,7 +146,7 @@ describe('TEAM_ROOT / registry resolution (sub-proposal A)', { timeout: 60_000 }
     void gitRoot; // used to confirm gitRoot is a valid path
   });
 
-  it('A2: stateRemote / stateBranch / developerAlias pulled from same entry as teamRoot', async () => {
+  it('A2: stateRemote / stateBranch / inboxHandle pulled from same entry as teamRoot', async () => {
     const base = makeTmpDir('A2');
     const docsRemote = path.join(base, 'docs-remote.git');
     const docsTeamRoot = path.join(base, 'docs');
@@ -166,7 +166,7 @@ describe('TEAM_ROOT / registry resolution (sub-proposal A)', { timeout: 60_000 }
         clones: [workGitRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'alice',
+        inboxHandle: 'alice',
       }]),
       warnings: [],
     });
@@ -249,8 +249,8 @@ describe('TEAM_ROOT / registry resolution (sub-proposal A)', { timeout: 60_000 }
 
     vi.mocked(loadRegistryFromDisk).mockReturnValue({
       registry: makeRegistry([
-        { path: path.join(wrongDocs, '.squad'), clones: [otherRoot], stateRemote: 'origin', developerAlias: 'wrong-dev' },
-        { path: path.join(correctDocs, '.squad'), clones: [workGitRoot], stateRemote: 'origin', developerAlias: 'correct-dev' },
+        { path: path.join(wrongDocs, '.squad'), clones: [otherRoot], stateRemote: 'origin', inboxHandle: 'wrong-dev' },
+        { path: path.join(correctDocs, '.squad'), clones: [workGitRoot], stateRemote: 'origin', inboxHandle: 'correct-dev' },
       ]),
       warnings: [],
     });
@@ -326,14 +326,14 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
       cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
     }).trim();
 
-    if (opts.envAlias) process.env['SQUAD_DEVELOPER_ALIAS'] = opts.envAlias;
+    if (opts.envAlias) process.env['SQUAD_INBOX_HANDLE'] = opts.envAlias;
 
     vi.mocked(loadRegistryFromDisk).mockReturnValue({
       registry: makeRegistry([{
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
-        ...(opts.registryAlias ? { developerAlias: opts.registryAlias } : {}),
+        ...(opts.registryAlias ? { inboxHandle: opts.registryAlias } : {}),
       }]),
       warnings: [],
     });
@@ -343,7 +343,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     return listBareRefs(docsRemote);
   }
 
-  it('D1: --developer flag wins over SQUAD_DEVELOPER_ALIAS env and registry alias', async () => {
+  it('D1: --developer flag wins over SQUAD_INBOX_HANDLE env and registry alias', async () => {
     const base = makeTmpDir('D1');
     const refs = await pushAndGetRefs(base, {
       developer: 'flag-alias',
@@ -355,7 +355,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     expect(refs.some(r => r.includes('squad/inbox/registry-alias/'))).toBe(false);
   });
 
-  it('D2: SQUAD_DEVELOPER_ALIAS env wins when --developer flag absent', async () => {
+  it('D2: SQUAD_INBOX_HANDLE env wins when --developer flag absent', async () => {
     const base = makeTmpDir('D2');
     const refs = await pushAndGetRefs(base, {
       envAlias: 'env-alias',
@@ -365,7 +365,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     expect(refs.some(r => r.includes('squad/inbox/registry-alias/'))).toBe(false);
   });
 
-  it('D3: registry developerAlias wins when neither --developer nor SQUAD_DEVELOPER_ALIAS', async () => {
+  it('D3: registry inboxHandle wins when neither --developer nor SQUAD_INBOX_HANDLE', async () => {
     const base = makeTmpDir('D3');
     const refs = await pushAndGetRefs(base, {
       registryAlias: 'registry-alias',
@@ -391,11 +391,11 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
       registry: makeRegistry([{
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
-        // No developerAlias
+        // No inboxHandle
       }]),
       warnings: [],
     });
-    // No --developer, no SQUAD_DEVELOPER_ALIAS, no registry alias
+    // No --developer, no SQUAD_INBOX_HANDLE, no registry alias
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spy, calls } = mockProcessExit();
@@ -407,9 +407,9 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     }
     expect(threw).toBe(true);
     expect(calls).toContain(1);
-    // G3: exit message must reference 'squad assign --developer-alias'
+    // G3: exit message must reference 'squad assign --inbox-handle'
     const errorMsg = errorSpy.mock.calls.map(args => String(args[0])).join('\n');
-    expect(errorMsg).toContain('squad assign --developer-alias');
+    expect(errorMsg).toContain('squad assign --inbox-handle');
     errorSpy.mockRestore();
     spy.mockRestore();
   });
@@ -432,7 +432,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
       registry: makeRegistry([{
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
-        // No developerAlias — pull should still work
+        // No inboxHandle — pull should still work
       }]),
       warnings: [],
     });
@@ -447,7 +447,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     spy.mockRestore();
   });
 
-  it('D6: whitespace-only alias on --push is trimmed to empty → exits 1 referencing squad assign --developer-alias', async () => {
+  it('D6: whitespace-only alias on --push is trimmed to empty → exits 1 referencing squad assign --inbox-handle', async () => {
     const base = makeTmpDir('D6');
     const docsRemote = path.join(base, 'docs-remote.git');
     const docsTeamRoot = path.join(base, 'docs');
@@ -466,7 +466,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
-        // No developerAlias in registry either
+        // No inboxHandle in registry either
       }]),
       warnings: [],
     });
@@ -483,7 +483,7 @@ describe('Alias resolution chain (sub-proposal D)', { timeout: 60_000 }, () => {
     expect(threw).toBe(true);
     expect(calls).toContain(1);
     const errorMsg = errorSpy.mock.calls.map(args => String(args[0])).join('\n');
-    expect(errorMsg).toContain('squad assign --developer-alias');
+    expect(errorMsg).toContain('squad assign --inbox-handle');
     errorSpy.mockRestore();
     spy.mockRestore();
   });

@@ -85,7 +85,7 @@ function setupRegistryEntry(docsRepoDir: string, cloneRoot: string): void {
       clones: [cloneRoot],
       stateRemote: 'origin',
       stateBranch: 'squad-state',
-      developerAlias: 'testdev',
+      inboxHandle: 'testdev',
     }]),
     warnings: [],
   });

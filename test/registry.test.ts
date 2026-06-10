@@ -31,16 +31,16 @@ describe('RegistryEntry — piece-32 state fields', () => {
     fs.rmSync(TMP_ROOT, { recursive: true, force: true });
   });
 
-  it('P32.R1 RegistryEntry interface accepts stateRemote, stateBranch, developerAlias', () => {
+  it('P32.R1 RegistryEntry interface accepts stateRemote, stateBranch, inboxHandle', () => {
     const entry: RegistryEntry = {
       path: squadPath(dir),
       stateRemote: 'upstream',
       stateBranch: 'squad-state',
-      developerAlias: 'alice-1',
+      inboxHandle: 'alice-1',
     };
     expect(entry.stateRemote).toBe('upstream');
     expect(entry.stateBranch).toBe('squad-state');
-    expect(entry.developerAlias).toBe('alice-1');
+    expect(entry.inboxHandle).toBe('alice-1');
   });
 
   it('P32.R2 entry with all three new fields serializes and round-trips through writeRegistry / loadRegistryFromDisk', () => {
@@ -54,7 +54,7 @@ describe('RegistryEntry — piece-32 state fields', () => {
         path: sqPath,
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'dev1',
+        inboxHandle: 'dev1',
       }],
     };
 
@@ -65,7 +65,7 @@ describe('RegistryEntry — piece-32 state fields', () => {
     const entry = loaded!.squads[0];
     expect(entry!.stateRemote).toBe('origin');
     expect(entry!.stateBranch).toBe('squad-state');
-    expect(entry!.developerAlias).toBe('dev1');
+    expect(entry!.inboxHandle).toBe('dev1');
   });
 
   it('P32.R3 legacy entry without state fields loads cleanly with undefined for all three', () => {

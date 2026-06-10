@@ -20,7 +20,7 @@ vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
 vi.mock('@bradygaster/squad-sdk/validation', () => ({
-  DEVELOPER_ALIAS_RE: /^[a-z][a-z0-9-]{1,38}$/,
+  INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -91,7 +91,7 @@ beforeEach(() => {
   vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
   vi.mocked(normalisedPathKey).mockImplementation((p: string) => p.toLowerCase().replace(/\\/g, '/'));
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -103,7 +103,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.mocked(normalisedPathKey).mockImplementation((p: string) => p.toLowerCase().replace(/\\/g, '/'));
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -165,7 +165,7 @@ describe('B — stateRemote defaults to origin (P37)', () => {
         callsign: 'test-squad',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'devtest',
+        inboxHandle: 'devtest',
         // stateRemote is intentionally NOT set → should default to 'origin'
         stateBranch: 'squad-state',
       }]),
@@ -207,7 +207,7 @@ describe('B — stateRemote defaults to origin (P37)', () => {
         callsign: 'test-squad',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'devtest',
+        inboxHandle: 'devtest',
         stateRemote: 'upstream',
         stateBranch: 'squad-state',
       }]),
@@ -313,7 +313,7 @@ describe('F — squad assign --help branch (P37)', () => {
     const src = readFileSync(CLI_ENTRY_SRC, 'utf-8');
     expect(src).toMatch(/cmd === ['"]assign['"]/);
     // The help block must print assign usage
-    expect(src).toContain('--developer-alias');
+    expect(src).toContain('--inbox-handle');
     expect(src).toContain('--state-remote');
     expect(src).toContain('--state-branch');
   });
@@ -388,7 +388,7 @@ describe('H — ADO pipeline directory .azuredevops (P37)', () => {
         clones: [cloneRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'testdev',
+        inboxHandle: 'testdev',
       }]),
       warnings: [],
     });
@@ -424,7 +424,7 @@ describe('H — ADO pipeline directory .azuredevops (P37)', () => {
         clones: [cloneRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'testdev',
+        inboxHandle: 'testdev',
       }]),
       warnings: [],
     });

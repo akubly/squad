@@ -103,7 +103,7 @@ describe('runUnassign: last clone demotion', () => {
       origins: ['github.com/example/api'],
       clones: [cloneDir],
       status: 'active',
-      stateBackend: 'worktree',
+      stateBackend: 'orphan',
       _unknownFutureField: 'preserved',
     }]);
   });
@@ -128,7 +128,7 @@ describe('runUnassign: last clone demotion', () => {
     expect(entry['callsign']).toBe('alpha');
     expect(entry['path']).toBe(squadPath);
     expect(entry['initUri']).toBe('https://github.com/example/squad-host');
-    expect(entry['stateBackend']).toBe('worktree');
+    expect(entry['stateBackend']).toBe('orphan');
     expect(entry['_unknownFutureField']).toBe('preserved');
     expect((entry['clones'] as string[])).toHaveLength(0);
   });
@@ -373,7 +373,7 @@ describe('runUnassign: forward-compatible field preservation', () => {
       origins: [],
       clones: [cloneDir, otherCloneDir],
       status: 'active',
-      stateBackend: 'worktree',
+      stateBackend: 'orphan',
       _custom: 'preserved-value',
     }]);
   });
@@ -392,7 +392,7 @@ describe('runUnassign: forward-compatible field preservation', () => {
 
     const reg = readRegistry(registryPath);
     const entry = (reg.squads as Record<string, unknown>[])[0]!;
-    expect(entry['stateBackend']).toBe('worktree');
+    expect(entry['stateBackend']).toBe('orphan');
     expect(entry['_custom']).toBe('preserved-value');
   });
 });

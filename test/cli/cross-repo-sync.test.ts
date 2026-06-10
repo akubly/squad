@@ -89,7 +89,7 @@ beforeEach(() => {
   // Reset registry mock to null before each test (integration tests override per-test)
   vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -100,7 +100,7 @@ afterEach(() => {
   }
   vi.clearAllMocks();
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -216,7 +216,7 @@ describe('publishTeamRootToInbox', { timeout: 60_000 }, () => {
     expect(hash1.startsWith('sha256:')).toBe(true);
   });
 
-  it('7. malformed developerAlias rejects before any ref is created on the remote', async () => {
+  it('7. malformed inboxHandle rejects before any ref is created on the remote', async () => {
     const base = makeTmpDir('alias-guard');
     const bare = path.join(base, 'bare.git');
     const repo = path.join(base, 'work');
@@ -228,7 +228,7 @@ describe('publishTeamRootToInbox', { timeout: 60_000 }, () => {
     const badAliases = ['', 'BAD', '-abc', 'a'.repeat(40)];
     for (const alias of badAliases) {
       await expect(publishTeamRootToInbox(repo, 'origin', alias, 'sess-x')).rejects.toThrow(
-        /Invalid developerAlias/,
+        /Invalid inboxHandle/,
       );
     }
 
@@ -277,7 +277,7 @@ describe('publishTeamRootToInbox', { timeout: 60_000 }, () => {
     const tooLong = 'a' + 'b'.repeat(39);
     await expect(
       publishTeamRootToInbox(repo, 'origin', tooLong, 'sess-toolong'),
-    ).rejects.toThrow(/Invalid developerAlias/);
+    ).rejects.toThrow(/Invalid inboxHandle/);
   });
 
   it('8. non-allowlisted paths (.squad/config.json) are silently filtered — publish succeeds with allowlisted subset', async () => {
@@ -402,7 +402,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
         clones: [workGitRoot],
         stateRemote: 'origin',
         stateBranch: 'squad-state',
-        developerAlias: 'alice',
+        inboxHandle: 'alice',
       }]),
       warnings: [],
     });
@@ -593,7 +593,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
-        developerAlias: 'dev3',
+        inboxHandle: 'dev3',
       }]),
       warnings: [],
     });

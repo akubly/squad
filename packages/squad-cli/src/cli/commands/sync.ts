@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
+import { INBOX_HANDLE_RE } from '@bradygaster/squad-sdk/validation';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 
@@ -28,7 +28,7 @@ export interface SyncOptions {
   remote?: string;
   cwd?: string;
   quiet?: boolean;
-  /** Developer alias for cross-repo inbox publish. Overrides env var and registry entry. */
+  /** Inbox handle for cross-repo inbox publish. Overrides env var and registry entry. */
   developer?: string;
   /** Dry-run: print pending files and target branch info without publishing. */
   dryRun?: boolean;
@@ -303,13 +303,13 @@ let _publishSeq = 0;
 export async function publishTeamRootToInbox(
   teamRoot: string,
   remote: string,
-  developerAlias: string,
+  inboxHandle: string,
   sessionId: string,
 ): Promise<void> {
-  // Step 1: Validate developerAlias before any git operation
-  if (!DEVELOPER_ALIAS_RE.test(developerAlias)) {
+  // Step 1: Validate inboxHandle before any git operation
+  if (!INBOX_HANDLE_RE.test(inboxHandle)) {
     throw new Error(
-      `Invalid developerAlias "${developerAlias}": must match /^[a-z][a-z0-9-]{1,38}$/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+      `Invalid inboxHandle "${inboxHandle}": must match /^[a-z][a-z0-9-]{1,38}$/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
     );
   }
 
@@ -323,7 +323,7 @@ export async function publishTeamRootToInbox(
   // Step 2: Build inbox branch name (monotonic seq suffix guarantees uniqueness below ms)
   const ts = formatPublishTimestamp(new Date());
   const seq = _publishSeq++;
-  const inboxBranch = `squad/inbox/${developerAlias}/${ts}-${seq}-${sessionId}`;
+  const inboxBranch = `squad/inbox/${inboxHandle}/${ts}-${seq}-${sessionId}`;
 
   // Step 3: Resolve base commit
   const baseStateCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -369,7 +369,7 @@ export async function publishTeamRootToInbox(
     const normalizedTeamRoot = teamRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     const pathHash = 'sha256:' + createHash('sha256').update(normalizedTeamRoot).digest('hex');
     const metadata = {
-      developerAlias,
+      inboxHandle,
       sessionId,
       sourceWorkRoot: {
         repo: path.basename(teamRoot),
@@ -529,7 +529,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
   let teamRoot: string | undefined;
   let stateRemote: string | undefined;
   let stateBranch: string | undefined;
-  let developerAlias: string | undefined;
+  let inboxHandle: string | undefined;
 
   const { registry } = loadRegistryFromDisk();
   const normalizedRoot = normalisedPathKey(repoRoot);
@@ -540,7 +540,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
     teamRoot = path.dirname(entry.path);
     stateRemote = entry.stateRemote;
     stateBranch = entry.stateBranch;
-    developerAlias = entry.developerAlias;
+    inboxHandle = entry.inboxHandle;
   } else {
     // Fallback: config.json for unregistered/single-repo contexts
     const configPath = path.join(repoRoot, '.squad', 'config.json');
@@ -549,7 +549,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         stateRemote = config.stateRemote;
         stateBranch = config.stateBranch;
-        developerAlias = config.developerAlias;
+        inboxHandle = config.inboxHandle;
       } catch { /* ignore */ }
     }
   }
@@ -584,7 +584,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
   console.log(`Pending changes:   ${pendingChanges}`);
   console.log(`State remote:      ${stateRemote ?? '(not set)'}`);
   console.log(`State branch:      ${stateBranch ?? '(not set)'}`);
-  console.log(`Developer alias:   ${developerAlias ?? '(not set)'}`);
+  console.log(`Inbox handle:      ${inboxHandle ?? '(not set)'}`);
   console.log(`Host clone path:   ${teamRoot ?? '(not bound)'}`);
 }
 
@@ -642,8 +642,29 @@ export async function runSync(options: SyncOptions): Promise<void> {
         teamRoot = path.dirname(entry.path); // entry.path ends in .squad
         stateRemote = entry.stateRemote;
         stateBranch = entry.stateBranch;
-        registryAlias = entry.developerAlias;
+        registryAlias = entry.inboxHandle;
+        // O: Read entry.stateBackend, default to and enforce 'orphan'.
+        // Warn (non-fatal) when an explicit non-orphan value is overridden.
+        const entryBackend = entry.stateBackend;
+        if (entryBackend && entryBackend !== 'orphan') {
+          console.warn(
+            `squad sync: warning: entry "${entry.callsign ?? entry.path}" has stateBackend '${entryBackend}' ` +
+            `but shared-squad entries enforce orphan backend. Using 'orphan'.`,
+          );
+        }
         backend = 'orphan';
+      } else {
+        // Item M: Sync-from-host guard — detect if cwd IS the host root (not a product clone).
+        const hostEntry = registry?.squads.find(e =>
+          normalisedPathKey(path.dirname(e.path)) === normalizedRoot
+        );
+        if (hostEntry) {
+          console.error(
+            `squad sync: you are in the shared-squad host clone (${repoRoot}).\n` +
+            `  squad sync runs from a product clone. To publish, run squad sync from your product repository.`,
+          );
+          process.exit(1);
+        }
       }
     }
 
@@ -656,7 +677,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
           const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
           stateRemote ??= config.stateRemote;
           stateBranch ??= config.stateBranch;
-          registryAlias ??= config.developerAlias;
+          registryAlias ??= config.inboxHandle;
           backend = config.stateBackend ?? null;
         } catch { /* ignore parse errors — treat as empty config */ }
       }
@@ -679,20 +700,20 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     const crossRepo = teamRoot !== undefined;
 
-    // ── Sub-proposal D: Alias resolution chain ────────────────────────────────
-    // Order: (1) --developer flag; (2) SQUAD_DEVELOPER_ALIAS env var; (3) registry entry alias.
-    // Trim whitespace so a blank/whitespace-only alias triggers the friendly exit-1 guidance.
+    // ── Inbox-handle resolution chain ─────────────────────────────────────────
+    // Order: (1) --developer flag; (2) SQUAD_INBOX_HANDLE env var; (3) registry entry handle.
+    // Trim whitespace so a blank/whitespace-only handle triggers the friendly exit-1 guidance.
     const rawAlias =
       options.developer !== undefined
         ? options.developer
-        : (process.env['SQUAD_DEVELOPER_ALIAS'] ?? registryAlias);
+        : (process.env['SQUAD_INBOX_HANDLE'] ?? registryAlias);
     const resolvedAlias = rawAlias?.trim() || undefined;
 
     // ── Dry-run: print pending info without publishing ─────────────────────────
-    // Must run before alias guard so developers can preview without a configured alias.
+    // Must run before handle guard so developers can preview without a configured handle.
     if (options.dryRun) {
       const files = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
-      const effectiveAlias = resolvedAlias ?? '(alias required)';
+      const effectiveAlias = resolvedAlias ?? '(handle required)';
       const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
       const effectiveBranch = stateBranch ?? 'squad-state';
       console.log(`squad sync --dry-run`);
@@ -708,9 +729,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     if (!resolvedAlias && isPush && crossRepo) {
       console.error(
-        `squad sync: developer alias is required for --push.\n` +
-        `  Pass --developer <alias>, set SQUAD_DEVELOPER_ALIAS, or run ` +
-        `'squad assign --developer-alias <alias>' to persist the alias.`,
+        `squad sync: inbox handle is required for --push.\n` +
+        `  Pass --developer <handle>, set SQUAD_INBOX_HANDLE, or run ` +
+        `'squad assign --inbox-handle <handle>' to persist the handle.`,
       );
       process.exit(1);
     }

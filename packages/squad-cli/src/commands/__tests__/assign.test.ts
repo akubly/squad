@@ -487,7 +487,7 @@ describe('runAssign: forward-compat registry fields', () => {
       path: squadPath,
       status: 'active',
       initUri: 'https://example.com/host.git',
-      stateBackend: 'worktree',
+      stateBackend: 'orphan',
       _futureField: 'must-survive',
       origins: [],
       clones: [],
@@ -511,7 +511,7 @@ describe('runAssign: forward-compat registry fields', () => {
     const entry = (reg.squads as Record<string, unknown>[])[0]!;
     expect(entry['status']).toBe('active');
     expect(entry['initUri']).toBe('https://example.com/host.git');
-    expect(entry['stateBackend']).toBe('worktree');
+    expect(entry['stateBackend']).toBe('orphan');
     expect(entry['_futureField']).toBe('must-survive');
   });
 });

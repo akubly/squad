@@ -25,8 +25,8 @@ import { getTemplatesDir } from '../cli/core/templates.js';
 import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
-import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation';
-import { installCrossRepoHook } from '../cli/commands/install-hooks.js';
+import { INBOX_HANDLE_RE } from '@bradygaster/squad-sdk/validation';
+import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */
@@ -280,10 +280,12 @@ export interface SquadAssignOpts {
   stateRemote?: string;
   /** --state-branch <name>: orphan branch holding folded canonical state. */
   stateBranch?: string;
-  /** --developer-alias <alias>: per-developer namespace identifier for inbox branches. */
-  developerAlias?: string;
+  /** --inbox-handle <handle>: per-developer namespace identifier for inbox branches. */
+  inboxHandle?: string;
   /** @internal Injectable seam: override cross-repo hook installer. For testing only. */
   _installCrossRepoHookFn?: (docsRepoPath: string) => void;
+  /** @internal Injectable seam: override product .squad/-forbid hook installer. For testing only. */
+  _installProductSquadForbidHookFn?: (productRepoPath: string) => void;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -328,11 +330,11 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   const cloneFn = opts.cloneCommand ?? _defaultCloneCommand;
   const writeRegistryFn = opts._writeRegistryFn ?? writeRegistry;
 
-  // Guard 0: Validate developerAlias format before any registry read.
-  if (opts.developerAlias !== undefined && !DEVELOPER_ALIAS_RE.test(opts.developerAlias)) {
+  // Guard 0: Validate inboxHandle format before any registry read.
+  if (opts.inboxHandle !== undefined && !INBOX_HANDLE_RE.test(opts.inboxHandle)) {
     throw new AssignError(
       'INVALID_ALIAS',
-      `Invalid --developer-alias "${opts.developerAlias}": must match /${DEVELOPER_ALIAS_RE.source}/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+      `Invalid --inbox-handle "${opts.inboxHandle}": must match /${INBOX_HANDLE_RE.source}/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
     );
   }
 
@@ -371,7 +373,9 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   if (opts.cloneTo !== undefined) {
     // Resolve cloneTo at the call site so _coldStart operates on a concrete string.
     const cloneTo = opts.cloneTo;
-    return _coldStart({ rawArg, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn });
+    const installCrossRepoHookFn = opts._installCrossRepoHookFn ?? installCrossRepoHook;
+    const installProductSquadForbidHookFn = opts._installProductSquadForbidHookFn ?? installProductSquadForbidHook;
+    return _coldStart({ rawArg, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn, installCrossRepoHookFn, installProductSquadForbidHookFn });
   }
 
   // URL without --clone-to: surface a teaching error.
@@ -446,9 +450,24 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     );
   }
 
-  // Guard 3: Host-path guard — assigning from the squad host itself is a no-op.
+  // Guard 3: Host-path guard — assigning from the squad host itself.
+  // Exception (K): handle-only update — when --inbox-handle is supplied AND no clone/target-dir/cold-start
+  // work is requested, update the entry's inboxHandle and write the registry instead of returning noOp.
   const hostParentDir = path.dirname(hostSquadDir);
   if (normalisedPathKey(resolvedTargetDir) === normalisedPathKey(hostParentDir)) {
+    const isHandleOnly = opts.inboxHandle !== undefined && !opts.cloneTo && !opts.targetDir;
+    if (isHandleOnly) {
+      // Handle-only update from host: update inboxHandle on this entry and persist.
+      const updatedEntry: RegistryEntry = { ...entry, inboxHandle: opts.inboxHandle };
+      const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
+      const newRegistry: Registry = {
+        version: registry?.version ?? 1,
+        squads: [...otherSquads, updatedEntry],
+      };
+      fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
+      writeRegistryFn(registryFilePath, newRegistry);
+      return { kind: 'assigned', callsign, hostPath: hostSquadDir, clonePath: hostParentDir, warnings: [], coordinatorInstalled: false };
+    }
     return { kind: 'noOp', callsign, hostPath: hostSquadDir };
   }
 
@@ -546,7 +565,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     // Additive merge: opts values win when supplied; existing entry values preserved when omitted.
     ...(opts.stateRemote !== undefined ? { stateRemote: opts.stateRemote } : {}),
     ...(opts.stateBranch !== undefined ? { stateBranch: opts.stateBranch } : {}),
-    ...(opts.developerAlias !== undefined ? { developerAlias: opts.developerAlias } : {}),
+    ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
   };
 
   const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
@@ -580,18 +599,35 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     );
   }
 
-  // Install cross-repo post-commit hook in the docs-repo clone when developerAlias is set.
-  // Degrades gracefully: a failure emits a warning and does not abort the assign command.
-  if (opts.developerAlias) {
-    const docsRepoPath = path.dirname(entry.path);
-    try {
-      installCrossRepoHookFn(docsRepoPath);
-    } catch (err) {
-      warnings.push(
-        `Could not install cross-repo hook at "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
-        `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
-      );
-    }
+  // Install cross-repo post-commit hook in BOTH clones: host (filtered) and product (unfiltered).
+  // Each install is independent — one failure must not abort the other.
+  // Supersedes piece-34 host-only constraint (.squad/decisions.md:998).
+  const docsRepoPath = path.dirname(entry.path);
+  try {
+    installCrossRepoHookFn(docsRepoPath);
+  } catch (err) {
+    warnings.push(
+      `Could not install cross-repo hook at host "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
+      `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
+    );
+  }
+  try {
+    installCrossRepoHookFn(clonePath);
+  } catch (err) {
+    warnings.push(
+      `Could not install cross-repo hook at product "${clonePath}": ${err instanceof Error ? err.message : String(err)}. ` +
+      `Run 'squad assign ${callsign}' again after the product clone is available.`,
+    );
+  }
+
+  // Install product .squad/-forbid pre-commit guard (product clone only, NOT host).
+  // Independent try/catch — failure does not abort assign or the post-commit installs.
+  try {
+    installProductSquadForbidHook(clonePath);
+  } catch (err) {
+    warnings.push(
+      `Could not install .squad/-forbid pre-commit guard at "${clonePath}": ${err instanceof Error ? err.message : String(err)}.`,
+    );
   }
 
   return {
@@ -616,10 +652,14 @@ interface _ColdStartCtx {
   cloneTo: string;
   /** Registry write function — injectable for testing failure paths. */
   writeRegistryFn: (filePath: string, registry: Registry) => void;
+  /** Injectable: cross-repo post-commit hook installer. */
+  installCrossRepoHookFn: (repoPath: string) => void;
+  /** Injectable: product .squad/-forbid pre-commit hook installer. */
+  installProductSquadForbidHookFn: (productRepoPath: string) => void;
 }
 
 async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
-  const { rawArg: url, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn } = ctx;
+  const { rawArg: url, opts, cwd, resolvedTargetDir, gitRootFn, remotesFn, cloneFn, cloneTo, writeRegistryFn, installCrossRepoHookFn, installProductSquadForbidHookFn } = ctx;
 
   // Derive or accept callsign.
   const callsign = opts.callsign ?? _deriveCallsignFromUrl(url);
@@ -730,7 +770,7 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     // Additive merge: opts values win when supplied; existing entry values preserved when omitted.
     ...(opts.stateRemote !== undefined ? { stateRemote: opts.stateRemote } : {}),
     ...(opts.stateBranch !== undefined ? { stateBranch: opts.stateBranch } : {}),
-    ...(opts.developerAlias !== undefined ? { developerAlias: opts.developerAlias } : {}),
+    ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
   };
 
   const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
@@ -770,6 +810,36 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     coldWarnings.push(
       `Could not install Copilot payload: ${err instanceof Error ? err.message : String(err)}. ` +
       `Re-run "squad assign ${callsign}" after fixing the source or permissions.`,
+    );
+  }
+
+  // Install cross-repo post-commit hook in BOTH clones: host (filtered) and product (unfiltered).
+  // Each install is independent — one failure must not abort the other.
+  // Supersedes piece-34 host-only constraint (.squad/decisions.md:998).
+  try {
+    installCrossRepoHookFn(cloneDest);
+  } catch (err) {
+    coldWarnings.push(
+      `Could not install cross-repo hook at host "${cloneDest}": ${err instanceof Error ? err.message : String(err)}. ` +
+      `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
+    );
+  }
+  try {
+    installCrossRepoHookFn(clonePath);
+  } catch (err) {
+    coldWarnings.push(
+      `Could not install cross-repo hook at product "${clonePath}": ${err instanceof Error ? err.message : String(err)}. ` +
+      `Run 'squad assign ${callsign}' again after the product clone is available.`,
+    );
+  }
+
+  // Install product .squad/-forbid pre-commit guard (product clone only, NOT host).
+  // Independent try/catch — failure does not abort assign or the post-commit installs.
+  try {
+    installProductSquadForbidHookFn(clonePath);
+  } catch (err) {
+    coldWarnings.push(
+      `Could not install .squad/-forbid pre-commit guard at "${clonePath}": ${err instanceof Error ? err.message : String(err)}.`,
     );
   }
 

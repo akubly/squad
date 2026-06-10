@@ -14,7 +14,7 @@ export interface AssignCliArgs {
   registryPath: string | undefined;
   targetDir: string | undefined;
   skillsFrom: string | undefined;
-  developerAlias: string | undefined;
+  inboxHandle: string | undefined;
   stateRemote: string | undefined;
   stateBranch: string | undefined;
 }
@@ -25,7 +25,7 @@ const NAMED_FLAGS = [
   '--registry-path',
   '--target-dir',
   '--skills-from',
-  '--developer-alias',
+  '--inbox-handle',
   '--state-remote',
   '--state-branch',
 ] as const;
@@ -66,7 +66,7 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     registryPath: argValue(args, '--registry-path'),
     targetDir: argValue(args, '--target-dir'),
     skillsFrom: argValue(args, '--skills-from'),
-    developerAlias: argValue(args, '--developer-alias'),
+    inboxHandle: argValue(args, '--inbox-handle'),
     stateRemote: argValue(args, '--state-remote'),
     stateBranch: argValue(args, '--state-branch'),
   };

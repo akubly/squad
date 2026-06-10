@@ -115,16 +115,50 @@ export interface InstallHooksOptions {
 }
 
 /**
- * Hook template for the cross-repo post-commit hook.
- * Installed in the docs-repo clone's .git/hooks/post-commit by installCrossRepoHook.
- * runSync owns the SQUAD_SYNC_ACTIVE guard internally; the hook must not pre-set it.
+ * Hook template for the cross-repo post-commit hook — HOST clone variant.
+ * Filters out .squad/-only commits: publishes only when non-.squad/ files changed.
+ * Uses git diff-tree --root (correct on root commit and shallow clones; never HEAD~1).
  */
-const CROSS_REPO_POST_COMMIT_TEMPLATE = `#!/bin/sh
+const CROSS_REPO_HOST_POST_COMMIT_TEMPLATE = `#!/bin/sh
 ${SQUAD_HOOK_MARKER}
-# Squad cross-repo publish hook
-# Installed by: squad assign --developer-alias
+# Squad cross-repo publish hook (host clone — filtered)
+# Installed by: squad assign --inbox-handle
+# Only publishes when a non-.squad/ file changed in this commit.
+if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
+  if git diff-tree --no-commit-id --name-only -r --root HEAD | grep -qv '^\\.squad/'; then
+    squad sync --push --quiet
+  fi
+fi
+`;
+
+/**
+ * Hook template for the cross-repo post-commit hook — PRODUCT clone variant.
+ * Fires on ANY commit (unfiltered). The product commit is only the trigger;
+ * publishTeamRootToInbox snapshots the host .squad/ working tree.
+ */
+const CROSS_REPO_PRODUCT_POST_COMMIT_TEMPLATE = `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad cross-repo publish hook (product clone — unfiltered)
+# Installed by: squad assign
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
   squad sync --push --quiet
+fi
+`;
+
+/**
+ * Hook template for the product .squad/-forbid pre-commit guard.
+ * Rejects commits that stage paths under .squad/ in the product clone.
+ * Forbids TRACKING, not on-disk existence (untracked .squad/ cache is fine).
+ */
+const PRODUCT_SQUAD_FORBID_PRE_COMMIT_TEMPLATE = `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad product .squad/-forbid guard
+# Product clones must not track .squad/. Write team state to the host clone's .squad/ via TEAM_ROOT.
+if git diff --cached --name-only | grep -q '^\\.squad/'; then
+  echo "ERROR: Cannot commit .squad/ paths in the product clone." >&2
+  echo "  Product clones must not track .squad/." >&2
+  echo "  Write team state to the host clone's .squad/ via TEAM_ROOT." >&2
+  exit 1
 fi
 `;
 
@@ -244,44 +278,79 @@ export function installGitHooks(cwd: string, options: InstallHooksOptions = {}):
 }
 
 /**
- * Install a post-commit hook in a docs-repo clone that invokes `squad sync --push --quiet`
+ * Install a post-commit hook in a clone that invokes `squad sync --push --quiet`
  * after each commit. Protected by the SQUAD_SYNC_ACTIVE recursion guard.
  *
- * The hook is installed in `docsRepoPath`'s .git/hooks/post-commit — NEVER in the
- * product repo. Call with an explicit, registry-resolved docs-repo path; there is
- * no CWD fallback.
+ * Determines template automatically based on whether the target path is a host clone
+ * (has .squad/team.md → host-filtered template) or a product clone (unfiltered template).
  *
  * Idempotent: calling twice on the same repo does not duplicate the hook section.
  *
- * @param docsRepoPath - Absolute path to the docs-repo clone (path.dirname(registryEntry.path)).
+ * @param repoPath - Absolute path to a clone (host or product).
  * @param options - Hook install options.
- * @throws {Error} if docsRepoPath is not a git repository.
+ * @throws {Error} if repoPath is not a git repository.
  */
-export function installCrossRepoHook(docsRepoPath: string, options: InstallHooksOptions = {}): void {
-  // Kill-list: must be an explicit git repo path — ERROR (not warning) if not a git repo.
-  // Also verifies docsRepoPath IS the repo root (not just inside one), to prevent accidentally
-  // targeting a parent git repo.
+export function installCrossRepoHook(repoPath: string, options: InstallHooksOptions = {}): void {
   let gitRoot: string;
   try {
     gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: docsRepoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: repoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
     throw new Error(
-      `installCrossRepoHook: "${docsRepoPath}" is not a git repository. ` +
+      `installCrossRepoHook: "${repoPath}" is not a git repository. ` +
       `Run 'squad assign' with a registered shared-squad host clone path before installing hooks.`,
     );
   }
-  if (normalisedPathKey(path.resolve(docsRepoPath)) !== normalisedPathKey(gitRoot)) {
+  if (normalisedPathKey(path.resolve(repoPath)) !== normalisedPathKey(gitRoot)) {
     throw new Error(
-      `installCrossRepoHook: "${docsRepoPath}" is not a git repository root ` +
+      `installCrossRepoHook: "${repoPath}" is not a git repository root ` +
       `(root is "${gitRoot}"). Pass the git root directory, not a subdirectory.`,
     );
   }
 
-  const hooksDir = getHooksDir(docsRepoPath);
+  // Determine variant: host clone has .squad/team.md, product does not.
+  const isHost = fs.existsSync(path.join(repoPath, '.squad', 'team.md'));
+  const template = isHost
+    ? CROSS_REPO_HOST_POST_COMMIT_TEMPLATE
+    : CROSS_REPO_PRODUCT_POST_COMMIT_TEMPLATE;
+
+  const hooksDir = getHooksDir(repoPath);
   fs.mkdirSync(hooksDir, { recursive: true });
-  installHook(hooksDir, 'post-commit', CROSS_REPO_POST_COMMIT_TEMPLATE, options.force ?? false);
+  installHook(hooksDir, 'post-commit', template, options.force ?? false);
+}
+
+/**
+ * Install a pre-commit hook in a product clone that rejects staging .squad/ paths.
+ * Product clones must not track .squad/; team state goes to the host clone's .squad/ via TEAM_ROOT.
+ *
+ * Idempotent. Installed in product clone only (NOT the host clone).
+ *
+ * @param productRepoPath - Absolute path to the product clone.
+ * @param options - Hook install options.
+ * @throws {Error} if productRepoPath is not a git repository.
+ */
+export function installProductSquadForbidHook(productRepoPath: string, options: InstallHooksOptions = {}): void {
+  let gitRoot: string;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: productRepoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    throw new Error(
+      `installProductSquadForbidHook: "${productRepoPath}" is not a git repository.`,
+    );
+  }
+  if (normalisedPathKey(path.resolve(productRepoPath)) !== normalisedPathKey(gitRoot)) {
+    throw new Error(
+      `installProductSquadForbidHook: "${productRepoPath}" is not a git repository root ` +
+      `(root is "${gitRoot}"). Pass the git root directory, not a subdirectory.`,
+    );
+  }
+
+  const hooksDir = getHooksDir(productRepoPath);
+  fs.mkdirSync(hooksDir, { recursive: true });
+  installHook(hooksDir, 'pre-commit', PRODUCT_SQUAD_FORBID_PRE_COMMIT_TEMPLATE, options.force ?? false);
 }
 
 /**

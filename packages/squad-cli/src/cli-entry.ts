@@ -337,12 +337,12 @@ async function main(): Promise<void> {
       console.log(`  --pull              Pull squad state from remote`);
       console.log(`  --both              Push and pull (default)`);
       console.log(`  --remote <name>     Remote name (default: origin)`);
-      console.log(`  --developer <alias> Developer alias for cross-repo inbox publish`);
+      console.log(`  --developer <handle> Inbox handle for cross-repo inbox publish`);
       console.log(`  --dry-run           Print pending files and target inbox branch without publishing`);
       console.log(`  --quiet             Suppress output\n`);
       console.log(`Environment:`);
       console.log(`  SQUAD_TEAM_ROOT          Override team root path`);
-      console.log(`  SQUAD_DEVELOPER_ALIAS    Developer alias fallback`);
+      console.log(`  SQUAD_INBOX_HANDLE       Inbox handle fallback`);
       console.log(`  COPILOT_SESSION_ID       Session ID for inbox branch naming\n`);
       return;
     }
@@ -352,7 +352,7 @@ async function main(): Promise<void> {
       console.log(`Positional:`);
       console.log(`  <callsign>                   Target squad callsign (warm path)`);
       console.log(`Options:`);
-      console.log(`  --developer-alias <alias>    Per-developer namespace for inbox branches`);
+      console.log(`  --inbox-handle <handle>       Per-developer namespace for inbox branches`);
       console.log(`  --state-remote <name>        Git remote name for state operations`);
       console.log(`  --state-branch <name>        Orphan branch holding folded canonical state`);
       console.log(`  --skills-from <sel>          Skill source: host, none, or local path`);
@@ -1323,7 +1323,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, developerAlias, stateRemote, stateBranch } = parseAssignArgs(args.slice(1));
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1333,7 +1333,7 @@ async function main(): Promise<void> {
         registryPath,
         targetDir,
         skillsFrom,
-        developerAlias,
+        inboxHandle,
         stateRemote,
         stateBranch,
         cwd: getSquadStartDir(),

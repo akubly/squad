@@ -13,12 +13,12 @@ export interface RegistryEntry {
   clones?: string[];
   status?: 'active' | 'inactive';
   initUri?: string;
-  stateBackend?: 'worktree' | 'local' | 'external';
+  stateBackend?: 'orphan' | 'local' | 'external' | 'two-layer';
   /** Git remote name used for state synchronisation. Default: `'origin'` when absent. */
   stateRemote?: string;
   /** Git branch name used for state synchronisation. Default: `'squad-state'` when absent. */
   stateBranch?: string;
-  developerAlias?: string;
+  inboxHandle?: string;
   [key: string]: unknown;
 }
 
@@ -140,11 +140,11 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
   }
 
   if (value['stateBackend'] !== undefined) {
-    const validBackends = ['worktree', 'local', 'external'];
+    const validBackends = ['orphan', 'local', 'external', 'two-layer'];
     if (!validBackends.includes(value['stateBackend'] as string)) {
       throw validationError(`Registry entry ${entryIndex} stateBackend must be one of ${validBackends.join(', ')}.`);
     }
-    entry.stateBackend = value['stateBackend'] as 'worktree' | 'local' | 'external';
+    entry.stateBackend = value['stateBackend'] as 'orphan' | 'local' | 'external' | 'two-layer';
   }
 
   if (value['stateRemote'] !== undefined) {
@@ -161,15 +161,16 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
     entry.stateBranch = value['stateBranch'];
   }
 
-  if (value['developerAlias'] !== undefined) {
-    if (typeof value['developerAlias'] !== 'string') {
-      throw validationError(`Registry entry ${entryIndex} developerAlias must be a string.`);
+  const rawHandle = value['inboxHandle'];
+  if (rawHandle !== undefined) {
+    if (typeof rawHandle !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} inboxHandle must be a string.`);
     }
-    entry.developerAlias = value['developerAlias'];
+    entry.inboxHandle = rawHandle;
   }
 
   // Preserve unknown forward-compatible fields for round-trip fidelity.
-  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'developerAlias']);
+  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'inboxHandle']);
   for (const [key, val] of Object.entries(value)) {
     if (!knownFields.has(key)) {
       entry[key] = val;

@@ -5,7 +5,7 @@
  */
 
 /**
- * Matches a valid developer alias: lowercase letter start, lowercase letters /
+ * Matches a valid inbox handle: lowercase letter start, lowercase letters /
  * digits / hyphens only, 2–39 characters total.
  */
-export const DEVELOPER_ALIAS_RE = /^[a-z][a-z0-9-]{1,38}$/;
+export const INBOX_HANDLE_RE = /^[a-z][a-z0-9-]{1,38}$/;

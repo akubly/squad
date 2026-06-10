@@ -64,7 +64,7 @@ beforeEach(() => {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
   vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -75,7 +75,7 @@ afterEach(() => {
   }
   vi.clearAllMocks();
   delete process.env['SQUAD_TEAM_ROOT'];
-  delete process.env['SQUAD_DEVELOPER_ALIAS'];
+  delete process.env['SQUAD_INBOX_HANDLE'];
   delete process.env['SQUAD_SYNC_ACTIVE'];
   delete process.env['COPILOT_SESSION_ID'];
 });
@@ -95,7 +95,7 @@ describe('--dry-run', () => {
         callsign: 'alpha',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'dev1',
+        inboxHandle: 'dev1',
         stateRemote: 'squad-docs',
         stateBranch: 'squad-state',
       }]),
@@ -140,7 +140,7 @@ describe('squad sync status', () => {
         callsign: 'alpha',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'testdev',
+        inboxHandle: 'testdev',
         stateRemote: 'my-remote',
         stateBranch: 'my-branch',
       }]),
@@ -178,7 +178,7 @@ describe('squad sync status', () => {
         callsign: 'alpha',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'testdev',
+        inboxHandle: 'testdev',
       }]),
       warnings: [],
     });
@@ -207,7 +207,7 @@ describe('squad sync status', () => {
         callsign: 'alpha',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'testdev',
+        inboxHandle: 'testdev',
       }]),
       warnings: [],
     });
@@ -258,7 +258,7 @@ describe('--quiet regression guard', () => {
         callsign: 'alpha',
         path: squadDir,
         clones: [cloneRoot],
-        developerAlias: 'dev1',
+        inboxHandle: 'dev1',
         stateRemote: 'squad-docs',
       }]),
       warnings: [],

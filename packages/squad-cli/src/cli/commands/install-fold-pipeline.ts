@@ -142,6 +142,8 @@ export async function installFoldPipeline(
   // Absent — copy template.
   fs.writeFileSync(destPath, templateContent, 'utf-8');
   console.log(`${GREEN}✓${RESET} Installed fold pipeline template: ${destPath}`);
+  console.log(`  Known limitation: the inbox-branch prefix (squad/inbox/) is fixed. To use a different prefix,`);
+  console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
   if (platform === 'ado') {
     console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/fold-squad-state.yml in the portal.`);
   }
