@@ -72,8 +72,8 @@ squad init
 | `squad nap --deep` | Thorough cleanup with recursive descent | Yes |
 | `squad nap --dry-run` | Preview cleanup actions without changes | Yes |
 | `squad sync` | Synchronize squad state with remote (push/pull/both) | Yes |
-| `squad sync status` | Print sync status: last published, pending changes, remote/branch, alias, docs path | Yes |
-| `squad install-fold-pipeline <github\|ado>` | Install fold pipeline CI template into the docs-repo clone | Yes |
+| `squad sync status` | Print sync status: last published, pending changes, remote/branch, inbox handle, host clone path | Yes |
+| `squad install-fold-pipeline <github\|ado>` | Install fold pipeline CI template into the shared-squad host clone | Yes |
 | `squad scrub-emails [directory]` | Remove email addresses from Squad state files (default: `.squad/`) | No |
 | `squad --version` | Print installed version | No |
 
@@ -131,7 +131,7 @@ Bind the current product repository to a registered squad host. Also installs th
 **Synopsis:**
 
 ```text
-squad assign <callsign> [--developer-alias <alias>] [--target-dir <path>] [--registry-path <file>]
+squad assign <callsign> [--inbox-handle <handle>] [--target-dir <path>] [--registry-path <file>]
 squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
 ```
 
@@ -141,7 +141,7 @@ squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [
 |------|-------------|
 | `--clone-to <path>` | Clone the host from `<url>` to this path before assigning |
 | `--callsign <name>` | Override the callsign when assigning by URL |
-| `--developer-alias <alias>` | Set the developer alias for cross-repo state publish (persisted to registry; also installs a `post-commit` hook in the docs-repo clone) |
+| `--inbox-handle <handle>` | Set the inbox handle for cross-repo state publish (persisted to registry; also installs a `post-commit` hook in the shared-squad host clone and product clone) |
 | `--state-remote <name>` | Override the git remote used for state sync (persisted to registry; default: `origin`) |
 | `--state-branch <name>` | Override the orphan branch used as the canonical state target (persisted to registry; default: `squad-state`) |
 | `--skills-from <callsign>` | Install skills, agents, and MCP entries from the named host's `.copilot/` directory |
@@ -339,6 +339,7 @@ Synchronize squad state branches between your local repo and a remote. In shared
 **Synopsis:**
 
 ```text
+squad sync (push | pull | both) [options]
 squad sync [--push | --pull | --both] [options]
 squad sync status
 ```
@@ -351,9 +352,9 @@ squad sync status
 | `--pull` | Pull squad state from remote |
 | `--both` | Push then pull (default when no direction flag is supplied) |
 | `--remote <name>` | Remote to sync with (default: resolved from current branch, then `origin`) |
-| `--developer <alias>` | Developer alias for cross-repo inbox publish (overrides `SQUAD_DEVELOPER_ALIAS` and registry) |
+| `--developer <handle>` | Inbox handle for cross-repo inbox publish (overrides `SQUAD_INBOX_HANDLE` and registry) |
 | `--quiet` | Suppress output |
-| `--dry-run` | Print pending `.squad/` files and target inbox branch name without publishing. Works without a resolved developer alias. |
+| `--dry-run` | Print pending `.squad/` files and target inbox branch name without publishing. Works without a resolved inbox handle. |
 
 **Exit codes:**
 
@@ -370,15 +371,15 @@ squad sync status
 | Pending changes | Count of `.squad/` files modified since last publish |
 | State remote | Configured git remote for state sync |
 | State branch | Orphan branch used as the canonical state target |
-| Developer alias | Alias used to namespace inbox branches |
-| Docs repo path | Resolved team-root path (docs-repo clone or current repo) |
+| Inbox handle | Handle used to namespace inbox branches |
+| Host clone path | Resolved shared-squad host clone path |
 
 **Environment variables:**
 
 | Variable | Description |
 |----------|-------------|
 | `SQUAD_TEAM_ROOT` | Explicit override for team root path |
-| `SQUAD_DEVELOPER_ALIAS` | Developer alias fallback |
+| `SQUAD_INBOX_HANDLE` | Inbox handle fallback |
 | `COPILOT_SESSION_ID` | Session ID embedded in the inbox branch name |
 
 **TEAM_ROOT resolution order:**
@@ -388,12 +389,14 @@ squad sync status
 3. `WORK_ROOT/.squad/config.json` fallback for single-repo or unregistered contexts
 4. Neither present + push direction → exit 1, run `squad assign`
 
-**Developer alias resolution order (push + cross-repo only):**
+**Inbox handle resolution order (push + cross-repo only):**
 
-1. `--developer <alias>` flag
-2. `SQUAD_DEVELOPER_ALIAS` env var
-3. `developerAlias` field on the matching registry entry
-4. None resolved → exit 1, set `SQUAD_DEVELOPER_ALIAS` or run `squad assign --developer-alias`
+1. `--developer <handle>` flag
+2. `SQUAD_INBOX_HANDLE` env var
+3. `inboxHandle` field on the matching registry entry
+4. None resolved → exit 1, set `SQUAD_INBOX_HANDLE` or run `squad assign --inbox-handle`
+
+> ⚠️ **Known inconsistency (piece-38):** `squad assign` sets the inbox handle with `--inbox-handle`; `squad sync` overrides it per-session with `--developer`. Both refer to the same concept. A future piece will align these flag names.
 
 **Examples:**
 
@@ -418,7 +421,7 @@ squad sync status
 
 ### squad install-fold-pipeline
 
-Install the fold pipeline CI template into the docs-repo clone for your CI platform. The workflow folds per-session inbox branches into the canonical state branch.
+Install the fold pipeline CI template into the shared-squad host clone for your CI platform. The workflow folds per-session inbox branches into the canonical state branch.
 
 **Synopsis:**
 
@@ -430,15 +433,15 @@ squad install-fold-pipeline <github|ado>
 
 | Argument | Description |
 |----------|-------------|
-| `github` | Copy template to `.github/workflows/fold-squad-state.yml` in the docs-repo |
-| `ado` | Copy template to `.azure-pipelines/fold-squad-state.yml` in the docs-repo |
+| `github` | Copy template to `.github/workflows/fold-squad-state.yml` in the shared-squad host clone |
+| `ado` | Copy template to `.azuredevops/fold-squad-state.yml` in the shared-squad host clone |
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Installed, or already installed and up to date |
-| 1 | Target directory does not exist; template not found; existing file differs from template; docs-repo path unresolvable |
+| 1 | Target directory does not exist; template not found; existing file differs from template; shared-squad host clone path unresolvable |
 
 **Idempotency:**
 
@@ -448,7 +451,7 @@ squad install-fold-pipeline <github|ado>
 | File present, matches template | No-op (exits 0) |
 | File present, differs from template | Exit 1 — review and delete the file, then re-run |
 
-> The docs-repo's `.github/workflows/` or `.azure-pipelines/` directory must already exist before running this command.
+> The shared-squad host clone's `.github/workflows/` or `.azuredevops/` directory must already exist before running this command.
 
 **Examples:**
 
@@ -740,7 +743,7 @@ First match wins.
 | `SQUAD_CLIENT` | Detected client platform | `cli`, `vscode` |
 | `COPILOT_TOKEN` | Copilot auth token (SDK usage) | Token string |
 | `SQUAD_TEAM_ROOT` | Override resolved team root for `squad sync` | Absolute path |
-| `SQUAD_DEVELOPER_ALIAS` | Developer alias for cross-repo inbox publish | Lowercase alias string |
+| `SQUAD_INBOX_HANDLE` | Inbox handle for cross-repo inbox publish | Lowercase handle string |
 | `COPILOT_SESSION_ID` | Session ID embedded in inbox branch name | Opaque string |
 
 ---

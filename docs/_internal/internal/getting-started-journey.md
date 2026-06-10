@@ -459,14 +459,14 @@ This creates a dual-root setup: project-specific state lives in `.squad/`, but t
 
 ### Shared-squad sync
 
-Set your developer alias when you assign to enable auto-publish on every commit:
+Set your inbox handle when you assign to enable auto-publish on every commit:
 
 ```bash
-# Assign with alias — installs a working post-commit hook automatically
-squad assign <callsign> --developer-alias <alias>
+# Assign with inbox handle — installs a working post-commit hook automatically
+squad assign <callsign> --inbox-handle <handle>
 ```
 
-After each commit in the docs-repo clone, the hook runs `squad sync --push --quiet` automatically. No manual push required.
+After each commit in the shared-squad host clone, the hook runs `squad sync --push --quiet` automatically. No manual push required.
 
 You can also push manually or pull as needed:
 
@@ -474,24 +474,24 @@ You can also push manually or pull as needed:
 # Push from any registered consumer repo
 squad sync --push
 
-# Pull state into the docs-repo clone
+# Pull state into the shared-squad host clone
 squad sync --pull
 
 # Check sync status
 squad sync status
 
-# Install CI fold pipeline in the docs-repo clone
+# Install CI fold pipeline in the shared-squad host clone
 squad install-fold-pipeline github
 ```
 
 For a per-session override or env-var fallback:
 
 ```bash
-# Per-session alias override
-squad sync --push --developer <your-alias>
+# Per-session handle override
+squad sync --push --developer <your-handle>
 
-# Persistent env var fallback (if you skipped --developer-alias at assign time)
-export SQUAD_DEVELOPER_ALIAS=acarter
+# Persistent env var fallback (if you skipped --inbox-handle at assign time)
+export SQUAD_INBOX_HANDLE=acarter
 squad sync --push
 ```
 

@@ -441,16 +441,16 @@ describe('CLI reference and shared-squad guide', () => {
     expect(content).toContain('squad sync status');
     expect(content).toContain('--push');
     expect(content).toContain('--pull');
-    expect(content).toContain('--developer <alias>');
+    expect(content).toContain('--developer <handle>');
     expect(content).toContain('--dry-run');
     expect(content).toContain('### squad install-fold-pipeline');
     expect(content).toContain('squad install-fold-pipeline github');
     expect(content).toContain('squad install-fold-pipeline ado');
   });
 
-  it('CLI reference documents developer-alias flag on squad assign', () => {
+  it('CLI reference documents inbox-handle flag on squad assign', () => {
     const content = readFile(cliRefPath);
-    expect(content).toContain('--developer-alias <alias>');
+    expect(content).toContain('--inbox-handle <handle>');
   });
   });
 
@@ -474,15 +474,15 @@ describe('CLI reference and shared-squad guide', () => {
     expect(content).toContain('squad sync');
     expect(content).toContain('squad sync status');
     expect(content).toContain('squad install-fold-pipeline');
-    expect(content).toContain('SQUAD_DEVELOPER_ALIAS');
+    expect(content).toContain('SQUAD_INBOX_HANDLE');
   });
 
-  it('shared-squad guide reflects piece-36 working auto-publish (no build-12 workaround)', () => {
+  it('shared-squad guide reflects piece-37/38 working auto-publish with inbox handle', () => {
     expect(existsSync(sharedSquadPath)).toBe(true);
     const content = readFile(sharedSquadPath);
     expect(content).not.toContain('Note (build 12)');
     expect(content).not.toContain('not yet exposed');
-    expect(content).toContain('squad assign <callsign> --developer-alias <alias>');
+    expect(content).toContain('squad assign <callsign> --inbox-handle <handle>');
   });
 
   it('CLI reference documents --state-remote and --state-branch on squad assign', () => {
