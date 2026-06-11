@@ -17,6 +17,7 @@ export interface AssignCliArgs {
   inboxHandle: string | undefined;
   stateRemote: string | undefined;
   stateBranch: string | undefined;
+  yes: boolean;
 }
 
 const NAMED_FLAGS = [
@@ -69,6 +70,7 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     inboxHandle: argValue(args, '--inbox-handle'),
     stateRemote: argValue(args, '--state-remote'),
     stateBranch: argValue(args, '--state-branch'),
+    yes: args.includes('--yes'),
   };
 }
 

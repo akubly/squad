@@ -28,7 +28,9 @@ export interface SyncOptions {
   remote?: string;
   cwd?: string;
   quiet?: boolean;
-  /** Inbox handle for cross-repo inbox publish. Overrides env var and registry entry. */
+  /** Inbox handle for cross-repo inbox publish. Primary flag (--inbox-handle). */
+  inboxHandle?: string;
+  /** @deprecated Use inboxHandle instead. Retained as a deprecated alias (--developer). */
   developer?: string;
   /** Dry-run: print pending files and target branch info without publishing. */
   dryRun?: boolean;
@@ -247,8 +249,8 @@ const SESSION_ID_FORBIDDEN_RE = /[\x00-\x20\x7f~^:?*\[\\]|\.\.|\@\{|\/\/|^\/|^\-
  * Allowlisted paths within .squad/ that may be published.
  * Relative to teamRoot, forward-slash separated.
  */
-const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md', '.squad/.last-publish'];
-const PUBLISH_ALLOWLIST_PREFIX = [
+export const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md', '.squad/.last-publish'];
+export const PUBLISH_ALLOWLIST_PREFIX = [
   '.squad/decisions/inbox/',
   '.squad/log/',
   '.squad/orchestration-log/',
@@ -260,6 +262,38 @@ function isAllowlisted(relPath: string): boolean {
   const p = relPath.replace(/\\/g, '/');
   if (PUBLISH_ALLOWLIST_EXACT.includes(p)) return true;
   return PUBLISH_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix));
+}
+
+/**
+ * Derive a valid inbox handle from the git user.email local-part.
+ *
+ * Sanitization pipeline:
+ *   1. lowercase
+ *   2. spaces → '.' then '.' → '-'
+ *   3. strip non-[a-z0-9-]
+ *   4. prepend 'u-' if result starts with a digit
+ *   5. truncate at 39 chars
+ *
+ * Returns undefined if user.email is unset or the sanitized result is empty.
+ */
+export function deriveHandleFromGitEmail(cwd: string): string | undefined {
+  try {
+    const email = execFileSync('git', ['config', 'user.email'], {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (!email) return undefined;
+    const localPart = email.split('@')[0] ?? '';
+    if (!localPart) return undefined;
+    let handle = localPart.toLowerCase();
+    handle = handle.replace(/ /g, '.').replace(/\./g, '-');
+    handle = handle.replace(/[^a-z0-9-]/g, '');
+    if (/^\d/.test(handle)) handle = 'u-' + handle;
+    handle = handle.slice(0, 39);
+    if (!INBOX_HANDLE_RE.test(handle)) return undefined;
+    return handle || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Enumerate all regular files under `teamRoot/.squad/` as forward-slash relative paths. */
@@ -386,6 +420,33 @@ export async function publishTeamRootToInbox(
     execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${metadataSha},.squad/publish-metadata.json`], {
       cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Sub-proposal A: Embed pipeline YAML in inbox snapshot so CI systems can evaluate triggers.
+    // Two independent probes: ADO (.azuredevops/) and GitHub (.github/workflows/).
+    const adoYamlPath = path.join(teamRoot, '.azuredevops', 'fold-squad-state.yml');
+    if (fs.existsSync(adoYamlPath)) {
+      const adoYamlContent = fs.readFileSync(adoYamlPath);
+      const adoYamlSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: teamRoot, env: indexEnv, input: adoYamlContent, encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      execFileSync('git', ['update-index', '--add', '--cacheinfo',
+        `100644,${adoYamlSha},.azuredevops/fold-squad-state.yml`], {
+        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+    const ghYamlPath = path.join(teamRoot, '.github', 'workflows', 'fold-squad-state.yml');
+    if (fs.existsSync(ghYamlPath)) {
+      const ghYamlContent = fs.readFileSync(ghYamlPath);
+      const ghYamlSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: teamRoot, env: indexEnv, input: ghYamlContent, encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      execFileSync('git', ['update-index', '--add', '--cacheinfo',
+        `100644,${ghYamlSha},.github/workflows/fold-squad-state.yml`], {
+        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
 
     // Write tree from isolated index
     const treeSha = execFileSync('git', ['write-tree'], {
@@ -701,26 +762,43 @@ export async function runSync(options: SyncOptions): Promise<void> {
     const crossRepo = teamRoot !== undefined;
 
     // ── Inbox-handle resolution chain ─────────────────────────────────────────
-    // Order: (1) --developer flag; (2) SQUAD_INBOX_HANDLE env var; (3) registry entry handle.
+    // Order: (1) --inbox-handle / --developer flag; (2) SQUAD_INBOX_HANDLE env var;
+    //        (3) registry entry handle; (4) git config user.email fallback.
     // Trim whitespace so a blank/whitespace-only handle triggers the friendly exit-1 guidance.
     const rawAlias =
-      options.developer !== undefined
-        ? options.developer
-        : (process.env['SQUAD_INBOX_HANDLE'] ?? registryAlias);
-    const resolvedAlias = rawAlias?.trim() || undefined;
+      (options.inboxHandle !== undefined ? options.inboxHandle : options.developer)
+        ?? process.env['SQUAD_INBOX_HANDLE']
+        ?? registryAlias;
+    let resolvedAlias = rawAlias?.trim() || undefined;
+
+    // 4th resolution step: derive inbox handle from git config user.email
+    if (!resolvedAlias) {
+      const gitEmailHandle = deriveHandleFromGitEmail(repoRoot);
+      if (gitEmailHandle) {
+        console.warn(
+          `squad sync: no inbox handle configured; using git config user.email as handle: ${gitEmailHandle}\n` +
+          `  Set a permanent handle with 'squad assign --inbox-handle <handle>' to suppress this warning.`,
+        );
+        resolvedAlias = gitEmailHandle;
+      }
+    }
 
     // ── Dry-run: print pending info without publishing ─────────────────────────
     // Must run before handle guard so developers can preview without a configured handle.
     if (options.dryRun) {
-      const files = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
+      const allFiles = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
+      const files = allFiles.filter(isAllowlisted);
       const effectiveAlias = resolvedAlias ?? '(handle required)';
-      const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
-      const effectiveBranch = stateBranch ?? 'squad-state';
       console.log(`squad sync --dry-run`);
-      console.log(`  Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>`);
-      console.log(`  State remote:        ${effectiveRemote}`);
-      console.log(`  State branch:        ${effectiveBranch}`);
-      console.log(`  Pending files (${files.length}):`);
+      if (isPush) {
+        console.log(`  Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>`);
+      }
+      if (isPull) {
+        const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
+        const effectiveBranch = stateBranch ?? 'squad-state';
+        console.log(`  Would pull from remote: ${effectiveRemote}, branch: ${effectiveBranch}`);
+      }
+      console.log(`  Pending files (${files.length} of ${allFiles.length} total, after allowlist filter):`);
       for (const f of files) {
         console.log(`    ${f}`);
       }

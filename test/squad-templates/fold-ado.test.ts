@@ -47,9 +47,16 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(parsed).not.toHaveProperty('pr');
   });
 
-  it('does NOT have a schedules: key', () => {
+  it('has a schedules: block with 15-minute cron fallback (A)', () => {
     const parsed = parseYaml(raw) as Record<string, unknown>;
-    expect(parsed).not.toHaveProperty('schedules');
+    expect(parsed).toHaveProperty('schedules');
+    const schedules = parsed['schedules'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(schedules)).toBe(true);
+    expect(schedules.length).toBeGreaterThan(0);
+    const crons = schedules.map(s => s['cron'] as string);
+    expect(crons).toContain('*/15 * * * *');
+    const fallback = schedules.find(s => s['cron'] === '*/15 * * * *')!;
+    expect(fallback['always']).toBe(false);
   });
 
   it('does not have allowScripts: true at pool level', () => {
@@ -85,5 +92,37 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     for (const name of disallowed) {
       expect(raw).not.toContain(name);
     }
+  });
+
+  it('has a git identity bash step immediately after checkout (B)', () => {
+    expect(raw).toContain('git config user.email "squad-fold@noreply"');
+    expect(raw).toContain('git config user.name "Squad Fold Pipeline"');
+    // Identity step must appear before first actual git commit command (not comments)
+    const identityIdx = raw.indexOf('git config user.email "squad-fold@noreply"');
+    const commitIdx = raw.search(/\bgit commit\s+(?:--allow-empty|-m|\\)/);
+    expect(identityIdx).toBeGreaterThan(-1);
+    expect(commitIdx).toBeGreaterThan(-1);
+    expect(identityIdx).toBeLessThan(commitIdx);
+  });
+
+  it('publish-history step uses env-binding for FOLDED_ENTRIES (SEC-1)', () => {
+    // SEC-1 fix: ADO macro expressions must be bound via the step env: block, never inlined
+    // into the bash script body. The runner expands the env mapping safely before execution.
+    expect(raw).toContain('FOLDED_ENTRIES: $(foldRefs.foldedEntries)');
+    expect(raw).toContain('FOLD_COMMIT_SHA: $(foldRefs.finalSha)');
+    // No inline assignment in script body — single-quoted or double-quoted forms both forbidden.
+    expect(raw).not.toContain(`FOLDED_ENTRIES='$(foldRefs.foldedEntries)'`);
+    expect(raw).not.toContain(`FOLDED_ENTRIES="$(foldRefs.foldedEntries)"`);
+    // Injection regression: no ADO $() expression for foldedEntries should appear inside a
+    // shell variable assignment (catches any form of inline break-out regardless of quote style).
+    expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\(foldRefs/);
+  });
+
+  it('fold loop has git rm --cached .squad/ before git read-tree (D)', () => {
+    const rmIdx = raw.indexOf('git rm -r --cached .squad/ 2>/dev/null || true');
+    const readTreeIdx = raw.indexOf('git read-tree --prefix=.squad/ -u');
+    expect(rmIdx).toBeGreaterThan(-1);
+    expect(readTreeIdx).toBeGreaterThan(-1);
+    expect(rmIdx).toBeLessThan(readTreeIdx);
   });
 });

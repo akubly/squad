@@ -302,6 +302,7 @@ async function main(): Promise<void> {
       console.log(`  --callsign <name> Register under this name`);
       console.log(`  --no-register     Scaffold only`);
       console.log(`  --registry-path   Alternate registry file`);
+      console.log(`  --yes             Auto-apply git-rm-cached + .gitignore for orphan backend`);
       console.log(`  --mode remote <p> Link to remote team root\n`);
       return;
     }
@@ -337,7 +338,7 @@ async function main(): Promise<void> {
       console.log(`  --pull              Pull squad state from remote`);
       console.log(`  --both              Push and pull (default)`);
       console.log(`  --remote <name>     Remote name (default: origin)`);
-      console.log(`  --developer <handle> Inbox handle for cross-repo inbox publish`);
+      console.log(`  --inbox-handle <handle>  Inbox handle for cross-repo inbox publish`);
       console.log(`  --dry-run           Print pending files and target inbox branch without publishing`);
       console.log(`  --quiet             Suppress output\n`);
       console.log(`Environment:`);
@@ -352,11 +353,12 @@ async function main(): Promise<void> {
       console.log(`Positional:`);
       console.log(`  <callsign>                   Target squad callsign (warm path)`);
       console.log(`Options:`);
-      console.log(`  --inbox-handle <handle>       Per-developer namespace for inbox branches`);
+      console.log(`  --inbox-handle <handle>     Per-developer namespace for inbox branches`);
       console.log(`  --state-remote <name>        Git remote name for state operations`);
       console.log(`  --state-branch <name>        Orphan branch holding folded canonical state`);
       console.log(`  --skills-from <sel>          Skill source: host, none, or local path`);
-      console.log(`  --callsign <name>            Override callsign (warm-path disambiguation)\n`);
+      console.log(`  --callsign <name>            Override callsign (warm-path disambiguation)`);
+      console.log(`  --yes                        Auto-apply git-rm-cached + .gitignore entries\n`);
       return;
     }
     // For other commands, fall through to the main help
@@ -416,6 +418,7 @@ async function main(): Promise<void> {
         isGlobal: hasGlobal,
         stateBackend: initStateBackend,
         remoteTeamPath,
+        yes: args.includes('--yes'),
       });
 
       if (mode === 'remote' && remoteTeamPath) {
@@ -1323,7 +1326,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch } = parseAssignArgs(args.slice(1));
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, yes } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1336,6 +1339,7 @@ async function main(): Promise<void> {
         inboxHandle,
         stateRemote,
         stateBranch,
+        yes,
         cwd: getSquadStartDir(),
       });
       // Emit warnings only on result kinds that carry them.
@@ -1462,13 +1466,15 @@ async function main(): Promise<void> {
 
     const remoteIdx = args.indexOf('--remote');
     const syncRemote = remoteIdx !== -1 ? args[remoteIdx + 1] : undefined;
+    const inboxHandleIdx = args.indexOf('--inbox-handle');
+    const inboxHandle = inboxHandleIdx !== -1 ? args[inboxHandleIdx + 1] : undefined;
     const developerIdx = args.indexOf('--developer');
     const developer = developerIdx !== -1 ? args[developerIdx + 1] : undefined;
     const syncQuiet = args.includes('--quiet');
     const syncDryRun = args.includes('--dry-run');
 
     const { runSync } = await import('./cli/commands/sync.js');
-    await runSync({ direction, remote: syncRemote, developer, quiet: syncQuiet, dryRun: syncDryRun });
+    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun });
     return;
   }
 

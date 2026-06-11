@@ -27,6 +27,7 @@ import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 import { INBOX_HANDLE_RE } from '@bradygaster/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
+import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */
@@ -286,6 +287,8 @@ export interface SquadAssignOpts {
   _installCrossRepoHookFn?: (docsRepoPath: string) => void;
   /** @internal Injectable seam: override product .squad/-forbid hook installer. For testing only. */
   _installProductSquadForbidHookFn?: (productRepoPath: string) => void;
+  /** When true, automatically run git rm --cached + .gitignore install for tracked allowlisted files. */
+  yes?: boolean;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -630,6 +633,9 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     );
   }
 
+  // Sub-proposal J: gitignore-on-assign — offer to untrack allowlisted files when backend is orphan.
+  applyAssignAllowlistGitignore(clonePath, opts.yes);
+
   return {
     kind: wasInactive ? 'reactivated' : 'assigned',
     callsign,
@@ -638,6 +644,58 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
     warnings,
     coordinatorInstalled,
   };
+}
+
+/**
+ * Sub-proposal J: When tracked allowlisted files exist in the product clone,
+ * offer (or apply with yes=true) git rm --cached + .gitignore install.
+ *
+ * Uses exactly the allowlist constants from sync.ts — NEVER a blanket `.squad/`.
+ * Always treated as orphan backend context in assign (cross-repo clones enforce orphan).
+ * Idempotent: skips .gitignore entries that already exist.
+ */
+function applyAssignAllowlistGitignore(clonePath: string, yes?: boolean): void {
+  let trackedAllowlisted: string[];
+  try {
+    const lsOutput = _assignExecFileSync('git', ['ls-files', '--', ...PUBLISH_ALLOWLIST_EXACT, ...PUBLISH_ALLOWLIST_PREFIX], {
+      cwd: clonePath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    trackedAllowlisted = lsOutput.trim().split('\n').filter(Boolean);
+  } catch {
+    return;
+  }
+  if (trackedAllowlisted.length === 0) return;
+
+  if (!yes) {
+    console.warn(
+      `squad assign: warning: ${trackedAllowlisted.length} allowlisted .squad/ file(s) are tracked in git.\n` +
+      `  With the orphan backend these files should not be committed to the main branch.\n` +
+      `  Run 'squad assign --yes' to automatically untrack them and add .gitignore entries.`,
+    );
+    return;
+  }
+
+  try {
+    _assignExecFileSync('git', ['rm', '-r', '--cached', '--', ...trackedAllowlisted], {
+      cwd: clonePath, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    console.warn(`squad assign: warning: git rm --cached failed for some allowlisted files.`);
+  }
+
+  const gitignorePath = path.join(clonePath, '.gitignore');
+  let existing = '';
+  try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* file may not exist */ }
+  const lines = existing.endsWith('\n') || existing.length === 0 ? existing : existing + '\n';
+  const toAdd = [...PUBLISH_ALLOWLIST_EXACT, ...PUBLISH_ALLOWLIST_PREFIX].filter(e =>
+    !existing.split('\n').some(l => l.trim() === e.trimEnd()),
+  );
+  if (toAdd.length > 0) {
+    const block = '\n# Squad allowlist — managed by squad assign (orphan backend)\n' +
+      toAdd.join('\n') + '\n';
+    fs.writeFileSync(gitignorePath, lines + block, 'utf-8');
+    console.log(`squad assign: added ${toAdd.length} .gitignore entries for allowlisted .squad/ paths.`);
+  }
 }
 
 interface _ColdStartCtx {

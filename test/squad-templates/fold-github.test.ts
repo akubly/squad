@@ -82,4 +82,47 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
       expect(raw).not.toContain(name);
     }
   });
+
+  it('has a schedule trigger with 15-minute cron fallback (A)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    const on = parsed['on'] as Record<string, unknown>;
+    expect(on).toHaveProperty('schedule');
+    const schedule = on['schedule'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(schedule)).toBe(true);
+    const crons = schedule.map(s => s['cron'] as string);
+    expect(crons).toContain('*/15 * * * *');
+  });
+
+  it('has a git identity configuration step (B)', () => {
+    expect(raw).toContain('git config user.email "squad-fold@noreply"');
+    expect(raw).toContain('git config user.name "Squad Fold Pipeline"');
+    // Identity step must appear before first actual git commit command (not comment)
+    const identityIdx = raw.indexOf('git config user.email "squad-fold@noreply"');
+    // Find first real commit: 'git commit --allow-empty' or 'git commit \'  (multiline)
+    const commitIdx = raw.search(/\bgit commit\s+(?:--allow-empty|-m)/);
+    expect(identityIdx).toBeGreaterThan(-1);
+    expect(commitIdx).toBeGreaterThan(-1);
+    expect(identityIdx).toBeLessThan(commitIdx);
+  });
+
+  it('fold loop has git rm --cached .squad/ before git read-tree (D)', () => {
+    const rmIdx = raw.indexOf('git rm -r --cached .squad/ 2>/dev/null || true');
+    const readTreeIdx = raw.indexOf('git read-tree --prefix=.squad/ -u');
+    expect(rmIdx).toBeGreaterThan(-1);
+    expect(readTreeIdx).toBeGreaterThan(-1);
+    expect(rmIdx).toBeLessThan(readTreeIdx);
+  });
+
+  it('publish-history step uses env-binding for FOLDED_ENTRIES (SEC-1)', () => {
+    // SEC-1 fix: ${{ }} expressions must be bound via the step env: block, never inlined
+    // into the script body. GitHub expands ${{ }} at render time before bash runs.
+    expect(raw).toContain('FOLDED_ENTRIES: ${{ steps.fold.outputs.folded_entries }}');
+    expect(raw).toContain('FOLD_COMMIT_SHA: ${{ steps.fold.outputs.final_sha }}');
+    // Inline assignments must not appear in the script body — any quote style.
+    expect(raw).not.toContain("FOLDED_ENTRIES='${{ steps.fold.outputs.folded_entries }}'");
+    expect(raw).not.toContain('FOLDED_ENTRIES="${{ steps.fold.outputs.folded_entries }}"');
+    // Injection regression: no ${{ }} expression for folded_entries should be assigned inline
+    // (catches break-out regardless of quote style — e.g., developerAlias with embedded quotes).
+    expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\{\{/);
+  });
 });
