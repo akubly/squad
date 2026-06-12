@@ -20,6 +20,7 @@ import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/regi
 import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
+import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
 import { writeRemoteConfig } from '../cli/commands/init-remote.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
@@ -94,6 +95,15 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
   const cwd = opts?.cwd ?? process.cwd();
   const targetDir = opts?.targetDir ? path.resolve(cwd, opts.targetDir) : cwd;
   const squadDir = path.join(targetDir, '.squad');
+
+  // M3: Validate explicit --callsign before any filesystem or registry write.
+  if (opts?.callsign !== undefined && !CALLSIGN_RE.test(opts.callsign)) {
+    throw new ConfigurationError(
+      `ERR_SQUAD_INIT_INVALID_CALLSIGN: "--callsign" value "${opts.callsign}" must match ` +
+      `/${CALLSIGN_RE.source}/ (lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+      { timestamp: new Date() },
+    );
+  }
 
   // Step 1: Determine whether the scaffold already exists.
   // Symlinks are rejected (init will not write through one).
@@ -194,7 +204,10 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
 
   if (pendingWrite) {
     const { callsign, registryFilePath: regPath, existing } = pendingWrite;
-    const validated = upsertEntry({ callsign, path: squadDir });
+    // Sub-proposal B: when --callsign is explicitly provided, default the state branch
+    // to squad/state/<callsign> so the fold pipeline and pull side agree on the namespace.
+    const stateBranch = opts?.callsign ? `squad/state/${opts.callsign}` : undefined;
+    const validated = upsertEntry({ callsign, path: squadDir, ...(stateBranch ? { stateBranch } : {}) });
     const newRegistry = { version: 1 as const, squads: [...existing, validated] };
     fs.mkdirSync(path.dirname(regPath), { recursive: true });
     writeRegistry(regPath, newRegistry);

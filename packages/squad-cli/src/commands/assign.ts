@@ -25,7 +25,7 @@ import { getTemplatesDir } from '../cli/core/templates.js';
 import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
-import { INBOX_HANDLE_RE } from '@bradygaster/squad-sdk/validation';
+import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
 
@@ -722,6 +722,15 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   // Derive or accept callsign.
   const callsign = opts.callsign ?? _deriveCallsignFromUrl(url);
 
+  // Validate explicit --callsign before constructing any branch name.
+  if (opts.callsign !== undefined && !CALLSIGN_RE.test(opts.callsign)) {
+    throw new AssignError(
+      'ERR_ASSIGN_MISSING_ARG',
+      `Invalid --callsign "${opts.callsign}": must match /${CALLSIGN_RE.source}/ ` +
+      `(lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+    );
+  }
+
   // Resolve and validate the clone destination.
   // cloneTo is already a concrete string (resolved at the runAssign call site).
   const cloneDest = path.resolve(cwd, cloneTo);
@@ -827,7 +836,17 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     ...(reactivating ? { status: 'active' as const } : {}),
     // Additive merge: opts values win when supplied; existing entry values preserved when omitted.
     ...(opts.stateRemote !== undefined ? { stateRemote: opts.stateRemote } : {}),
-    ...(opts.stateBranch !== undefined ? { stateBranch: opts.stateBranch } : {}),
+    // H2: when creating a new entry (not reactivating) and no explicit --state-branch was given,
+    // default stateBranch to squad/state/<callsign> so the fold pipeline and pull side agree.
+    // Gate on CALLSIGN_RE validity of the resolved callsign: URL-derived callsigns may not satisfy
+    // the regex (e.g. contain underscores or dots), in which case leave stateBranch undefined so
+    // the hydrate fallback ?? 'squad-state' preserves pre-piece-40 behavior — no regression.
+    // For reactivating entries the existing stateBranch is preserved via baseEntry spread above.
+    ...(opts.stateBranch !== undefined
+      ? { stateBranch: opts.stateBranch }
+      : !reactivating && CALLSIGN_RE.test(callsign)
+        ? { stateBranch: `squad/state/${callsign}` }
+        : {}),
     ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
   };
 

@@ -398,6 +398,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
     // Registry entry: path ends in .squad; clones contains workRepo git root
     vi.mocked(loadRegistryFromDisk).mockReturnValue({
       registry: makeRegistry([{
+        callsign: 'docs-squad',
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
@@ -412,7 +413,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
     await runSync({ direction: 'push', cwd: workRepo, developer: 'alice', quiet: true });
 
     const refs = listBareRefs(docsRemote);
-    const inboxRefs = refs.filter(r => r.includes('refs/heads/squad/inbox/alice/'));
+    const inboxRefs = refs.filter(r => r.includes('refs/heads/squad/inbox/docs-squad/alice/'));
     expect(inboxRefs).toHaveLength(1);
     expect(inboxRefs[0]).toContain('test-session-b1');
   });
@@ -590,6 +591,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
 
     vi.mocked(loadRegistryFromDisk).mockReturnValue({
       registry: makeRegistry([{
+        callsign: 'dev-squad',
         path: path.join(docsTeamRoot, '.squad'),
         clones: [workGitRoot],
         stateRemote: 'origin',
@@ -611,7 +613,7 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
     await runSync({ direction: 'push', cwd: workRepo, developer: 'dev3', quiet: true });
 
     const refs2 = listBareRefs(docsRemote);
-    const inboxRefs = refs2.filter(r => r.includes('refs/heads/squad/inbox/dev3/'));
+    const inboxRefs = refs2.filter(r => r.includes('refs/heads/squad/inbox/dev-squad/dev3/'));
     expect(inboxRefs).toHaveLength(2); // two pushes, two inbox branches
     expect(inboxRefs.every(r => !r.includes('undefined'))).toBe(true);
   });

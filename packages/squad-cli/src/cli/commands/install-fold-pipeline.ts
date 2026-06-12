@@ -20,6 +20,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,6 +36,8 @@ const RESET = '\x1b[0m';
 export interface InstallFoldPipelineOptions {
   cwd?: string;
   force?: boolean;
+  /** Optional callsign to scope the pipeline trigger and fold target to this squad. */
+  callsign?: string;
 }
 
 function getRepoRoot(cwd: string): string {
@@ -55,6 +58,17 @@ export async function installFoldPipeline(
   options: InstallFoldPipelineOptions = {},
 ): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+
+  // ── Validate --callsign when provided ────────────────────────────────────
+  const callsign = options.callsign;
+  if (callsign !== undefined && !CALLSIGN_RE.test(callsign)) {
+    console.error(
+      `✗ Invalid --callsign "${callsign}": must match /^[a-z][a-z0-9-]{1,38}$/ ` +
+      `(lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+    );
+    process.exit(1);
+    return;
+  }
 
   // ── Registry-first docs-repo path resolution ──────────────────────────────
   // Exact pattern from runSyncStatus in sync.ts (lines 523–529).
@@ -120,7 +134,46 @@ export async function installFoldPipeline(
     return;
   }
 
-  const templateContent = fs.readFileSync(templatePath, 'utf-8');
+  const rawTemplate = fs.readFileSync(templatePath, 'utf-8');
+
+  // ── Callsign parameterization ─────────────────────────────────────────────
+  // When --callsign is provided, scope the trigger glob and fold target to this squad.
+  // When absent, emit the template verbatim for backward compatibility.
+  let templateContent: string;
+  if (callsign) {
+    if (platform === 'github') {
+      templateContent = rawTemplate
+        // Scope trigger glob (on.push.branches) to this callsign's inbox prefix.
+        .replace(/- 'squad\/inbox\/\*\*'/g, `- 'squad/inbox/${callsign}/**'`)
+        // H1: scope Step-2 enumeration fetch refspec — was fetching all squads' inbox refs.
+        .replace(
+          /'\+refs\/heads\/squad\/inbox\/\*\*:refs\/remotes\/origin\/squad\/inbox\/\*\*'/g,
+          `'+refs/heads/squad/inbox/${callsign}/**:refs/remotes/origin/squad/inbox/${callsign}/**'`,
+        )
+        // H1: scope Step-2 ls-remote pattern to this callsign namespace.
+        .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
+        // Replace all remaining bare `squad-state` tokens (step names, comments, git commands,
+        // refs). This covers M4 (--orphan), the push target, fetch, ls-remote, checkout -B, etc.
+        .replace(/squad-state/g, `squad/state/${callsign}`);
+    } else {
+      // ADO
+      templateContent = rawTemplate
+        // Scope trigger branch include to this callsign's inbox prefix.
+        .replace(/- refs\/heads\/squad\/inbox\/\*/g, `- refs/heads/squad/inbox/${callsign}/*`)
+        // H1: scope Step-2 enumeration fetch refspec.
+        .replace(
+          /'\+refs\/heads\/squad\/inbox\/\*:refs\/remotes\/origin\/squad\/inbox\/\*'/g,
+          `'+refs/heads/squad/inbox/${callsign}/*:refs/remotes/origin/squad/inbox/${callsign}/*'`,
+        )
+        // H1: scope Step-2 ls-remote pattern to this callsign namespace.
+        .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
+        // Replace all remaining bare `squad-state` tokens (display names, comments, git commands).
+        .replace(/squad-state/g, `squad/state/${callsign}`);
+    }
+  } else {
+    templateContent = rawTemplate;
+  }
+
   const destPath = path.join(targetDir, 'fold-squad-state.yml');
 
   // ── Three-way idempotency / conflict gate ─────────────────────────────────
@@ -139,11 +192,13 @@ export async function installFoldPipeline(
     return;
   }
 
-  // Absent — copy template.
+  // Absent — write template.
   fs.writeFileSync(destPath, templateContent, 'utf-8');
   console.log(`${GREEN}✓${RESET} Installed fold pipeline template: ${destPath}`);
-  console.log(`  Known limitation: the inbox-branch prefix (squad/inbox/) is fixed. To use a different prefix,`);
-  console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
+  if (!callsign) {
+    console.log(`  Known limitation: the inbox-branch prefix (squad/inbox/) is fixed. To use a different prefix,`);
+    console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
+  }
   if (platform === 'ado') {
     console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/fold-squad-state.yml in the portal.`);
   }

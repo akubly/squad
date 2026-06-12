@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { INBOX_HANDLE_RE } from '@bradygaster/squad-sdk/validation';
+import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 
@@ -339,6 +339,7 @@ export async function publishTeamRootToInbox(
   remote: string,
   inboxHandle: string,
   sessionId: string,
+  callsign?: string,
 ): Promise<void> {
   // Step 1: Validate inboxHandle before any git operation
   if (!INBOX_HANDLE_RE.test(inboxHandle)) {
@@ -354,10 +355,26 @@ export async function publishTeamRootToInbox(
     );
   }
 
-  // Step 2: Build inbox branch name (monotonic seq suffix guarantees uniqueness below ms)
+  // Step 1c: Validate callsign when provided.
+  // When a callsign is present it is embedded in the branch name and must match the same
+  // character constraints as inboxHandle.
+  if (callsign !== undefined) {
+    if (!CALLSIGN_RE.test(callsign)) {
+      throw new Error(
+        `Invalid callsign "${callsign}": must match /^[a-z][a-z0-9-]{1,38}$/ (lowercase, starts with a letter, hyphens allowed, max 39 chars). ` +
+        `Set the callsign via 'squad assign --callsign <name>'.`,
+      );
+    }
+  }
+
+  // Step 2: Build inbox branch name (monotonic seq suffix guarantees uniqueness below ms).
+  // Cross-repo mode (callsign present): squad/inbox/<callsign>/<handle>/<ts>-<seq>-<sessionId>
+  // Single-repo / legacy mode (no callsign): squad/inbox/<handle>/<ts>-<seq>-<sessionId>
   const ts = formatPublishTimestamp(new Date());
   const seq = _publishSeq++;
-  const inboxBranch = `squad/inbox/${inboxHandle}/${ts}-${seq}-${sessionId}`;
+  const inboxBranch = callsign
+    ? `squad/inbox/${callsign}/${inboxHandle}/${ts}-${seq}-${sessionId}`
+    : `squad/inbox/${inboxHandle}/${ts}-${seq}-${sessionId}`;
 
   // Step 3: Resolve base commit
   const baseStateCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -402,7 +419,7 @@ export async function publishTeamRootToInbox(
     // §9 PII: sourceWorkRoot is {repo: basename, pathHash: sha256(normalizedAbsPath)} — no raw path
     const normalizedTeamRoot = teamRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     const pathHash = 'sha256:' + createHash('sha256').update(normalizedTeamRoot).digest('hex');
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       inboxHandle,
       sessionId,
       sourceWorkRoot: {
@@ -412,6 +429,9 @@ export async function publishTeamRootToInbox(
       publishedAt: new Date().toISOString(),
       baseStateCommit,
     };
+    if (callsign !== undefined) {
+      metadata['callsign'] = callsign;
+    }
     const metadataJson = JSON.stringify(metadata, null, 2);
     const metadataSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
       cwd: teamRoot, env: indexEnv, input: Buffer.from(metadataJson, 'utf-8'),
@@ -687,6 +707,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
     let stateRemote: string | undefined;
     let stateBranch: string | undefined;
     let registryAlias: string | undefined;
+    let registryCallsign: string | undefined;
     let backend: string | null = null;
     let configJsonPresent = false;
 
@@ -704,6 +725,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
         stateRemote = entry.stateRemote;
         stateBranch = entry.stateBranch;
         registryAlias = entry.inboxHandle;
+        registryCallsign = entry.callsign;
         // O: Read entry.stateBackend, default to and enforce 'orphan'.
         // Warn (non-fatal) when an explicit non-orphan value is overridden.
         const entryBackend = entry.stateBackend;
@@ -791,8 +813,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
       const effectiveAlias = resolvedAlias ?? '(handle required)';
       console.log(`squad sync --dry-run`);
       if (isPush) {
-        console.log(`  Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>`);
-      }
+          const callsignPrefix = registryCallsign ? `${registryCallsign}/` : '';
+          console.log(`  Target inbox branch: squad/inbox/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
+        }
       if (isPull) {
         const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
         const effectiveBranch = stateBranch ?? 'squad-state';
@@ -833,12 +856,25 @@ export async function runSync(options: SyncOptions): Promise<void> {
     // ── Sub-proposal B: Push path ──────────────────────────────────────────────
     if (isPush) {
       if (crossRepo) {
+        // Guard: callsign is required for cross-repo publish. Without a callsign the
+        // inbox branch would collide with other squads sharing the same remote.
+        if (!registryCallsign || !CALLSIGN_RE.test(registryCallsign)) {
+          console.error(
+            `squad sync: FATAL: no callsign set for this registry entry.\n` +
+            `  A callsign is required to publish in cross-repo mode so inbox branches are\n` +
+            `  scoped to this squad (squad/inbox/<callsign>/<handle>/...).\n` +
+            `  Set it with: squad assign <callsign> --callsign <name>`,
+          );
+          process.exit(1);
+          return;
+        }
         const sessionId = process.env['COPILOT_SESSION_ID'] ?? randomUUID();
         await _transport.publishTeamRootToInbox(
           teamRoot!,
           stateRemote ?? DEFAULT_STATE_REMOTE,
           resolvedAlias!,
           sessionId,
+          registryCallsign,
         );
         // Write last-publish timestamp after successful cross-repo push.
         writeLastPublish(teamRoot!);
