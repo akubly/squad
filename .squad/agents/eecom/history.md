@@ -22,7 +22,23 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Recent Pieces (Pieces 33-34)
 
-### Piece 34 — Client-side publish triggers (2026-06-06) ✅
+### Piece 40 — Callsign-namespaced transport (2026-06-11) ✅
+
+**Branch:** `squad/piece-40-callsign-namespaced-transport`
+
+Sub-proposals A–D implemented (E deferred per triage):
+- **A:** `publishTeamRootToInbox` gains optional `callsign?` 5th param; 3-component branch `squad/inbox/<callsign>/<handle>/<ts>-<seq>-<sessionId>` when callsign present; 2-component preserved for single-repo mode; cross-repo push without callsign is a fatal error directing user to `squad assign --callsign`; `publish-metadata.json` gains `callsign` field.
+- **B:** `runInit` sets `stateBranch: 'squad/state/<callsign>'` when callsign provided; omits field otherwise; sync pull reads `entry.stateBranch` (unchanged, fallback `squad-state` still works).
+- **C:** `installFoldPipeline` gains `callsign?` option; validates with `CALLSIGN_RE`; applies string-replacement parameterization at generation time (templates unchanged on disk); no-callsign = byte-identical output.
+- **D:** Tests only. All 4 guard behaviors confirmed correct (D1 warn+succeed, D2 error, D3 --callsign excludes, D4 Guard 7).
+
+**Tests:** 22/22 GREEN. Regressions in `cross-repo-sync.test.ts` (B1, B3) fixed by adding `callsign` to registry entries and updating branch assertions.
+
+**Changeset:** `.changeset/callsign-namespaced-transport.md` (patch for `@bradygaster/squad-cli`).
+
+**Pre-existing failures acknowledged:** `assign.test.ts` P34.A1 and P34.A3 were already failing before piece 40 — the piece-36 decision to install hooks in both clones superseded piece-34 host-only behavior, but those older tests were not updated. Not caused by piece-40 changes.
+
+
 
 **Commit:** `763c2451` (pushed to origin)
 
@@ -48,7 +64,31 @@ This history covers SDK lifecycle, registry schema, template propagation, cherry
 
 ## Key Learnings (Recent)
 
-### Recursion-Guard Test Standard (Piece 34 FIDO Directive)
+### Callsign-namespaced transport (Piece 40)
+
+**`CALLSIGN_RE`:** `/^[a-z][a-z0-9-]{1,38}$/` — identical to `INBOX_HANDLE_RE`. Lowercase-only, starts with letter, hyphens allowed, 2–39 chars total. Exported from `packages/squad-sdk/src/validation.ts`.
+
+**Callsign threading through publish:**
+1. Captured in `runSync` at registry match: `registryCallsign = entry.callsign`
+2. Cross-repo push guard: if `!registryCallsign`, `console.error(...)` + `process.exit(1)` with message directing user to `squad assign --callsign`
+3. Passed to `publishTeamRootToInbox(teamRoot, remote, handle, sessionId, callsign?)`
+4. Branch: `squad/inbox/${callsign}/${inboxHandle}/${ts}-${seq}-${sessionId}` (3-component when callsign set, 2-component without)
+5. Metadata: `{ callsign, inboxHandle, ... }` in `.squad/publish-metadata.json`
+
+**Template parameterization approach (C):** Read raw template, apply string-replace at generation time. Templates on disk remain unchanged (ensuring byte-identical output when `--callsign` absent).
+- GitHub replacements: `'squad/inbox/**'` → `'squad/inbox/<callsign>/**'`; `squad-state` refs → `squad/state/<callsign>`
+- ADO replacements: `refs/heads/squad/inbox/*` → `refs/heads/squad/inbox/<callsign>/*`; same state branch
+
+**Test mock architecture for `runInit`:** `@bradygaster/squad-sdk/registry` mock must use `importActual` to preserve `upsertEntry` (re-exported from `./registry.js` via the barrel). Replacing the whole module loses `upsertEntry`. Pattern:
+```typescript
+vi.mock('@bradygaster/squad-sdk/registry', async (importActual) => {
+  const actual = await importActual<...>();
+  return { ...actual, loadRegistryFromDisk: vi.fn(), writeRegistry: vi.fn() };
+});
+```
+To assert on `runInit` registry writes, check `vi.mocked(writeRegistry).mock.calls` — don't read from disk (mock makes writes a no-op).
+
+
 
 Sentinel-function + marker-file approach: prepend `squad()` function shadowing PATH; assert marker absence when guard fires, presence when guard absent. Three-case structure required (including guard-stripped case) to prove test load-bearing. Exit-code-only assertions insufficient.
 

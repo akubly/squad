@@ -102,9 +102,48 @@
 
 **Build emit verification process:** After adding a new subpath export, the required verification is: (1) `npm run build` exits 0, (2) `dist/<name>.js` exists, (3) `dist/<name>.d.ts` exists and exports the correct symbol, (4) JSON structure of package.json `exports` is valid via `node -e "require('./package.json')"`. All four passed for `./validation`.
 
-### Piece 35 — Fold pipeline installer adversarial review (2026-06-07)
+### Piece 40 — Callsign-namespaced transport adversarial revision (2026-06-12)
 
-**Verdict: ✅ APPROVE** — commit `64eecd47`, author EECOM.
+**BLOCK → ✅ FIXED** — Independent revision of EECOM's commit `b64bef25`. Build: `npm run build` exits 0 (strict, zero new errors). Tests: **33 piece-40 + 16 cross-repo = 49 tests, all pass**.
+
+**H1 (HIGH) — Enumeration fetch/ls-remote not scoped (fixed: install-fold-pipeline.ts)**
+- The original callsign block only rewrote the trigger glob and the state-branch target. Step-2 enumeration (`git fetch origin '+refs/heads/squad/inbox/**:…'` and `git ls-remote --heads origin 'refs/heads/squad/inbox/*'`) continued to match all squads' inbox refs — guaranteed cross-contamination on cron.
+- Fix: replaced the many specific `.replace()` chains with three targeted pattern replacements (trigger, H1 fetch refspec, H1 ls-remote pattern) plus a **broad `/squad-state/g`** catch-all. The broad catch-all is safe because `squad-state` is not a substring of `squad/state/<callsign>` after substitution, so no double-apply is possible.
+- **Pattern**: when `squad-state` appears in both display names/comments AND executable YAML, a broad `/squad-state/g` replacement is simpler and more complete than an enumeration of specific patterns. Verify no false positives before applying.
+
+**M4 (MED) — Orphan local branch name not parameterized (fixed: install-fold-pipeline.ts)**
+- `git checkout --orphan squad-state` was not being rewritten. After the broad replacement, it becomes `git checkout --orphan squad/state/<callsign>` automatically.
+- After H1+M4 fixes, a callsign-scoped install produces ZERO bare `squad-state` tokens.
+
+**H2 (HIGH) — assign cold-start does not default stateBranch (fixed: assign.ts)**
+- `_coldStart` built `updatedEntry` with no `stateBranch` for new entries. Now: when `!reactivating && opts.stateBranch === undefined`, defaults to `squad/state/<callsign>`. Explicit `--state-branch` always wins. Reactivating entries preserve existing `stateBranch` via `baseEntry` spread.
+- Added `CALLSIGN_RE` import and explicit callsign validation before branch construction.
+- **Pattern**: `...(!reactivating ? { stateBranch: `squad/state/${callsign}` } : {})` is the idiomatic conditional-spread for stateful defaulting without clobbering existing values.
+
+**M3 (MED) — init builds stateBranch from unvalidated callsign (fixed: init.ts)**
+- Added `CALLSIGN_RE` import and early validation of `opts?.callsign` before any scaffold or registry write. Throws `ConfigurationError` with `ERR_SQUAD_INIT_INVALID_CALLSIGN` on invalid explicit callsign.
+- **Pattern**: callsign validation belongs at the entry point (before any side effects), not inline at the interpolation site.
+
+**M5 (MED) — C5/C6 tests strengthened to byte-identical (test file)**
+- Changed from `toContain()` substring checks to `toBe(fs.readFileSync(templatePath,'utf-8'))` for both github and ado no-callsign paths. C5 and C6 pass, confirming the no-callsign output is still byte-for-byte identical to the raw template. Added `TEMPLATES_ROOT` constant at module scope.
+
+**M6 (MED) — INT1 cross-contamination negative assertion added (test file)**
+- Added `expect(refsA.some(r => r.includes('team-b'))).toBe(false)` and vice versa to INT1.
+
+**LOW — sync.ts dry-run inbox branch preview includes callsign (sync.ts)**
+- Updated dry-run output from `squad/inbox/${effectiveAlias}/...` to `squad/inbox/${callsignPrefix}${effectiveAlias}/...` when `registryCallsign` is set. Matches the actual runtime branch structure.
+
+**New tests added (6):**
+- `M3`: init rejects invalid callsigns before registry write (5 bad callsigns, writeRegistry call count = 0)
+- `H2-1`: cold-start `--callsign team-b`, no `--state-branch` → `stateBranch: 'squad/state/team-b'`
+- `H2-2`: explicit `--state-branch` overrides callsign default
+- `H2-3`: reactivating existing entry preserves existing `stateBranch`
+- `H2-4`: invalid explicit `--callsign` in cold-start throws `AssignError` before clone
+- `C8`: callsign set → no bare `squad-state` token, no global inbox glob (both platforms); namespaced enumeration patterns present
+
+**No-callsign byte-identical confirmed:** C5 (`toBe`) and C6 (`toBe`) pass.
+
+
 
 **Pattern reusable:** `fatal(): never` + inequality narrowing of `string | undefined` to `'github' | 'ado'` is a valid TypeScript CFA pattern for platform-literal dispatch. No type errors at call site; confirmed by clean build on piece-35 files. Registry API correct: `registry?.squads.find(...)` matches actual type; `path.dirname(entry.path)` matches registry-first pattern from sync.ts.
 
