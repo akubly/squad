@@ -11,14 +11,14 @@
  */
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
   writeRegistry: vi.fn(),
 }));
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
-vi.mock('@bradygaster/squad-sdk/validation', () => ({
+vi.mock('@wifi-aware/squad-sdk/validation', () => ({
   INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
 
@@ -35,8 +35,8 @@ import {
   PUBLISH_ALLOWLIST_EXACT,
   PUBLISH_ALLOWLIST_PREFIX,
 } from '../../packages/squad-cli/src/cli/commands/sync.js';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
 import type { Registry } from '../../packages/squad-sdk/src/registry.js';
 import { runInit } from '../../packages/squad-cli/src/commands/init.js';
 import { parseAssignArgs } from '../../packages/squad-cli/src/commands/assign-args.js';

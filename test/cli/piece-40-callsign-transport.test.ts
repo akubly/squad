@@ -10,18 +10,18 @@
  */
 
 // ─── Mocks (must come before all imports per Vitest hoisting rules) ───────────
-vi.mock('@bradygaster/squad-sdk/registry', async (importActual) => {
-  const actual = await importActual<typeof import('@bradygaster/squad-sdk/registry')>();
+vi.mock('@wifi-aware/squad-sdk/registry', async (importActual) => {
+  const actual = await importActual<typeof import('@wifi-aware/squad-sdk/registry')>();
   return {
     ...actual,
     loadRegistryFromDisk: vi.fn(),
     writeRegistry: vi.fn(),
   };
 });
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
-vi.mock('@bradygaster/squad-sdk/validation', () => ({
+vi.mock('@wifi-aware/squad-sdk/validation', () => ({
   INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
   CALLSIGN_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
@@ -46,9 +46,9 @@ import {
 import { runInit } from '../../packages/squad-cli/src/commands/init.js';
 import { runAssign, AssignError } from '../../packages/squad-cli/src/commands/assign.js';
 import type { SquadAssignOpts } from '../../packages/squad-cli/src/commands/assign.js';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
-import type { Registry } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
+import type { Registry } from '@wifi-aware/squad-sdk/registry';
 import { writeRegistry as writeRegistryDirect } from '../../packages/squad-sdk/src/registry.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/regis
 import type { RegistryEntry } from '@wifi-aware/squad-sdk/registry';
 import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
-import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
+import { CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
 import { writeRemoteConfig } from '../cli/commands/init-remote.js';
 import { migratePoleBToA } from '../cli/commands/pole-a-migrate.js';
