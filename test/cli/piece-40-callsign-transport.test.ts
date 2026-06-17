@@ -720,7 +720,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
 
     await installFoldPipeline('github', { cwd: cloneDir, callsign: 'team-a' });
 
-    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.team-a.yml'), 'utf-8');
     expect(content).toContain('squad/inbox/team-a/**');
     expect(content).not.toContain("'squad/inbox/**'");
   });
@@ -736,7 +736,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
 
     await installFoldPipeline('github', { cwd: cloneDir, callsign: 'team-a' });
 
-    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.team-a.yml'), 'utf-8');
     expect(content).toContain('squad/state/team-a');
     // The old hardcoded squad-state push must be replaced
     expect(content).not.toContain('HEAD:refs/heads/squad-state');
@@ -758,7 +758,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
       consoleSpy.mockRestore();
     }
 
-    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.team-a.yml'), 'utf-8');
     expect(content).toContain('refs/heads/squad/inbox/team-a/*');
     expect(content).not.toContain('- refs/heads/squad/inbox/*\n');
   });
@@ -779,7 +779,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
       consoleSpy.mockRestore();
     }
 
-    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.team-a.yml'), 'utf-8');
     expect(content).toContain('squad/state/team-a');
     expect(content).not.toContain('HEAD:refs/heads/squad-state');
   });
@@ -832,7 +832,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
     fs.mkdirSync(workflowsDir, { recursive: true });
     setupFoldRegistry(ghDocsDir, ghCloneRoot);
     await installFoldPipeline('github', { cwd: ghCloneDir, callsign: 'team-b' });
-    const ghContent = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.yml'), 'utf-8');
+    const ghContent = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.team-b.yml'), 'utf-8');
     // No bare squad-state token anywhere (covers M4 orphan branch and all refs/names).
     expect(ghContent).not.toContain('squad-state');
     // No global inbox glob.
@@ -854,7 +854,7 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
     } finally {
       consoleSpy.mockRestore();
     }
-    const adoContent = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.yml'), 'utf-8');
+    const adoContent = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.team-b.yml'), 'utf-8');
     expect(adoContent).not.toContain('squad-state');
     expect(adoContent).not.toContain('refs/heads/squad/inbox/*\n');
     // Scoped mode pins the callsign and state branch without runtime discovery.
@@ -1280,7 +1280,7 @@ describe('FIDO Edge Tests — adversarial callsign inputs and round-trip', { tim
 
     await installFoldPipeline('github', { cwd: cloneDir, callsign: 'team-b' });
 
-    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(workflowsDir, 'fold-squad-state.team-b.yml'), 'utf-8');
     // Both the trigger glob and the fold target must carry the full namespaced callsign
     expect(content).toContain('squad/inbox/team-b/**');
     expect(content).toContain('squad/state/team-b');
@@ -1305,7 +1305,7 @@ describe('FIDO Edge Tests — adversarial callsign inputs and round-trip', { tim
       consoleSpy.mockRestore();
     }
 
-    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.yml'), 'utf-8');
+    const content = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.team-b.yml'), 'utf-8');
     expect(content).toContain('refs/heads/squad/inbox/team-b/*');
     expect(content).toContain('squad/state/team-b');
     expect(content).not.toContain('- refs/heads/squad/inbox/*\n');

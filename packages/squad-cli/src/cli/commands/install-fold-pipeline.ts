@@ -189,18 +189,19 @@ export async function installFoldPipeline(
     templateContent = rawTemplate;
   }
 
-  const destPath = path.join(targetDir, 'fold-squad-state.yml');
+  const filename = callsign ? `fold-squad-state.${callsign}.yml` : 'fold-squad-state.yml';
+  const destPath = path.join(targetDir, filename);
 
   // ── Three-way idempotency / conflict gate ─────────────────────────────────
   if (fs.existsSync(destPath)) {
     const existing = fs.readFileSync(destPath, 'utf-8');
     if (existing === templateContent) {
-      console.log(`${GREEN}✓${RESET} fold-squad-state.yml already installed and up to date.`);
+      console.log(`${GREEN}✓${RESET} ${filename} already installed and up to date.`);
       return;
     }
     // Content differs — conflict guard.
     console.error(
-      `✗ fold-squad-state.yml exists at ${destPath} with different content.\n` +
+      `✗ ${filename} exists at ${destPath} with different content.\n` +
       `  Review and delete it manually before re-running install-fold-pipeline.`,
     );
     process.exit(1);
@@ -215,6 +216,6 @@ export async function installFoldPipeline(
     console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
   }
   if (platform === 'ado') {
-    console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/fold-squad-state.yml in the portal.`);
+    console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/${filename} in the portal.`);
   }
 }

@@ -397,7 +397,7 @@ describe('callsign-generic generated pipeline', () => {
 
     await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha-team' });
 
-    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.alpha-team.yml'), 'utf-8');
     expect(yaml).toContain("- 'squad/inbox/alpha-team/**'");
     expect(yaml).toContain("callsigns=\"alpha-team\"");
     expect(yaml).toContain('squad/state/alpha-team');
@@ -413,10 +413,139 @@ describe('callsign-generic generated pipeline', () => {
 
     await installFoldPipeline('ado', { cwd: cloneDir, callsign: 'alpha-team' });
 
-    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.alpha-team.yml'), 'utf-8');
     expect(yaml).toContain('- refs/heads/squad/inbox/alpha-team/*');
     expect(yaml).toContain("callsigns=\"alpha-team\"");
     expect(yaml).toContain('squad/state/alpha-team');
     expect(yaml).not.toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+  });
+});
+
+// ─── Piece 44 sub-proposal A: callsign-named scoped filename ──────────────────
+
+describe('piece 44 A: callsign-named scoped pipeline filename', () => {
+  it('A44.1: --callsign writes fold-squad-state.<callsign>.yml and not the generic filename', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-named');
+    const cloneDir = makeTmpDir('p44-clone-named');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' });
+
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.alpha.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.yml'))).toBe(false);
+  });
+
+  it('A44.2: two scoped installs for different callsigns coexist without tripping the conflict gate', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-coexist');
+    const cloneDir = makeTmpDir('p44-clone-coexist');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    fs.mkdirSync(wfDir, { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_c?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' });
+      await installFoldPipeline('github', { cwd: cloneDir, callsign: 'bravo' });
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.alpha.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.bravo.yml'))).toBe(true);
+  });
+
+  it('A44.3: default (no --callsign) install still writes the generic fold-squad-state.yml', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-default');
+    const cloneDir = makeTmpDir('p44-clone-default');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    fs.mkdirSync(wfDir, { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.yml'))).toBe(true);
+  });
+
+  it('A44.4: idempotent re-run of a scoped install is a no-op (exit 0, no conflict)', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-idem');
+    const cloneDir = makeTmpDir('p44-clone-idem');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    fs.mkdirSync(wfDir, { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_c?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' });
+      const first = fs.readFileSync(path.join(wfDir, 'fold-squad-state.alpha.yml'), 'utf-8');
+      await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' });
+      const second = fs.readFileSync(path.join(wfDir, 'fold-squad-state.alpha.yml'), 'utf-8');
+      expect(second).toBe(first);
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  it('A44.5: scoped conflict gate names the callsign-named path when content differs', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-conflict');
+    const cloneDir = makeTmpDir('p44-clone-conflict');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    fs.mkdirSync(wfDir, { recursive: true });
+    const destPath = path.join(wfDir, 'fold-squad-state.alpha.yml');
+    fs.writeFileSync(destPath, '# different content\n', 'utf-8');
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_c?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errOutput = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(errOutput).toContain(destPath);
+    } finally {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('A44.6 (C1): a scoped install leaves a pre-existing generic fold-squad-state.yml in place', async () => {
+    const docsRepoDir = makeTmpDir('p44-docs-c1');
+    const cloneDir = makeTmpDir('p44-clone-c1');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    const wfDir = path.join(docsRepoRoot, '.github', 'workflows');
+    fs.mkdirSync(wfDir, { recursive: true });
+    const genericPath = path.join(wfDir, 'fold-squad-state.yml');
+    fs.writeFileSync(genericPath, '# pre-existing generic pipeline\n', 'utf-8');
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha' });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(wfDir, 'fold-squad-state.alpha.yml'))).toBe(true);
+    // C1: the generic file is left in place (not removed by the scoped install).
+    expect(fs.existsSync(genericPath)).toBe(true);
+    expect(fs.readFileSync(genericPath, 'utf-8')).toBe('# pre-existing generic pipeline\n');
   });
 });

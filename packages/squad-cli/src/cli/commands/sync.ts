@@ -453,31 +453,39 @@ export async function publishTeamRootToInbox(
       cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Sub-proposal A: Embed pipeline YAML in inbox snapshot so CI systems can evaluate triggers.
-    // Two independent probes: ADO (.azuredevops/) and GitHub (.github/workflows/).
-    const adoYamlPath = path.join(teamRoot, '.azuredevops', 'fold-squad-state.yml');
-    if (fs.existsSync(adoYamlPath)) {
-      const adoYamlContent = fs.readFileSync(adoYamlPath);
-      const adoYamlSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
-        cwd: teamRoot, env: indexEnv, input: adoYamlContent, encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-      execFileSync('git', ['update-index', '--add', '--cacheinfo',
-        `100644,${adoYamlSha},.azuredevops/fold-squad-state.yml`], {
-        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
-      });
+    // Sub-proposal A (piece 39): embed the host pipeline YAML in the inbox snapshot so CI
+    // systems can evaluate triggers against the published snapshot.
+    // Piece 44 (B): a host may carry a pipeline copy in more than one directory (a stale
+    // alternate-platform copy from an earlier convention). Resolve a single canonical
+    // pipeline path and embed ONLY that one — never a second, stale alternate-directory copy.
+    // Precedence (first existing wins, then stop): callsign-scoped file before the generic
+    // file, Azure DevOps before GitHub.
+    const pipelineCandidates: string[] = [];
+    if (callsign !== undefined) {
+      pipelineCandidates.push(
+        path.join('.azuredevops', `fold-squad-state.${callsign}.yml`),
+        path.join('.github', 'workflows', `fold-squad-state.${callsign}.yml`),
+      );
     }
-    const ghYamlPath = path.join(teamRoot, '.github', 'workflows', 'fold-squad-state.yml');
-    if (fs.existsSync(ghYamlPath)) {
-      const ghYamlContent = fs.readFileSync(ghYamlPath);
-      const ghYamlSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
-        cwd: teamRoot, env: indexEnv, input: ghYamlContent, encoding: 'utf-8',
+    pipelineCandidates.push(
+      path.join('.azuredevops', 'fold-squad-state.yml'),
+      path.join('.github', 'workflows', 'fold-squad-state.yml'),
+    );
+    for (const relPipeline of pipelineCandidates) {
+      const absPipeline = path.join(teamRoot, relPipeline);
+      if (!fs.existsSync(absPipeline)) continue;
+      const pipelineContent = fs.readFileSync(absPipeline);
+      const pipelineSha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: teamRoot, env: indexEnv, input: pipelineContent, encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
+      // git index paths are always forward-slash separated, regardless of host OS.
+      const gitRelPipeline = relPipeline.split(path.sep).join('/');
       execFileSync('git', ['update-index', '--add', '--cacheinfo',
-        `100644,${ghYamlSha},.github/workflows/fold-squad-state.yml`], {
+        `100644,${pipelineSha},${gitRelPipeline}`], {
         cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
       });
+      break; // embed only the canonical pipeline; never a stale alternate-directory copy
     }
 
     // Write tree from isolated index

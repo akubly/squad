@@ -452,7 +452,9 @@ describe('H — ADO pipeline directory .azuredevops (P37)', () => {
 
   it('P37.H4 install-fold-pipeline.ts contains ADO portal note for .azuredevops path', () => {
     const src = readFileSync(INSTALL_FOLD_SRC, 'utf-8');
-    expect(src).toMatch(/\.azuredevops.*fold-squad-state\.yml|fold-squad-state\.yml.*\.azuredevops/i);
+    // Piece 44: the portal note now references the resolved (possibly callsign-named)
+    // filename via `.azuredevops/${filename}` instead of the literal fold-squad-state.yml.
+    expect(src).toMatch(/Configure the ADO pipeline to point to \.azuredevops\/\$\{filename\}/);
   });
 });
 
