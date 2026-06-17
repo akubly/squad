@@ -57,27 +57,19 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | C (Tier 1) | A cross-repo `sync --pull` no longer runs the in-clone fetch against the code clone (no misleading "no remote squad-state refs" warning); hydration from the state ref is the sole source |
 | D (Tier 2, decision) | Fallback when an entry has neither `stateBranch` nor a callsign — retain the flat `squad-state` legacy default (recommended) vs. fail fast with a teaching error |
 
+### Piece 44 — Pipeline-file injection hygiene on shared hosts
+
+`docs/proposals/upstream-bradygaster/44-pipeline-file-injection-hygiene-on-shared-hosts.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Scoped `install-fold-pipeline --callsign` writes a distinct, callsign-named `fold-squad-state.<callsign>.yml` (reusing `CALLSIGN_RE`) so two scoped installs on one repository no longer collide on the fixed filename; the default install is unchanged |
+| B (Tier 1) | The cross-repo `sync` pipeline injection resolves a single canonical pipeline path (callsign-named preferred, ADO-before-GitHub tiebreak) and embeds only that one, so a stale alternate-directory copy is never carried into the published snapshot |
+| C (Tier 2, decision) | Whether the scoped install also removes a stale alternate-directory copy — leave it in place and rely on B's single-embed (recommended) vs. remove the superseded copy |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
-
-### Piece 44 — Pipeline-file injection hygiene on shared hosts
-
-**Intent.** On a host that may carry more than one fold definition, the scoped `--callsign`
-install and the `sync`-time pipeline injection must not collide or leave stale copies.
-Today a scoped install writes a fixed filename (two scoped installs on one repo would
-overwrite each other) and the injection writes one canonical pipeline directory while a
-stale alternate-directory copy can remain from an earlier convention.
-
-**Candidate outcomes (assertion-shaped).**
-- Two `--callsign` scoped installs targeting one repository produce distinct,
-  non-colliding pipeline files (callsign-named), or the scoped install is rejected when the
-  callsign-generic pipeline already covers the repo.
-- `sync` injects only the canonical pipeline path and does not leave a stale copy in an
-  alternate pipeline directory.
-
-**Source classes:** scoped-mode fixed-filename collision; injection writes one directory
-while a stale alternate copy persists.
 
 ### Piece 45 — Post-commit hook entrypoint resolution
 
