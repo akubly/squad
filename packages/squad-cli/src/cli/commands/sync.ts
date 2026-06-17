@@ -121,6 +121,18 @@ function resolveRemote(cwd: string): string {
 }
 
 /**
+ * Resolve the state branch for a registry entry. An explicit `stateBranch` wins; otherwise,
+ * when a valid callsign is present, derive the namespaced `squad/state/<callsign>` branch
+ * (matching the fold pipeline's target and the value assign/init persist for new entries).
+ * Falls back to the flat legacy `squad-state` branch when neither is available.
+ */
+export function deriveStateBranch(stateBranch: string | undefined, callsign: string | undefined): string {
+  if (stateBranch) return stateBranch;
+  if (callsign && CALLSIGN_RE.test(callsign)) return `squad/state/${callsign}`;
+  return 'squad-state';
+}
+
+/**
  * Pull: fetch remote state branches and fast-forward local refs.
  */
 function syncPull(cwd: string, remote: string, backend: string | null, quiet: boolean): void {
@@ -691,9 +703,6 @@ export async function runSync(options: SyncOptions): Promise<void> {
   }
   process.env[SQUAD_SYNC_ENV] = '1';
 
-  // Default remote for cross-repo state operations (sub-proposal B).
-  const DEFAULT_STATE_REMOTE = 'origin';
-
   try {
     const cwd = options.cwd ?? process.cwd();
     const quiet = options.quiet ?? false;
@@ -783,6 +792,14 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     const crossRepo = teamRoot !== undefined;
 
+    // ── Piece 43: cross-repo state remote / branch resolution ─────────────────
+    // The state remote and the squad/state/<callsign> branch are resolved from the
+    // registry / team-root host, not from the code clone's origin. An explicit
+    // stateRemote/stateBranch wins; otherwise the remote resolves from the host clone and
+    // the branch derives from the callsign (falling back to the flat legacy `squad-state`).
+    const effectiveStateRemote = crossRepo ? (stateRemote ?? resolveRemote(teamRoot!)) : remote;
+    const effectiveStateBranch = deriveStateBranch(stateBranch, registryCallsign);
+
     // ── Inbox-handle resolution chain ─────────────────────────────────────────
     // Order: (1) --inbox-handle / --developer flag; (2) SQUAD_INBOX_HANDLE env var;
     //        (3) registry entry handle; (4) git config user.email fallback.
@@ -815,11 +832,10 @@ export async function runSync(options: SyncOptions): Promise<void> {
       if (isPush) {
           const callsignPrefix = registryCallsign ? `${registryCallsign}/` : '';
           console.log(`  Target inbox branch: squad/inbox/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
+          console.log(`  Would publish to remote: ${effectiveStateRemote}`);
         }
       if (isPull) {
-        const effectiveRemote = stateRemote ?? DEFAULT_STATE_REMOTE;
-        const effectiveBranch = stateBranch ?? 'squad-state';
-        console.log(`  Would pull from remote: ${effectiveRemote}, branch: ${effectiveBranch}`);
+        console.log(`  Would pull from remote: ${effectiveStateRemote}, branch: ${effectiveStateBranch}`);
       }
       console.log(`  Pending files (${files.length} of ${allFiles.length} total, after allowlist filter):`);
       for (const f of files) {
@@ -838,18 +854,21 @@ export async function runSync(options: SyncOptions): Promise<void> {
     }
 
     if (!quiet) {
-      const displayRemote = crossRepo ? (stateRemote ?? DEFAULT_STATE_REMOTE) : remote;
-      console.log(`squad sync: ${options.direction} (remote: ${displayRemote}, backend: ${backend ?? 'orphan'})`);
+      console.log(`squad sync: ${options.direction} (remote: ${effectiveStateRemote}, backend: ${backend ?? 'orphan'})`);
     }
     // ── Sub-proposal C: Pull path ──────────────────────────────────────────────
     if (isPull) {
-      syncPull(repoRoot, remote, backend, quiet);
       if (crossRepo) {
+        // Cross-repo: the authoritative hydration is from the state ref on the host. Do not
+        // run the in-clone fetch against the code clone (its origin does not host the state
+        // branch — that produced a misleading "no remote squad-state refs" notice).
         await _transport.hydrateTeamRootFromStateRef(
           teamRoot!,
-          stateRemote ?? DEFAULT_STATE_REMOTE,
-          stateBranch ?? 'squad-state',
+          effectiveStateRemote,
+          effectiveStateBranch,
         );
+      } else {
+        syncPull(repoRoot, remote, backend, quiet);
       }
     }
 
@@ -871,7 +890,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
         const sessionId = process.env['COPILOT_SESSION_ID'] ?? randomUUID();
         await _transport.publishTeamRootToInbox(
           teamRoot!,
-          stateRemote ?? DEFAULT_STATE_REMOTE,
+          effectiveStateRemote,
           resolvedAlias!,
           sessionId,
           registryCallsign,
