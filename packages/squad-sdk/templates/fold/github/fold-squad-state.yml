@@ -63,11 +63,12 @@ jobs:
 
             HISTORY_FILE=".squad/publish-history.json"
             FOLDED_REFS=""
-            if [ -f "$HISTORY_FILE" ]; then
-              if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
-                echo "::error::$HISTORY_FILE is malformed JSON — aborting to prevent data loss."
-                exit 1
+            if [ ! -s "$HISTORY_FILE" ] || ! jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
+              if [ -e "$HISTORY_FILE" ]; then
+                echo "::warning::$HISTORY_FILE is missing, empty, or non-array JSON — resetting to []."
+                printf '%s\n' '[]' > "$HISTORY_FILE"
               fi
+            else
               FOLDED_REFS=$(jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null || true)
             fi
 
@@ -145,7 +146,7 @@ jobs:
 
             FINAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
             EXISTING="[]"
-            if [ -f "$HISTORY_FILE" ]; then
+            if [ -s "$HISTORY_FILE" ] && jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
               EXISTING=$(cat "$HISTORY_FILE")
             fi
 
@@ -156,7 +157,13 @@ jobs:
               --argjson entries "$FOLDED_ENTRIES" \
               '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}')
 
-            echo "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]' > "$HISTORY_FILE"
+            UPDATED_HISTORY=$(printf '%s\n' "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]')
+            if [ -z "$UPDATED_HISTORY" ] || ! printf '%s\n' "$UPDATED_HISTORY" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              echo "::error::Failed to produce valid publish-history.json — aborting to prevent data loss."
+              exit 1
+            fi
+            mkdir -p "$(dirname "$HISTORY_FILE")"
+            printf '%s\n' "$UPDATED_HISTORY" > "$HISTORY_FILE"
             git add "$HISTORY_FILE"
             git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
 

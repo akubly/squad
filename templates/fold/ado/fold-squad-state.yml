@@ -41,6 +41,8 @@ jobs:
         displayName: Configure git identity
 
       - bash: |
+          set -euo pipefail
+
           callsigns="`git ls-remote --heads origin 'refs/heads/squad/inbox/*' \
             | sed -nE 's#^[0-9a-f]+\srefs/heads/squad/inbox/([^/]+)/.*#\1#p' \
             | sort -u`"
@@ -70,11 +72,12 @@ jobs:
 
             HISTORY_FILE=".squad/publish-history.json"
             FOLDED_REFS=""
-            if [ -f "$HISTORY_FILE" ]; then
-              if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
-                echo "##vso[task.logissue type=error]$HISTORY_FILE is malformed JSON — aborting to prevent data loss."
-                exit 1
+            if [ ! -s "$HISTORY_FILE" ] || ! jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
+              if [ -e "$HISTORY_FILE" ]; then
+                echo "##vso[task.logissue type=warning]$HISTORY_FILE is missing, empty, or non-array JSON — resetting to []."
+                printf '%s\n' '[]' > "$HISTORY_FILE"
               fi
+            else
               FOLDED_REFS=`jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null || true`
             fi
 
@@ -134,25 +137,28 @@ jobs:
               git read-tree --prefix=.squad/ -u "$INBOX_SQUAD_TREE"
               git add .squad/
 
-              GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+              if GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
                 git commit \
                   --author="Squad Fold Pipeline <squad-fold@noreply>" \
-                  -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
-
-              ENTRY=`jq -n \
-                --arg ref "$REF" \
-                --arg sha "$REF_SHA" \
-                --arg alias "$DEV_ALIAS" \
-                --arg pubAt "$PUB_AT" \
-                '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
-              FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+                  -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"; then
+                ENTRY=`jq -n \
+                  --arg ref "$REF" \
+                  --arg sha "$REF_SHA" \
+                  --arg alias "$DEV_ALIAS" \
+                  --arg pubAt "$PUB_AT" \
+                  '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+                FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+              else
+                echo "##vso[task.logissue type=warning]WARNING: Fold commit failed for $REF — not recording it in publish-history.json."
+                git reset --hard HEAD >/dev/null 2>&1 || true
+              fi
 
               git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
             done <<< "$SORTED_REFS"
 
             FINAL_SHA=`git rev-parse HEAD 2>/dev/null || echo ""`
             EXISTING="[]"
-            if [ -f "$HISTORY_FILE" ]; then
+            if [ -s "$HISTORY_FILE" ] && jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
               EXISTING=`cat "$HISTORY_FILE"`
             fi
 
@@ -163,7 +169,13 @@ jobs:
               --argjson entries "$FOLDED_ENTRIES" \
               '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}'`
 
-            echo "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]' > "$HISTORY_FILE"
+            UPDATED_HISTORY=`printf '%s\n' "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]'`
+            if [ -z "$UPDATED_HISTORY" ] || ! printf '%s\n' "$UPDATED_HISTORY" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              echo "##vso[task.logissue type=error]Failed to produce valid publish-history.json — aborting to prevent data loss."
+              exit 1
+            fi
+            mkdir -p "`dirname "$HISTORY_FILE"`"
+            printf '%s\n' "$UPDATED_HISTORY" > "$HISTORY_FILE"
             git add "$HISTORY_FILE"
             git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
 
