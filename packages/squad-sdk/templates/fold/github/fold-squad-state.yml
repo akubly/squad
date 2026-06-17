@@ -15,6 +15,13 @@ permissions:
   contents: write
   actions: read
 
+# Serialize all fold runs (push + cron) so concurrent inbox pushes never race
+# the sole-writer push to squad/state/<callsign>. Mirrors the ADO `batch: true`
+# behavior. Never cancel an in-flight fold mid-push — queue instead.
+concurrency:
+  group: fold-squad-state
+  cancel-in-progress: false
+
 jobs:
   fold:
     runs-on: ubuntu-latest
