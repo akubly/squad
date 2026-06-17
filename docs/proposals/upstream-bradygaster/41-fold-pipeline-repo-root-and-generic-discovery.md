@@ -150,12 +150,13 @@ dedicated-repository case.
   state commit (a fold run that races or repeats does not corrupt or duplicate state).
 - `batch: true` (ADO) is present so concurrent multi-callsign pushes coalesce into one run.
 
-**Out of scope (successor piece):** Hardening of the fold *step body* — self-healing an
-empty or malformed `publish-history.json`, and gating each step on the success of the
-prior step so a failed fold cannot push — is addressed in piece 42 and applies to all
-fold templates including the one introduced here. This piece introduces the template
-structure (repo-root placement, run-time discovery, per-callsign fold loop) with a
-correct minimal fold body.
+**Out of scope (successor piece):** Two fold-body correctness items are addressed in
+piece 42 and apply to all fold templates: (1) overlaying the inbox `.squad` tree onto a
+state branch that already contains `.squad/` without a bind failure and without clobbering
+the pipeline-owned `publish-history.json`, and (2) serializing Azure DevOps fold runs
+beyond `batch: true` so the fetch→fold→push critical section cannot overlap. This piece
+introduces the template structure (repo-root placement, run-time discovery, per-callsign
+fold loop) with a self-healing, success-gated fold body (sub-proposal D).
 
 **Test surface:** (a) The default generated ADO YAML contains
 `refs/heads/squad/inbox/*` in the trigger, `batch: true`, the callsign-discovery command,
@@ -194,6 +195,49 @@ documentation; no specific tenant or organization URL.
 
 ---
 
+### D. Fold-body integrity: self-healing publish-history, push gated on fold success, and serialized GitHub runs
+
+**Current behavior:** The fold body records each inbox ref it processes and rewrites
+`.squad/publish-history.json`, then pushes the state branch, without (1) tolerating a
+`publish-history.json` that is present-but-empty or non-array, (2) guaranteeing that a ref
+is recorded and pushed only when its fold commit actually succeeded, or (3) preventing two
+GitHub workflow runs from mutating the same state branch concurrently.
+
+**Required behavior:**
+
+1. **Self-healing history.** Treat a `publish-history.json` that is missing, empty, or not
+   a JSON array as an empty history (`[]`) — both when reading the already-folded set
+   before the loop and when appending the run record after it — so a degenerate history
+   file recovers to a valid array rather than skipping all folds or being rewritten empty.
+   The written history is always a valid JSON array.
+2. **Push gated on fold success.** Record an inbox ref in the run's folded set (and
+   therefore in `publish-history.json`) only if its fold commit succeeded; a failed fold
+   logs a warning, resets the working tree, and is not recorded, so the next run retries
+   it. The fold body runs under shell `errexit`/`pipefail` (where the platform does not
+   supply it by default) so an intermediate failure aborts before the state-branch push;
+   the post-loop history rewrite is validated to be a non-empty JSON array before it is
+   written and pushed.
+3. **Serialized GitHub runs.** The GitHub workflow declares a `concurrency` group so two
+   fold runs never overlap; an in-progress fold is not cancelled mid-push (queued, not
+   cancelled). Azure DevOps retains `batch: true` for coalescing; run-level serialization
+   of the ADO fold beyond batching is deferred to piece 42.
+
+**Hard constraints:**
+- Applies to all fold templates (both platforms); the mirrored template trees are kept
+  byte-identical.
+- A degenerate `publish-history.json` never causes the fold to drop all refs or to write an
+  empty/invalid file.
+- A ref is never recorded as folded unless its fold commit landed.
+- The GitHub workflow does not run two fold jobs concurrently, and does not cancel an
+  in-progress fold.
+
+**Test surface:** generated-YAML assertions that the fold body contains the history
+self-heal guard, the commit-success-gated record, the `errexit`/`pipefail` directive where
+the platform does not supply it (the ADO inline bash body), and the GitHub `concurrency`
+group; the runtime behavior is covered by the integration acceptance criterion.
+
+---
+
 ## Acceptance
 
 - Build exits 0.
@@ -207,6 +251,10 @@ documentation; no specific tenant or organization URL.
   `squad-state` branch.
 - `--callsign <name>` still produces the scoped single-callsign pipeline for both
   platforms, unchanged from piece 40.
+- The fold body self-heals a missing, empty, or non-array `publish-history.json` to `[]`
+  and always writes a valid JSON array; an inbox ref is recorded and pushed only when its
+  fold commit succeeded, and a failed fold is retried on the next run; the GitHub workflow
+  serializes fold runs via a `concurrency` group and does not cancel an in-progress fold.
 - Integration: a single installed callsign-generic pipeline, exercised with inbox pushes
   for two distinct callsigns sharing one host repository, folds each into its own
   `squad/state/<callsign>` branch in one batched run, with no cross-contamination and no
