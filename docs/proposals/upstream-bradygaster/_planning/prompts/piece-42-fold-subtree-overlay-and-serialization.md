@@ -23,11 +23,17 @@ git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/REPLAY-PROTOC
 git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/40-callsign-namespaced-transport.md
 git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/41-fold-pipeline-repo-root-and-generic-discovery.md
 git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/42-fold-subtree-overlay-and-serialization.md
+git show akubly/upstream-specs:docs/proposals/upstream-bradygaster/_planning/dogfood-backlog.md
 ```
 
 If `42-fold-subtree-overlay-and-serialization.md` does not exist on
 `akubly/upstream-specs`, STOP immediately. Post a blocking comment asking the spec to be
 staged before this session proceeds.
+
+`_planning/dogfood-backlog.md` is the roadmap context: it maps the dogfood-discovered work
+to delivered (piece 41), specced (piece 42 — this session), and planned candidates
+(43–45). Read it so you understand where piece 42 sits and what depends on it; implement
+**only** piece 42 here.
 
 Piece 42 hardens the fold step body that piece 41 introduced. It (A) replaces the
 `.squad/` subtree placement with a deterministic overlay that succeeds when the state
