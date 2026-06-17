@@ -21,6 +21,7 @@ vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
 }));
 vi.mock('@bradygaster/squad-sdk/validation', () => ({
   INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
+  CALLSIGN_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -39,6 +40,8 @@ import {
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 import type { Registry } from '@bradygaster/squad-sdk/registry';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 // ─── Source files for static analysis tests ──────────────────────────────────
 
@@ -376,6 +379,7 @@ describe('H — ADO pipeline directory .azuredevops (P37)', () => {
     const docsRepoDir = makeTmpDir('docs-h2');
     const cloneDir = makeTmpDir('clone-h2');
     const cloneRoot = initGitRepo(cloneDir);
+    initGitRepo(docsRepoDir);
 
     const squadDir = makeSquadHost(docsRepoDir, 'test-squad');
     const adoDir = path.join(docsRepoDir, '.azuredevops');
@@ -408,6 +412,7 @@ describe('H — ADO pipeline directory .azuredevops (P37)', () => {
     const docsRepoDir = makeTmpDir('docs-h3');
     const cloneDir = makeTmpDir('clone-h3');
     const cloneRoot = initGitRepo(cloneDir);
+    initGitRepo(docsRepoDir);
 
     const squadDir = makeSquadHost(docsRepoDir, 'test-squad');
     const adoDir = path.join(docsRepoDir, '.azuredevops');
@@ -694,4 +699,3 @@ describe('G — help table alignment behavioral (P37)', () => {
     expect(longestName.length).toBeLessThan(width);
   });
 });
-

@@ -19,7 +19,7 @@ const TEMPLATE_PATH = path.join(
 );
 
 const SINGLE_WRITER_COMMENT =
-  '# This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.';
+  '# This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.';
 
 const raw = fs.readFileSync(TEMPLATE_PATH, 'utf-8');
 
@@ -70,6 +70,24 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(raw).toContain('--force-with-lease');
   });
 
+  it('discovers distinct callsigns at run time from live inbox refs', () => {
+    expect(raw).toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+    expect(raw).toContain("sed -nE 's#^[0-9a-f]+\\srefs/heads/squad/inbox/([^/]+)/.*#\\1#p'");
+    expect(raw).toContain('sort -u');
+  });
+
+  it('validates discovered callsigns before using them as branch path components', () => {
+    expect(raw).toContain('^[a-z][a-z0-9-]{1,38}$');
+    expect(raw).toContain('WARNING: Skipping invalid callsign');
+  });
+
+  it('folds into per-callsign state branches, not a flat squad-state branch', () => {
+    expect(raw).toContain('squad/state/$CALLSIGN');
+    expect(raw).toContain('HEAD:refs/heads/${STATE_BRANCH}');
+    expect(raw).not.toContain('refs/heads/squad-state');
+    expect(raw).not.toContain('HEAD:refs/heads/squad-state');
+  });
+
   it('does not contain git merge (uses git read-tree for folding)', () => {
     // Folding must use git read-tree, not git merge
     expect(raw).not.toMatch(/\bgit merge\b/);
@@ -113,16 +131,9 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(rmIdx).toBeLessThan(readTreeIdx);
   });
 
-  it('publish-history step uses env-binding for FOLDED_ENTRIES (SEC-1)', () => {
-    // SEC-1 fix: ${{ }} expressions must be bound via the step env: block, never inlined
-    // into the script body. GitHub expands ${{ }} at render time before bash runs.
-    expect(raw).toContain('FOLDED_ENTRIES: ${{ steps.fold.outputs.folded_entries }}');
-    expect(raw).toContain('FOLD_COMMIT_SHA: ${{ steps.fold.outputs.final_sha }}');
-    // Inline assignments must not appear in the script body — any quote style.
-    expect(raw).not.toContain("FOLDED_ENTRIES='${{ steps.fold.outputs.folded_entries }}'");
-    expect(raw).not.toContain('FOLDED_ENTRIES="${{ steps.fold.outputs.folded_entries }}"');
-    // Injection regression: no ${{ }} expression for folded_entries should be assigned inline
-    // (catches break-out regardless of quote style — e.g., developerAlias with embedded quotes).
+  it('does not inline GitHub expression outputs into shell assignments (SEC-1)', () => {
+    expect(raw).not.toContain('${{ steps.fold.outputs.folded_entries }}');
+    expect(raw).not.toContain('${{ steps.fold.outputs.final_sha }}');
     expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\{\{/);
   });
 });

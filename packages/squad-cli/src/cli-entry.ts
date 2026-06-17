@@ -347,6 +347,20 @@ async function main(): Promise<void> {
       console.log(`  COPILOT_SESSION_ID       Session ID for inbox branch naming\n`);
       return;
     }
+    if (cmd === 'install-fold-pipeline') {
+      console.log(`\n${b}squad install-fold-pipeline${r} — Install a fold pipeline into the host repository\n`);
+      console.log(`Usage: squad install-fold-pipeline <github|ado> [--callsign <name>]\n`);
+      console.log(`Installs a repository-root pipeline definition that folds Squad inbox refs into`);
+      console.log(`squad/state/<callsign> branches. Without --callsign, the pipeline discovers`);
+      console.log(`callsigns at run time and folds each callsign independently.\n`);
+      console.log(`Options:`);
+      console.log(`  --callsign <name>  Generate a pipeline scoped to one callsign\n`);
+      console.log(`Prerequisite: the CI service identity must have Contribute, Create branch,`);
+      console.log(`and Force push permission on the host repository (for example,`);
+      console.log(`dev.azure.com/contoso/MyProject) because the job creates and force-updates`);
+      console.log(`squad/state/<callsign> branches.\n`);
+      return;
+    }
     if (cmd === 'assign') {
       console.log(`\n${b}squad assign${r} — Bind this checkout to a registered squad\n`);
       console.log(`Usage: squad assign [<callsign>] [options]\n`);
@@ -1481,11 +1495,13 @@ async function main(): Promise<void> {
   if (cmd === 'install-fold-pipeline') {
     const platform = args[1] as string | undefined;
     if (platform !== 'github' && platform !== 'ado') {
-      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado>`);
+      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado> [--callsign <name>]`);
       return;
     }
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
     const { installFoldPipeline } = await import('./cli/commands/install-fold-pipeline.js');
-    await installFoldPipeline(platform, { cwd: getSquadStartDir() });
+    await installFoldPipeline(platform, { cwd: getSquadStartDir(), callsign });
     return;
   }
 
@@ -1501,7 +1517,6 @@ main().catch(err => {
   }
   process.exit(1);
 });
-
 
 
 

@@ -680,7 +680,8 @@ describe('H2 — assign cold-start stateBranch defaulting', { timeout: 30_000 },
 
 describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
   function setupFoldRegistry(docsRepoDir: string, cloneRoot: string): void {
-    const squadDir = path.join(docsRepoDir, '.squad');
+    const docsRepoRoot = initGitRepo(docsRepoDir);
+    const squadDir = path.join(docsRepoRoot, '.squad');
     fs.mkdirSync(squadDir, { recursive: true });
     vi.mocked(loadRegistryFromDisk).mockReturnValue({
       registry: makeRegistry([{
@@ -836,11 +837,9 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
     expect(ghContent).not.toContain('squad-state');
     // No global inbox glob.
     expect(ghContent).not.toContain("'squad/inbox/**'");
-    // Callsign-namespaced enumeration must be present (H1).
-    expect(ghContent).toContain("'+refs/heads/squad/inbox/team-b/**:refs/remotes/origin/squad/inbox/team-b/**'");
-    expect(ghContent).toContain("'refs/heads/squad/inbox/team-b/*'");
-    // Orphan branch must be namespaced (M4).
-    expect(ghContent).toContain('git checkout --orphan squad/state/team-b');
+    // Scoped mode pins the callsign and state branch without runtime discovery.
+    expect(ghContent).toContain('callsigns="team-b"');
+    expect(ghContent).toContain('STATE_BRANCH="squad/state/team-b"');
 
     // ADO
     const adoDocsDir = makeTmpDir('c8-ado-docs');
@@ -858,11 +857,9 @@ describe('C — install-fold-pipeline --callsign', { timeout: 30_000 }, () => {
     const adoContent = fs.readFileSync(path.join(pipelinesDir, 'fold-squad-state.yml'), 'utf-8');
     expect(adoContent).not.toContain('squad-state');
     expect(adoContent).not.toContain('refs/heads/squad/inbox/*\n');
-    // H1: callsign-namespaced enumeration patterns present.
-    expect(adoContent).toContain("'+refs/heads/squad/inbox/team-b/*:refs/remotes/origin/squad/inbox/team-b/*'");
-    expect(adoContent).toContain("'refs/heads/squad/inbox/team-b/*'");
-    // M4: orphan branch must be namespaced.
-    expect(adoContent).toContain('git checkout --orphan squad/state/team-b');
+    // Scoped mode pins the callsign and state branch without runtime discovery.
+    expect(adoContent).toContain('callsigns="team-b"');
+    expect(adoContent).toContain('STATE_BRANCH="squad/state/team-b"');
   });
 
   it('C7: invalid --callsign exits 1 before writing any file', async () => {
@@ -1201,6 +1198,7 @@ describe('FIDO Edge Tests — adversarial callsign inputs and round-trip', { tim
 
   /** Mock registry wired for installFoldPipeline (docs-repo path derived from entry.path dirname). */
   function setupFoldRegistryLocal(docsRepoDir: string, cloneRoot: string, callsign: string): void {
+    makeMinimalGitRoot(docsRepoDir);
     const squadDir = path.join(docsRepoDir, '.squad');
     fs.mkdirSync(squadDir, { recursive: true });
     vi.mocked(loadRegistryFromDisk).mockReturnValue({

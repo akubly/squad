@@ -19,7 +19,7 @@ const TEMPLATE_PATH = path.join(
 );
 
 const SINGLE_WRITER_COMMENT =
-  '# This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.';
+  '# This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.';
 
 const ADO_VAR_RE = /\$\(([^)]+)\)/g;
 const SAFE_VAR_IDENT = /^[A-Za-z][A-Za-z0-9._]*$/;
@@ -76,6 +76,24 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(raw).toContain('--force-with-lease');
   });
 
+  it('discovers distinct callsigns at run time from live inbox refs', () => {
+    expect(raw).toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+    expect(raw).toContain("sed -nE 's#^[0-9a-f]+\\srefs/heads/squad/inbox/([^/]+)/.*#\\1#p'");
+    expect(raw).toContain('sort -u');
+  });
+
+  it('validates discovered callsigns before using them as branch path components', () => {
+    expect(raw).toContain('^[a-z][a-z0-9-]{1,38}$');
+    expect(raw).toContain('WARNING: Skipping invalid callsign');
+  });
+
+  it('folds into per-callsign state branches, not a flat squad-state branch', () => {
+    expect(raw).toContain('squad/state/$CALLSIGN');
+    expect(raw).toContain('HEAD:refs/heads/${STATE_BRANCH}');
+    expect(raw).not.toContain('refs/heads/squad-state');
+    expect(raw).not.toContain('HEAD:refs/heads/squad-state');
+  });
+
   it('does not contain git merge (uses git read-tree for folding)', () => {
     expect(raw).not.toMatch(/\bgit merge\b/);
   });
@@ -105,16 +123,9 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(identityIdx).toBeLessThan(commitIdx);
   });
 
-  it('publish-history step uses env-binding for FOLDED_ENTRIES (SEC-1)', () => {
-    // SEC-1 fix: ADO macro expressions must be bound via the step env: block, never inlined
-    // into the bash script body. The runner expands the env mapping safely before execution.
-    expect(raw).toContain('FOLDED_ENTRIES: $(foldRefs.foldedEntries)');
-    expect(raw).toContain('FOLD_COMMIT_SHA: $(foldRefs.finalSha)');
-    // No inline assignment in script body — single-quoted or double-quoted forms both forbidden.
-    expect(raw).not.toContain(`FOLDED_ENTRIES='$(foldRefs.foldedEntries)'`);
-    expect(raw).not.toContain(`FOLDED_ENTRIES="$(foldRefs.foldedEntries)"`);
-    // Injection regression: no ADO $() expression for foldedEntries should appear inside a
-    // shell variable assignment (catches any form of inline break-out regardless of quote style).
+  it('does not inline ADO output macros into shell assignments (SEC-1)', () => {
+    expect(raw).not.toContain('$(foldRefs.foldedEntries)');
+    expect(raw).not.toContain('$(foldRefs.finalSha)');
     expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\(foldRefs/);
   });
 

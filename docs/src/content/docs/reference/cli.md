@@ -38,6 +38,7 @@ squad init
 | `squad start [--tunnel] [--port N] [--command cmd]` | Start Copilot with remote phone access via PTY and WebSocket | No |
 | `squad status` | Show which squad is active and why | Yes |
 | `squad doctor` | Validate squad setup integrity and diagnose issues (alias: `heartbeat`) | Yes |
+| `squad install-fold-pipeline <github\|ado> [--callsign <name>]` | Install the fold pipeline definition at the host repository root | Yes |
 | `squad upgrade` | Upgrade Squad-owned files to latest version | Yes |
 | `squad upgrade --state-backend <type>` | Migrate state backend (`orphan`, `two-layer`); installs git hooks automatically | Yes |
 | `squad upgrade --migrate-directory` | Rename legacy `.ai-team/` directory to `.squad/` | Yes |
@@ -239,6 +240,26 @@ squad list
 # Read from a custom registry file
 squad list --registry-path ./tmp/squad-registry.json
 ```
+
+---
+
+### squad install-fold-pipeline
+
+Install the CI definition that folds Squad inbox branches into state branches.
+
+**Synopsis:**
+
+```text
+squad install-fold-pipeline <github|ado> [--callsign <name>]
+```
+
+**Behavior:**
+
+- Writes the definition at the host repository root: `.github/workflows/fold-squad-state.yml` for GitHub or `.azuredevops/fold-squad-state.yml` for ADO.
+- Without `--callsign`, installs one callsign-generic pipeline that discovers inbox callsigns at run time and folds each into `squad/state/<callsign>`.
+- With `--callsign <name>`, installs a scoped pipeline for that callsign only.
+
+**Prerequisite:** the CI service identity must have **Contribute**, **Create branch**, and **Force push** permission on the host repository (for example, `dev.azure.com/contoso/MyProject`) because the fold job creates and force-updates `squad/state/<callsign>` branches.
 
 ---
 

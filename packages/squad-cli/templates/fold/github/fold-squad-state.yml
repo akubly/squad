@@ -1,9 +1,8 @@
 # Squad fold pipeline — GitHub variant
-# Folds Squad inbox branches into the Squad state branch.
+# Folds Squad inbox branches into per-callsign Squad state branches.
 #
 # Trigger: push to any branch under squad/inbox/** (serialized by the single-writer invariant).
-# This pipeline is the sole writer to squad-state. Any concurrent inbox pushes are processed
-# in sorted order so two runs on the same input produce the same squad-state tip SHA.
+# This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
 
 on:
   push:
@@ -20,223 +19,154 @@ jobs:
   fold:
     runs-on: ubuntu-latest
     steps:
-      # This pipeline is the sole writer to squad-state. No other automation or manual push should target this branch.
+      # This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
 
-      # Step 1 — Full-depth checkout (required for ancestry computation and read-tree).
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Step B — Configure git identity (GitHub-hosted runners do not preset user.email/user.name
-      # in git config; git commit steps will fail without this step).
       - name: Configure git identity
         run: |
           git config user.email "squad-fold@noreply"
           git config user.name "Squad Fold Pipeline"
 
-      # Step 2 — Enumerate all remote Squad inbox refs.
-      - name: Enumerate Squad inbox refs
-        id: enum-inbox
-        run: |
-          git fetch origin '+refs/heads/squad/inbox/**:refs/remotes/origin/squad/inbox/**' 2>/dev/null || true
-          INBOX_REFS=$(git ls-remote --heads origin 'refs/heads/squad/inbox/*' | awk '{print $2}')
-          echo "inbox_refs<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$INBOX_REFS" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      # Step 3 — Filter against publish-history.json foldedRefs; skip already-folded refs.
-      # Idempotency key is the inbox ref name (not a timestamp), immune to clock skew.
-      - name: Filter unfolded refs
-        id: filter
-        run: |
-          HISTORY_FILE=".squad/publish-history.json"
-          FOLDED_REFS=""
-          if [ -f "$HISTORY_FILE" ]; then
-            if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
-              echo "::error::$HISTORY_FILE is malformed JSON — aborting to prevent data loss."
-              exit 1
-            fi
-            FOLDED_REFS=$(jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null || true)
-          fi
-
-          UNFOLDED=""
-          while IFS= read -r REF; do
-            [ -z "$REF" ] && continue
-            SHORT_REF="${REF#refs/heads/}"
-            if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
-              echo "  Skipping $REF (already recorded in publish-history.json)"
-              continue
-            fi
-            UNFOLDED="${UNFOLDED}${REF}"$'\n'
-          done <<< "${{ steps.enum-inbox.outputs.inbox_refs }}"
-
-          if [ -z "$UNFOLDED" ]; then
-            echo "No unfolded refs — nothing to do."
-            echo "has_work=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_work=true" >> "$GITHUB_OUTPUT"
-            echo "unfolded_refs<<EOF" >> "$GITHUB_OUTPUT"
-            printf '%s' "$UNFOLDED" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Step 4 — Sort unfolded refs deterministically.
-      # Primary key: timestamp segment <yyyyMMdd-HHmmss> from ref name.
-      # Secondary key: sessionId/developerAlias segment (ASCII lexicographic).
-      # Guarantees two pipeline runs on the same input produce the same squad-state tip SHA.
-      - name: Sort inbox refs
-        id: sort-refs
-        if: steps.filter.outputs.has_work == 'true'
-        run: |
-          SORT_LIST=()
-          while IFS= read -r REF; do
-            [ -z "$REF" ] && continue
-            # Extract timestamp from ref path: squad/inbox/<alias>/<yyyyMMdd-HHmmss>-<sessionId>
-            TS=$(echo "$REF" | grep -oP '\d{8}-\d{6}' || echo "00000000-000000")
-            SESSION=$(echo "$REF" | sed 's|.*/||')
-            SORT_KEY="${TS}"$'\t'"${SESSION}"$'\t'"${REF}"
-            SORT_LIST+=("$SORT_KEY")
-          done <<< "${{ steps.filter.outputs.unfolded_refs }}"
-
-          SORTED_REFS=$(printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f3)
-          echo "sorted_refs<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$SORTED_REFS" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      # Step 5 — Checkout the current squad-state tip (or create orphan if branch is new).
-      - name: Checkout squad-state branch
-        if: steps.filter.outputs.has_work == 'true'
-        run: |
-          if git ls-remote --exit-code origin refs/heads/squad-state >/dev/null 2>&1; then
-            git fetch origin squad-state
-            git checkout -B squad-state origin/squad-state
-          else
-            git checkout --orphan squad-state
-            git rm -rf . >/dev/null 2>&1 || true
-            git commit --allow-empty -m "Initialize Squad state branch"
-          fi
-
-      # Step 6 — For each inbox ref (sorted): apply .squad/ subtree via git read-tree.
-      # Commits use publishedAt from inbox snapshot metadata — NOT pipeline run time —
-      # to keep fold ordering deterministic across retried runs.
-      - name: Fold each inbox ref into squad-state
+      - name: Discover and fold callsigns
         id: fold
-        if: steps.filter.outputs.has_work == 'true'
         run: |
-          FOLD_COMMIT_SHAS=()
-          FOLDED_ENTRIES="[]"
+          callsigns="$(git ls-remote --heads origin 'refs/heads/squad/inbox/*' \
+            | sed -nE 's#^[0-9a-f]+\srefs/heads/squad/inbox/([^/]+)/.*#\1#p' \
+            | sort -u)"
 
-          while IFS= read -r REF; do
-            [ -z "$REF" ] && continue
-            SHORT_REF="${REF#refs/heads/}"
-            echo "  Folding $REF ..."
-
-            # Resolve the ref to a SHA on the remote
-            REF_SHA=$(git ls-remote origin "$REF" | awk '{print $1}')
-            if [ -z "$REF_SHA" ]; then
-              echo "  WARNING: Cannot resolve $REF — skipping."
-              continue
-            fi
-
-            # Fetch the specific inbox ref
-            git fetch origin "+${REF}:refs/fold-tmp/inbox" 2>/dev/null
-
-            # Read publishedAt and developerAlias from the inbox snapshot metadata.
-            # Fallback to epoch if metadata is missing (non-fatal — fold ordering is by ref name).
-            METADATA_SHA=$(git ls-tree refs/fold-tmp/inbox .squad/publish-metadata.json 2>/dev/null | awk '{print $3}')
-            PUB_AT="1970-01-01T00:00:00Z"
-            DEV_ALIAS="unknown"
-            if [ -n "$METADATA_SHA" ]; then
-              META_JSON=$(git cat-file blob "$METADATA_SHA" 2>/dev/null || echo '{}')
-              PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // "1970-01-01T00:00:00Z"')
-              DEV_ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // "unknown"')
-            else
-              echo "  WARNING: Missing .squad/publish-metadata.json on $REF — using defaults."
-            fi
-
-            # Apply only the .squad/ subtree from the inbox snapshot via git read-tree.
-            # git read-tree updates the working tree without creating a merge commit.
-            INBOX_SQUAD_TREE=$(git ls-tree refs/fold-tmp/inbox .squad 2>/dev/null | awk '{print $3}')
-            if [ -z "$INBOX_SQUAD_TREE" ]; then
-              echo "  WARNING: No .squad/ subtree in $REF — skipping."
-              git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
-              continue
-            fi
-
-            git rm -r --cached .squad/ 2>/dev/null || true
-            git read-tree --prefix=.squad/ -u "$INBOX_SQUAD_TREE"
-            git add .squad/
-
-            # Commit with publishedAt from inbox snapshot metadata (not pipeline run time).
-            GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
-              git commit \
-                --author="Squad Fold Pipeline <squad-fold@noreply>" \
-                -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
-
-            FOLD_SHA=$(git rev-parse HEAD)
-            FOLD_COMMIT_SHAS+=("$FOLD_SHA")
-
-            # Accumulate fold record entry
-            ENTRY=$(jq -n \
-              --arg ref "$REF" \
-              --arg sha "$REF_SHA" \
-              --arg alias "$DEV_ALIAS" \
-              --arg pubAt "$PUB_AT" \
-              '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}')
-            FOLDED_ENTRIES=$(echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]')
-
-            git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
-          done <<< "${{ steps.sort-refs.outputs.sorted_refs }}"
-
-          echo "folded_entries<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$FOLDED_ENTRIES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-          FINAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-          echo "final_sha=$FINAL_SHA" >> "$GITHUB_OUTPUT"
-
-      # Step 7 — Update .squad/publish-history.json with a new fold record.
-      - name: Update publish-history.json
-        if: steps.filter.outputs.has_work == 'true'
-        # SEC-1: bind pipeline outputs to env vars; never inline ${{ }} into the script body.
-        env:
-          FOLDED_ENTRIES: ${{ steps.fold.outputs.folded_entries }}
-          FOLD_COMMIT_SHA: ${{ steps.fold.outputs.final_sha }}
-        run: |
-          HISTORY_FILE=".squad/publish-history.json"
-          EXISTING="[]"
-          if [ -f "$HISTORY_FILE" ]; then
-            EXISTING=$(cat "$HISTORY_FILE")
+          if [ -z "$callsigns" ]; then
+            echo "No Squad inbox callsigns discovered — nothing to do."
+            exit 0
           fi
 
-          FOLD_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          for CALLSIGN in $callsigns; do
+            if ! [[ "$CALLSIGN" =~ ^[a-z][a-z0-9-]{1,38}$ ]]; then
+              echo "WARNING: Skipping invalid callsign '$CALLSIGN'."
+              continue
+            fi
 
-          NEW_RECORD=$(jq -n \
-            --arg ts "$FOLD_TS" \
-            --arg sha "$FOLD_COMMIT_SHA" \
-            --argjson entries "$FOLDED_ENTRIES" \
-            '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}')
+            STATE_BRANCH="squad/state/$CALLSIGN"
+            echo "Folding inbox refs for $CALLSIGN into $STATE_BRANCH ..."
 
-          echo "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]' > "$HISTORY_FILE"
-          git add "$HISTORY_FILE"
-          git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
+            if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
+              git fetch origin "$STATE_BRANCH"
+              git checkout -B "$STATE_BRANCH" "origin/$STATE_BRANCH"
+            else
+              git checkout --orphan "$STATE_BRANCH"
+              git rm -rf . >/dev/null 2>&1 || true
+              git commit --allow-empty -m "Initialize Squad state branch for $CALLSIGN"
+            fi
 
-      # Step 8 — Push squad-state with --force-with-lease.
-      # --force-with-lease is mandatory even when branch protection serializes the pipeline.
-      # It is the last line of defense against concurrent pipeline runs clobbering each other.
-      - name: Push squad-state
-        if: steps.filter.outputs.has_work == 'true'
-        run: |
-          git push origin HEAD:refs/heads/squad-state --force-with-lease
+            HISTORY_FILE=".squad/publish-history.json"
+            FOLDED_REFS=""
+            if [ -f "$HISTORY_FILE" ]; then
+              if ! jq empty "$HISTORY_FILE" 2>/dev/null; then
+                echo "::error::$HISTORY_FILE is malformed JSON — aborting to prevent data loss."
+                exit 1
+              fi
+              FOLDED_REFS=$(jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null || true)
+            fi
 
-      # Step 9 — Optional pruning: delete folded Squad inbox refs when DELETE_FOLDED_REFS is true.
-      # Deletion failures are non-fatal — log and continue.
-      - name: Prune folded Squad inbox refs
-        if: steps.filter.outputs.has_work == 'true' && vars.DELETE_FOLDED_REFS == 'true'
-        run: |
-          while IFS= read -r REF; do
-            [ -z "$REF" ] && continue
-            echo "  Deleting folded Squad inbox ref: $REF"
-            git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to delete $REF — continuing."
-          done <<< "${{ steps.sort-refs.outputs.sorted_refs }}"
+            INBOX_REFS=$(git ls-remote --heads origin "refs/heads/squad/inbox/${CALLSIGN}/*" | awk '{print $2}')
+            SORT_LIST=()
+            while IFS= read -r REF; do
+              [ -z "$REF" ] && continue
+              if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
+                echo "  Skipping $REF (already recorded in publish-history.json)"
+                continue
+              fi
+              TS=$(echo "$REF" | grep -oP '\d{8}-\d{6}' || echo "00000000-000000")
+              SESSION=$(echo "$REF" | sed 's|.*/||')
+              SORT_LIST+=("${TS}"$'\t'"${SESSION}"$'\t'"${REF}")
+            done <<< "$INBOX_REFS"
+
+            if [ ${#SORT_LIST[@]} -eq 0 ]; then
+              echo "No unfolded refs for $CALLSIGN — nothing to do."
+              continue
+            fi
+
+            SORTED_REFS=$(printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f3)
+            FOLDED_ENTRIES="[]"
+
+            while IFS= read -r REF; do
+              [ -z "$REF" ] && continue
+              SHORT_REF="${REF#refs/heads/}"
+              echo "  Folding $REF ..."
+
+              REF_SHA=$(git ls-remote origin "$REF" | awk '{print $1}')
+              if [ -z "$REF_SHA" ]; then
+                echo "  WARNING: Cannot resolve $REF — skipping."
+                continue
+              fi
+
+              git fetch origin "+${REF}:refs/fold-tmp/inbox" 2>/dev/null
+
+              METADATA_SHA=$(git ls-tree refs/fold-tmp/inbox .squad/publish-metadata.json 2>/dev/null | awk '{print $3}')
+              PUB_AT="1970-01-01T00:00:00Z"
+              DEV_ALIAS="unknown"
+              if [ -n "$METADATA_SHA" ]; then
+                META_JSON=$(git cat-file blob "$METADATA_SHA" 2>/dev/null || echo '{}')
+                PUB_AT=$(echo "$META_JSON" | jq -r '.publishedAt // "1970-01-01T00:00:00Z"')
+                DEV_ALIAS=$(echo "$META_JSON" | jq -r '.developerAlias // "unknown"')
+              else
+                echo "  WARNING: Missing .squad/publish-metadata.json on $REF — using defaults."
+              fi
+
+              INBOX_SQUAD_TREE=$(git ls-tree refs/fold-tmp/inbox .squad 2>/dev/null | awk '{print $3}')
+              if [ -z "$INBOX_SQUAD_TREE" ]; then
+                echo "  WARNING: No .squad/ subtree in $REF — skipping."
+                git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+                continue
+              fi
+
+              git rm -r --cached .squad/ 2>/dev/null || true
+              git read-tree --prefix=.squad/ -u "$INBOX_SQUAD_TREE"
+              git add .squad/
+
+              GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+                git commit \
+                  --author="Squad Fold Pipeline <squad-fold@noreply>" \
+                  -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
+
+              ENTRY=$(jq -n \
+                --arg ref "$REF" \
+                --arg sha "$REF_SHA" \
+                --arg alias "$DEV_ALIAS" \
+                --arg pubAt "$PUB_AT" \
+                '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}')
+              FOLDED_ENTRIES=$(echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]')
+
+              git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+            done <<< "$SORTED_REFS"
+
+            FINAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+            EXISTING="[]"
+            if [ -f "$HISTORY_FILE" ]; then
+              EXISTING=$(cat "$HISTORY_FILE")
+            fi
+
+            FOLD_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            NEW_RECORD=$(jq -n \
+              --arg ts "$FOLD_TS" \
+              --arg sha "$FINAL_SHA" \
+              --argjson entries "$FOLDED_ENTRIES" \
+              '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}')
+
+            echo "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]' > "$HISTORY_FILE"
+            git add "$HISTORY_FILE"
+            git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
+
+            git push origin HEAD:refs/heads/${STATE_BRANCH} --force-with-lease
+
+            if [ "${DELETE_FOLDED_REFS:-false}" = "true" ]; then
+              while IFS= read -r REF; do
+                [ -z "$REF" ] && continue
+                echo "  Deleting folded Squad inbox ref: $REF"
+                git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to delete $REF — continuing."
+              done <<< "$SORTED_REFS"
+            fi
+          done

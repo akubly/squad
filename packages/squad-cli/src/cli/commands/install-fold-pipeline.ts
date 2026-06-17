@@ -1,8 +1,8 @@
 /**
- * Squad install-fold-pipeline — installs a fold pipeline template into the docs-repo clone.
+ * Squad install-fold-pipeline — installs a fold pipeline template into the host repository.
  *
- * Resolves the docs-repo clone path registry-first (path.dirname(entry.path) from the registry
- * entry matching cwd) then copies the appropriate fold template into the platform's workflow
+ * Resolves the host repository root registry-first (git rev-parse --show-toplevel from
+ * the registry entry matching cwd) then copies the appropriate fold template into the platform's workflow
  * directory. Template source: `.squad-templates/fold/<platform>/fold-squad-state.yml` relative
  * to the CLI package root (5 levels up from this file in both source and compiled output).
  *
@@ -11,7 +11,7 @@
  *   present+match → exit 0; log "already installed and up to date."
  *   present+differ → exit 1 with actionable message naming the path.
  *
- * Fails fast (exit 1) if the target directory does not exist.
+ * Fails fast (exit 1) if the host root cannot be resolved or the target directory does not exist.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -40,17 +40,35 @@ export interface InstallFoldPipelineOptions {
   callsign?: string;
 }
 
-function getRepoRoot(cwd: string): string {
-  return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-    cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
+function tryGetRepoRoot(cwd: string): string | undefined {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveRepoRootOrExit(cwd: string, label: string): string | undefined {
+  const repoRoot = tryGetRepoRoot(cwd);
+  if (repoRoot) {
+    return repoRoot;
+  }
+
+  console.error(
+    `✗ Could not resolve git repository root for ${label}: ${cwd}\n` +
+    `  install-fold-pipeline must target a host clone inside a git work tree.`,
+  );
+  process.exit(1);
+  return undefined;
 }
 
 /**
- * Install the fold pipeline template for the given platform into the docs-repo clone.
+ * Install the fold pipeline template for the given platform into the host repository.
  *
- * Registry-first resolution: derive docs-repo path from path.dirname(entry.path) via
- * loadRegistryFromDisk + normalisedPathKey. config.json is fallback only for unregistered
+ * Registry-first resolution: derive host repository root from the registry entry path via
+ * loadRegistryFromDisk + normalisedPathKey + git rev-parse. config.json is fallback only for unregistered
  * contexts. Never primary when a registry entry matches.
  */
 export async function installFoldPipeline(
@@ -70,34 +88,38 @@ export async function installFoldPipeline(
     return;
   }
 
-  // ── Registry-first docs-repo path resolution ──────────────────────────────
+  // ── Registry-first host root resolution ───────────────────────────────────
   // Exact pattern from runSyncStatus in sync.ts (lines 523–529).
-  const repoRoot = getRepoRoot(cwd);
+  const repoRoot = resolveRepoRootOrExit(cwd, 'current directory');
+  if (!repoRoot) return;
   const { registry } = loadRegistryFromDisk();
   const normalizedRoot = normalisedPathKey(repoRoot);
   const entry = registry?.squads.find(e =>
     e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
   );
 
-  let docsRepoPath: string | undefined;
+  let hostRepoRoot: string | undefined;
   if (entry) {
-    docsRepoPath = path.dirname(entry.path); // entry.path ends in .squad
+    const entryDir = path.dirname(entry.path); // entry.path ends in .squad
+    hostRepoRoot = resolveRepoRootOrExit(entryDir, 'registered host');
+    if (!hostRepoRoot) return;
   }
 
   // Fallback for unregistered/single-repo contexts: read config.json stateLocation
-  if (!docsRepoPath) {
+  if (!hostRepoRoot) {
     const configPath = path.join(repoRoot, '.squad', 'config.json');
     if (fs.existsSync(configPath)) {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
         if (typeof config['stateLocation'] === 'string') {
-          docsRepoPath = config['stateLocation'];
+          hostRepoRoot = resolveRepoRootOrExit(config['stateLocation'], 'configured stateLocation');
+          if (!hostRepoRoot) return;
         }
       } catch { /* ignore */ }
     }
   }
 
-  if (!docsRepoPath) {
+  if (!hostRepoRoot) {
     console.error(
       `✗ Could not resolve shared-squad host clone path. Run 'squad assign' to register a host clone.`,
     );
@@ -107,8 +129,8 @@ export async function installFoldPipeline(
 
   // ── Platform → target directory mapping ───────────────────────────────────
   const platformDirMap: Record<'github' | 'ado', string> = {
-    github: path.join(docsRepoPath, '.github', 'workflows'),
-    ado: path.join(docsRepoPath, '.azuredevops'),
+    github: path.join(hostRepoRoot, '.github', 'workflows'),
+    ado: path.join(hostRepoRoot, '.azuredevops'),
   };
   const targetDir = platformDirMap[platform];
 
@@ -138,36 +160,29 @@ export async function installFoldPipeline(
 
   // ── Callsign parameterization ─────────────────────────────────────────────
   // When --callsign is provided, scope the trigger glob and fold target to this squad.
-  // When absent, emit the template verbatim for backward compatibility.
+  // When absent, emit the callsign-generic template verbatim.
   let templateContent: string;
   if (callsign) {
     if (platform === 'github') {
       templateContent = rawTemplate
         // Scope trigger glob (on.push.branches) to this callsign's inbox prefix.
         .replace(/- 'squad\/inbox\/\*\*'/g, `- 'squad/inbox/${callsign}/**'`)
-        // H1: scope Step-2 enumeration fetch refspec — was fetching all squads' inbox refs.
-        .replace(
-          /'\+refs\/heads\/squad\/inbox\/\*\*:refs\/remotes\/origin\/squad\/inbox\/\*\*'/g,
-          `'+refs/heads/squad/inbox/${callsign}/**:refs/remotes/origin/squad/inbox/${callsign}/**'`,
-        )
-        // H1: scope Step-2 ls-remote pattern to this callsign namespace.
+        .replace(/callsigns="\$\(git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u\)"/,
+          `callsigns="${callsign}"`)
+        .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
+        // Scope any remaining inbox ref patterns to this callsign namespace.
         .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
-        // Replace all remaining bare `squad-state` tokens (step names, comments, git commands,
-        // refs). This covers M4 (--orphan), the push target, fetch, ls-remote, checkout -B, etc.
         .replace(/squad-state/g, `squad/state/${callsign}`);
     } else {
       // ADO
       templateContent = rawTemplate
         // Scope trigger branch include to this callsign's inbox prefix.
         .replace(/- refs\/heads\/squad\/inbox\/\*/g, `- refs/heads/squad/inbox/${callsign}/*`)
-        // H1: scope Step-2 enumeration fetch refspec.
-        .replace(
-          /'\+refs\/heads\/squad\/inbox\/\*:refs\/remotes\/origin\/squad\/inbox\/\*'/g,
-          `'+refs/heads/squad/inbox/${callsign}/*:refs/remotes/origin/squad/inbox/${callsign}/*'`,
-        )
-        // H1: scope Step-2 ls-remote pattern to this callsign namespace.
+        .replace(/callsigns="`git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u`"/,
+          `callsigns="${callsign}"`)
+        .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
+        // Scope any remaining inbox ref patterns to this callsign namespace.
         .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
-        // Replace all remaining bare `squad-state` tokens (display names, comments, git commands).
         .replace(/squad-state/g, `squad/state/${callsign}`);
     }
   } else {

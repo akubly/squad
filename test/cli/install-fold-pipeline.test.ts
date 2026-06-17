@@ -1,9 +1,10 @@
 /**
  * Tests for installFoldPipeline (sub-proposal C).
  *
- * Covers: github/ado platform args copy templates to correct paths; idempotent
+ * Covers: github/ado platform args copy templates to repo-root paths; idempotent
  * re-run exits 0; conflict guard exits 1 with path in message; missing target
- * directory exits 1; registry-first docs-path resolution (not config.json-primary).
+ * directory exits 1; registry-first docs-path resolution (not config.json-primary),
+ * and callsign-generic default pipeline generation.
  */
 
 // ─── Registry mock ───────────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ import {
   installFoldPipeline,
   type InstallFoldPipelineOptions,
 } from '../../packages/squad-cli/src/cli/commands/install-fold-pipeline.js';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -74,8 +77,7 @@ afterEach(() => {
 
 // ─── Helper: set up a registry entry pointing at a docs-repo clone ────────────
 
-function setupRegistryEntry(docsRepoDir: string, cloneRoot: string): void {
-  const squadDir = path.join(docsRepoDir, '.squad');
+function setupRegistryEntryForSquadDir(squadDir: string, cloneRoot: string): void {
   fs.mkdirSync(squadDir, { recursive: true });
 
   vi.mocked(loadRegistryFromDisk).mockReturnValue({
@@ -91,10 +93,15 @@ function setupRegistryEntry(docsRepoDir: string, cloneRoot: string): void {
   });
 
   // normalisedPathKey: return canonical path for both cloneRoot and squadDir
-  const normalizedClone = cloneRoot.toLowerCase().replace(/\\/g, '/');
   vi.mocked(normalisedPathKey).mockImplementation((p: string) =>
     p.toLowerCase().replace(/\\/g, '/'),
   );
+}
+
+function setupRegistryEntry(docsRepoDir: string, cloneRoot: string): string {
+  const docsRepoRoot = initGitRepo(docsRepoDir);
+  setupRegistryEntryForSquadDir(path.join(docsRepoRoot, '.squad'), cloneRoot);
+  return docsRepoRoot;
 }
 
 // ─── Tests: github platform ───────────────────────────────────────────────────
@@ -107,11 +114,11 @@ describe('github platform', () => {
     const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
     fs.mkdirSync(workflowsDir, { recursive: true });
 
-    setupRegistryEntry(docsRepoDir, cloneRoot);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
 
     await installFoldPipeline('github', { cwd: cloneDir });
 
-    const dest = path.join(workflowsDir, 'fold-squad-state.yml');
+    const dest = path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml');
     expect(fs.existsSync(dest)).toBe(true);
     expect(fs.readFileSync(dest, 'utf-8').length).toBeGreaterThan(0);
   });
@@ -123,18 +130,18 @@ describe('github platform', () => {
     const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
     fs.mkdirSync(workflowsDir, { recursive: true });
 
-    setupRegistryEntry(docsRepoDir, cloneRoot);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
 
     await installFoldPipeline('github', { cwd: cloneDir });
     const contentAfterFirst = fs.readFileSync(
-      path.join(workflowsDir, 'fold-squad-state.yml'),
+      path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'),
       'utf-8',
     );
 
     // Second run — should be a no-op
     await installFoldPipeline('github', { cwd: cloneDir });
     const contentAfterSecond = fs.readFileSync(
-      path.join(workflowsDir, 'fold-squad-state.yml'),
+      path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'),
       'utf-8',
     );
 
@@ -202,7 +209,7 @@ describe('ado platform', () => {
     const pipelinesDir = path.join(docsRepoDir, '.azuredevops');
     fs.mkdirSync(pipelinesDir, { recursive: true });
 
-    setupRegistryEntry(docsRepoDir, cloneRoot);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -211,7 +218,7 @@ describe('ado platform', () => {
       consoleSpy.mockRestore();
     }
 
-    const dest = path.join(pipelinesDir, 'fold-squad-state.yml');
+    const dest = path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml');
     expect(fs.existsSync(dest)).toBe(true);
     expect(fs.readFileSync(dest, 'utf-8').length).toBeGreaterThan(0);
   });
@@ -260,16 +267,156 @@ describe('registry-first docs-repo path resolution', () => {
     );
 
     // Registry entry points to the correct docsRepoDir
-    setupRegistryEntry(docsRepoDir, cloneRoot);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
 
     await installFoldPipeline('github', { cwd: cloneDir });
 
     // File must be written to the registry-derived path, not the config.json path
     const dest = path.join(workflowsDir, 'fold-squad-state.yml');
     expect(fs.existsSync(dest)).toBe(true);
+    expect(dest.toLowerCase().replace(/\\/g, '/').startsWith(docsRepoRoot.toLowerCase().replace(/\\/g, '/'))).toBe(true);
 
     // Wrong path must NOT have been written
     const wrongDest = path.join(wrongDocsDir, '.github', 'workflows', 'fold-squad-state.yml');
     expect(fs.existsSync(wrongDest)).toBe(false);
+  });
+});
+
+describe('repo-root target resolution', () => {
+  it('A1: nested .squad entry writes GitHub workflow under the git repository root', async () => {
+    const hostRepoDir = makeTmpDir('host-nested-gh');
+    const hostRoot = initGitRepo(hostRepoDir);
+    const cloneDir = makeTmpDir('clone-nested-gh');
+    const cloneRoot = initGitRepo(cloneDir);
+    const nestedSquadDir = path.join(hostRoot, 'alpha-host', '.squad');
+    fs.mkdirSync(path.join(hostRoot, '.github', 'workflows'), { recursive: true });
+
+    setupRegistryEntryForSquadDir(nestedSquadDir, cloneRoot);
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    const rootDest = path.join(hostRoot, '.github', 'workflows', 'fold-squad-state.yml');
+    const nestedDest = path.join(hostRoot, 'alpha-host', '.github', 'workflows', 'fold-squad-state.yml');
+    expect(fs.existsSync(rootDest)).toBe(true);
+    expect(fs.existsSync(nestedDest)).toBe(false);
+  });
+
+  it('A2: root-level .squad entry keeps the GitHub workflow path unchanged', async () => {
+    const hostRepoDir = makeTmpDir('host-root-gh');
+    const hostRoot = initGitRepo(hostRepoDir);
+    const cloneDir = makeTmpDir('clone-root-gh');
+    const cloneRoot = initGitRepo(cloneDir);
+    fs.mkdirSync(path.join(hostRoot, '.github', 'workflows'), { recursive: true });
+
+    setupRegistryEntryForSquadDir(path.join(hostRoot, '.squad'), cloneRoot);
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    expect(fs.existsSync(path.join(hostRoot, '.github', 'workflows', 'fold-squad-state.yml'))).toBe(true);
+  });
+
+  it('A3: non-git host entry exits 1 and writes no pipeline file', async () => {
+    const hostDir = makeTmpDir('host-nongit-gh');
+    const cloneDir = makeTmpDir('clone-nongit-gh');
+    const cloneRoot = initGitRepo(cloneDir);
+    fs.mkdirSync(path.join(hostDir, '.github', 'workflows'), { recursive: true });
+    setupRegistryEntryForSquadDir(path.join(hostDir, '.squad'), cloneRoot);
+    const oldCeiling = process.env['GIT_CEILING_DIRECTORIES'];
+    process.env['GIT_CEILING_DIRECTORIES'] = path.dirname(hostDir);
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(installFoldPipeline('github', { cwd: cloneDir })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errOutput = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(errOutput).toContain('git repository root');
+      expect(fs.existsSync(path.join(hostDir, '.github', 'workflows', 'fold-squad-state.yml'))).toBe(false);
+    } finally {
+      if (oldCeiling === undefined) {
+        delete process.env['GIT_CEILING_DIRECTORIES'];
+      } else {
+        process.env['GIT_CEILING_DIRECTORIES'] = oldCeiling;
+      }
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+});
+
+describe('callsign-generic generated pipeline', () => {
+  it('B1: default GitHub output discovers callsigns and avoids the flat squad-state target', async () => {
+    const docsRepoDir = makeTmpDir('docs-gh-generic');
+    const cloneDir = makeTmpDir('clone-gh-generic');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain("- 'squad/inbox/**'");
+    expect(yaml).toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+    expect(yaml).toContain("sed -nE 's#^[0-9a-f]+\\srefs/heads/squad/inbox/([^/]+)/.*#\\1#p'");
+    expect(yaml).toContain('sort -u');
+    expect(yaml).toContain('squad/state/$CALLSIGN');
+    expect(yaml).toContain('^[a-z][a-z0-9-]{1,38}$');
+    expect(yaml).not.toContain('refs/heads/squad-state');
+    expect(yaml).not.toContain('git push origin HEAD:refs/heads/squad-state');
+  });
+
+  it('B2: default ADO output is batched, discovers callsigns, and avoids the flat squad-state target', async () => {
+    const docsRepoDir = makeTmpDir('docs-ado-generic');
+    const cloneDir = makeTmpDir('clone-ado-generic');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    await installFoldPipeline('ado', { cwd: cloneDir });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('batch: true');
+    expect(yaml).toContain('- refs/heads/squad/inbox/*');
+    expect(yaml).toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+    expect(yaml).toContain("sed -nE 's#^[0-9a-f]+\\srefs/heads/squad/inbox/([^/]+)/.*#\\1#p'");
+    expect(yaml).toContain('sort -u');
+    expect(yaml).toContain('squad/state/$CALLSIGN');
+    expect(yaml).not.toContain('refs/heads/squad-state');
+    expect(yaml).not.toContain('git push origin HEAD:refs/heads/squad-state');
+  });
+
+  it('B3: --callsign GitHub output remains scoped to one callsign', async () => {
+    const docsRepoDir = makeTmpDir('docs-gh-scoped');
+    const cloneDir = makeTmpDir('clone-gh-scoped');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir, callsign: 'alpha-team' });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain("- 'squad/inbox/alpha-team/**'");
+    expect(yaml).toContain("callsigns=\"alpha-team\"");
+    expect(yaml).toContain('squad/state/alpha-team');
+    expect(yaml).not.toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
+  });
+
+  it('B4: --callsign ADO output remains scoped to one callsign', async () => {
+    const docsRepoDir = makeTmpDir('docs-ado-scoped');
+    const cloneDir = makeTmpDir('clone-ado-scoped');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    await installFoldPipeline('ado', { cwd: cloneDir, callsign: 'alpha-team' });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('- refs/heads/squad/inbox/alpha-team/*');
+    expect(yaml).toContain("callsigns=\"alpha-team\"");
+    expect(yaml).toContain('squad/state/alpha-team');
+    expect(yaml).not.toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
   });
 });
