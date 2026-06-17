@@ -93,6 +93,34 @@ mechanism) so it runs the same CLI version that wrote it.
 
 **Source class:** post-commit hook invokes bare `squad`.
 
+### Piece 46 — State-remote resolution hardening and pull/push transport coverage
+
+**Intent.** Piece 43 resolves the cross-repo state remote from the team-root host, but the
+underlying remote resolver still falls back to a literal `origin` string without confirming
+that remote exists. On a host clone configured with a single differently named remote (or
+none) and no branch tracking, resolution can name a non-existent `origin` instead of the
+obvious sole remote. Harden the resolver and close the cross-repo transport test gap left by
+piece 43 (whose pull/push tests assert argument plumbing against a mocked transport rather
+than real git fetch/push behavior).
+
+**Candidate outcomes (assertion-shaped).**
+- The state-remote resolver prefers the branch's tracking remote; else, when exactly one
+  remote is configured, it selects that remote; else `origin` only when `origin` actually
+  exists; else it fails with an actionable error directing the operator to set `stateRemote`.
+- A cross-repo `sync --pull` against a real bare state remote whose branch is named
+  `squad/state/<callsign>` hydrates `.squad` files into the team-root (real fetch, not a
+  mocked transport).
+- A cross-repo `sync --push` against a real bare host remote that is **not** named `origin`
+  publishes the inbox ref to that remote.
+- The state-branch derivation returns the flat `squad-state` fallback for every invalid
+  callsign shape (uppercase, underscore, dot, leading digit, over-length), covered by a
+  focused unit test.
+
+**Source classes:** literal-`origin` fallback in the remote resolver; piece-43 transport
+tests assert plumbing against mocks, not real fetch/push; invalid-callsign fallback lacks
+direct coverage. (Accepted from the piece-43 adversarial review; deferred out of piece 43 to
+avoid reopening shipped scope and to keep the shared resolver change isolated.)
+
 ---
 
 ## Operational follow-ups (host actions, not stack pieces)
