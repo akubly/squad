@@ -35,7 +35,9 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 
 ---
 
-## Specced in piece 42 (specced — ready for Phase B)
+## Specced (design on the spec branch — ready for Phase B)
+
+### Piece 42 — Fold subtree overlay and serialization
 
 `docs/proposals/upstream-bradygaster/42-fold-subtree-overlay-and-serialization.md`
 
@@ -44,30 +46,20 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | A (Tier 1) | Replace the `.squad/` subtree placement (`read-tree --prefix=.squad/`, which fails once the state branch already contains `.squad/`) with a `git archive | tar -x` overlay that excludes the pipeline-owned `publish-history.json` |
 | B (Tier 2, decision) | Run-level serialization of the Azure DevOps fold — exclusive-lock Environment (recommended, onboarding cost) vs. retain `batch: true` + `--force-with-lease` |
 
+### Piece 43 — Cross-repo state remote and branch resolution
+
+`docs/proposals/upstream-bradygaster/43-cross-repo-state-remote-and-branch-resolution.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Resolve the cross-repo `sync --pull` state remote from the registry/team-root host (entry `stateRemote`, else the host clone's remote), never the code clone's origin |
+| B (Tier 1) | When a registry entry has no explicit `stateBranch` but carries a callsign, derive `squad/state/<callsign>` (the pipeline's namespaced target) via the existing `CALLSIGN_RE` instead of the flat legacy branch |
+| C (Tier 1) | A cross-repo `sync --pull` no longer runs the in-clone fetch against the code clone (no misleading "no remote squad-state refs" warning); hydration from the state ref is the sole source |
+| D (Tier 2, decision) | Fallback when an entry has neither `stateBranch` nor a callsign — retain the flat `squad-state` legacy default (recommended) vs. fail fast with a teaching error |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
-
-### Piece 43 — Cross-repo state remote and branch resolution
-
-**Intent.** When the squad **state host** repository is different from the **code clone**'s
-origin (the common split: code lives in one repo, squad state is published to another),
-`sync --pull` must resolve both the state *remote* and the `squad/state/<callsign>` *branch*
-from the registry / team-root host, not from the code clone's origin. Today a cross-repo
-pull can resolve the remote from the wrong origin and can fall back to a legacy flat state
-branch when the registry entry predates callsign-namespaced state.
-
-**Candidate outcomes (assertion-shaped).**
-- `sync --pull` resolves the state remote from the registry/team-root host origin, not from
-  the code clone's origin.
-- When a registry entry has no explicit `stateBranch`, `sync --pull` derives
-  `squad/state/<callsign>` (matching the pipeline's namespaced target) instead of a flat
-  legacy branch.
-- A cross-repo `sync --pull` no longer runs the in-clone publish path against the code
-  clone (no misleading warning); the authoritative hydration is from the state ref.
-
-**Source classes:** state-remote-from-clone-origin; missing callsign→state-branch
-derivation; legacy registry entry without `stateBranch`.
 
 ### Piece 44 — Pipeline-file injection hygiene on shared hosts
 
