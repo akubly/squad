@@ -123,12 +123,29 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(identityIdx).toBeLessThan(commitIdx);
   });
 
-  it('fold loop has git rm --cached .squad/ before git read-tree (D)', () => {
-    const rmIdx = raw.indexOf('git rm -r --cached .squad/ 2>/dev/null || true');
-    const readTreeIdx = raw.indexOf('git read-tree --prefix=.squad/ -u');
-    expect(rmIdx).toBeGreaterThan(-1);
-    expect(readTreeIdx).toBeGreaterThan(-1);
-    expect(rmIdx).toBeLessThan(readTreeIdx);
+  it('overlays the inbox .squad tree with git archive | tar, not read-tree --prefix (A)', () => {
+    expect(raw).toContain('git archive refs/fold-tmp/inbox .squad');
+    expect(raw).toContain("tar -x --exclude='.squad/publish-history.json'");
+    // The bind-style placement must be gone — it fails on a populated .squad/.
+    expect(raw).not.toContain('git read-tree --prefix=.squad/');
+    expect(raw).not.toContain('git rm -r --cached .squad/');
+  });
+
+  it('excludes the pipeline-owned publish-history.json from the inbox overlay (A)', () => {
+    expect(raw).toContain("--exclude='.squad/publish-history.json'");
+  });
+
+  it('still resolves and guards on INBOX_SQUAD_TREE before the overlay (A)', () => {
+    expect(raw).toContain('INBOX_SQUAD_TREE=$(git ls-tree refs/fold-tmp/inbox .squad');
+    expect(raw).toContain('No .squad/ subtree in $REF — skipping.');
+  });
+
+  it('leaves run serialization to the piece-41 concurrency group (B leaves GitHub unchanged)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    const concurrency = parsed['concurrency'] as Record<string, unknown> | undefined;
+    expect(concurrency).toBeDefined();
+    expect(concurrency!['group']).toBe('fold-squad-state');
+    expect(concurrency!['cancel-in-progress']).toBe(false);
   });
 
   it('does not inline GitHub expression outputs into shell assignments (SEC-1)', () => {

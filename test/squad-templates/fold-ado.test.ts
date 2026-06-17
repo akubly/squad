@@ -129,11 +129,32 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\(foldRefs/);
   });
 
-  it('fold loop has git rm --cached .squad/ before git read-tree (D)', () => {
-    const rmIdx = raw.indexOf('git rm -r --cached .squad/ 2>/dev/null || true');
-    const readTreeIdx = raw.indexOf('git read-tree --prefix=.squad/ -u');
-    expect(rmIdx).toBeGreaterThan(-1);
-    expect(readTreeIdx).toBeGreaterThan(-1);
-    expect(rmIdx).toBeLessThan(readTreeIdx);
+  it('overlays the inbox .squad tree with git archive | tar, not read-tree --prefix (A)', () => {
+    expect(raw).toContain('git archive refs/fold-tmp/inbox .squad');
+    expect(raw).toContain("tar -x --exclude='.squad/publish-history.json'");
+    // The bind-style placement must be gone — it fails on a populated .squad/.
+    expect(raw).not.toContain('git read-tree --prefix=.squad/');
+    expect(raw).not.toContain('git rm -r --cached .squad/');
+  });
+
+  it('excludes the pipeline-owned publish-history.json from the inbox overlay (A)', () => {
+    expect(raw).toContain("--exclude='.squad/publish-history.json'");
+  });
+
+  it('still resolves and guards on INBOX_SQUAD_TREE before the overlay (A)', () => {
+    expect(raw).toContain('INBOX_SQUAD_TREE=`git ls-tree refs/fold-tmp/inbox .squad');
+    expect(raw).toContain('No .squad/ subtree in $REF — skipping.');
+  });
+
+  it('serializes fold runs through an exclusive lock on a protected resource (B1)', () => {
+    expect(raw).toContain('lockBehavior: sequential');
+    expect(raw).toContain('environment: squad-fold');
+  });
+
+  it('retains batch coalescing and the force-with-lease backstop alongside the lock (B1)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    const trigger = parsed['trigger'] as Record<string, unknown>;
+    expect(trigger['batch']).toBe(true);
+    expect(raw).toContain('--force-with-lease');
   });
 });

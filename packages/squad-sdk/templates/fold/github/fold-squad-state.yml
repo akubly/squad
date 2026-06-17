@@ -131,8 +131,8 @@ jobs:
                 continue
               fi
 
-              git rm -r --cached .squad/ 2>/dev/null || true
-              git read-tree --prefix=.squad/ -u "$INBOX_SQUAD_TREE"
+              git archive refs/fold-tmp/inbox .squad \
+                | tar -x --exclude='.squad/publish-history.json'
               git add .squad/
 
               GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \

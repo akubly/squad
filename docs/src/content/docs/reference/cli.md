@@ -261,6 +261,8 @@ squad install-fold-pipeline <github|ado> [--callsign <name>]
 
 **Prerequisite:** the CI service identity must have **Contribute**, **Create branch**, and **Force push** permission on the host repository (for example, `dev.azure.com/contoso/MyProject`) because the fold job creates and force-updates `squad/state/<callsign>` branches.
 
+**Azure DevOps run serialization:** the ADO fold pipeline runs as a stage with `lockBehavior: sequential` that references a protected Environment named `squad-fold`, so queued runs serialize through an exclusive lock and the fetch→fold→push critical section for a `squad/state/<callsign>` branch never overlaps across runs (`trigger.batch: true` still coalesces bursts and `--force-with-lease` remains the integrity backstop). As a one-time onboarding step, create the `squad-fold` Environment in your project (for example, under `dev.azure.com/contoso/MyProject`), add an **Exclusive lock** check to it, and grant the pipeline permission to use it. The GitHub workflow serializes runs through its `concurrency` group and needs no additional setup.
+
 ---
 
 ### squad doctor (lifecycle flags)
