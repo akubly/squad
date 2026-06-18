@@ -76,39 +76,24 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | A (Tier 1) | The cross-repo post-commit hook resolves the CLI entrypoint at install time (`process.execPath` + the `cli-entry` located via `fileURLToPath(import.meta.url)`) and embeds a `<node> <cli-entry> sync --push --quiet` invocation — POSIX-shell-quoted and Windows-absolute-path-safe — in both host and product variants via builder functions, instead of a bare `squad` resolved from the global `PATH`, so the hook runs the same CLI build that installed it; the `SQUAD_SYNC_ACTIVE` guard, host `.squad/`-filter, and marker idempotency are preserved |
 | B (Tier 2, decision) | Fallback when the entrypoint cannot be resolved at install time — resolve-with-fallback-to-bare-`squad` so the install never breaks (recommended) vs. hard-require a resolved entrypoint |
 
----
-
-## Planned (candidate pieces — no spec yet)
-
 ### Piece 46 — State-remote resolution hardening and pull/push transport coverage
 
-**Intent.** Piece 43 resolves the cross-repo state remote from the team-root host, but the
-underlying remote resolver still falls back to a literal `origin` string without confirming
-that remote exists. On a host clone configured with a single differently named remote (or
-none) and no branch tracking, resolution can name a non-existent `origin` instead of the
-obvious sole remote. Harden the resolver and close the cross-repo transport test gap left by
-piece 43 (whose pull/push tests assert argument plumbing against a mocked transport rather
-than real git fetch/push behavior).
+`docs/proposals/upstream-bradygaster/46-state-remote-resolution-hardening-and-transport-coverage.md`
 
-**Candidate outcomes (assertion-shaped).**
-- The state-remote resolver prefers the branch's tracking remote; else, when exactly one
-  remote is configured, it selects that remote; else `origin` only when `origin` actually
-  exists; else it fails with an actionable error directing the operator to set `stateRemote`.
-- A cross-repo `sync --pull` against a real bare state remote whose branch is named
-  `squad/state/<callsign>` hydrates `.squad` files into the team-root (real fetch, not a
-  mocked transport).
-- A cross-repo `sync --push` against a real bare host remote that is **not** named `origin`
-  publishes the inbox ref to that remote.
-- The state-branch derivation returns the flat `squad-state` fallback for every invalid
-  callsign shape (uppercase, underscore, dot, leading digit, over-length), covered by a
-  focused unit test.
-
-**Source classes:** literal-`origin` fallback in the remote resolver; piece-43 transport
-tests assert plumbing against mocks, not real fetch/push; invalid-callsign fallback lacks
-direct coverage. (Accepted from the piece-43 adversarial review; deferred out of piece 43 to
-avoid reopening shipped scope and to keep the shared resolver change isolated.)
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Harden `resolveRemote(cwd)` to a deterministic precedence — the branch's tracking remote; else, when exactly one remote is configured, that remote; else `origin` only when `origin` actually exists; else fail with an actionable `SquadError` directing the operator to set `stateRemote` — instead of silently returning a literal `origin` that may not exist; every call site is kept intact and a cross-repo sync does not throw on an unrelated code-clone remote |
+| B (Tier 1) | New integration test: a cross-repo `sync --pull` against a REAL bare state remote whose branch is `squad/state/<callsign>` (derived from the callsign, no explicit `stateBranch`) hydrates `.squad` files into the team-root via a real git fetch — `_transport` is not mocked |
+| C (Tier 1) | New integration test: a cross-repo `sync --push` against a REAL bare host remote that is NOT named `origin` (remote resolved per A, no explicit `stateRemote`) publishes the inbox ref to that remote via a real git push — `_transport` is not mocked |
+| D (Tier 1) | Focused unit test pinning `deriveStateBranch`'s flat `squad-state` fallback for every invalid callsign shape (uppercase, underscore, dot, leading digit, over-length); `deriveStateBranch` is unchanged (coverage only) |
+| E (Tier 2, decision) | Ambiguous resolution (no tracking remote, no `origin`, more than one remote) — fail with an actionable error naming `stateRemote` (recommended) vs. fall back to the first-listed remote |
 
 ---
+
+## Planned (candidate pieces — no spec yet)
+
+None. Piece 46 was the last planned piece on this stack and is now specced (above); there is
+no piece 47.
 
 ## Operational follow-ups (host actions, not stack pieces)
 
