@@ -33,7 +33,7 @@ This proposal delivers the squad command surface for registry-backed resolution 
 | 20 | CLI reference + shared-squad guide | 10 | 19 | 5 | | CLI help text + `shared-squad.md` update for command surface |
 | 38 | Multi-clone publish model & Tier-2 completion | x-repo | 26–37 | ~30 | | Decoupled publish trigger/source; hooks in both clones (host filter-out via `diff-tree --root` + product unfiltered); product `.squad/`-forbid pre-commit guard; orphan-backend enum reconciliation + enforcement; inbox-handle rename (J); sync-from-host guard (M); handle-from-host (K); inbox-prefix doc (L); dual-role registration (N). Dual-package `patch`. |
 
-**Totals:** 23 PRs, ~132 unique files, 2 breaking changes (pieces 13, 16). (The cross-repo arc — pieces 21–37 — is tracked in each piece's spec file and `_planning/cross-repo-staged-plan.md`, not in this table; piece 38 is listed here as the arc's Tier-2 completion entry.)
+**Totals:** 23 PRs, ~132 unique files, 2 breaking changes (pieces 13, 16). (The cross-repo arc — pieces 21–37 — is tracked in each piece's spec file and `_planning/cross-repo-staged-plan.md`, not in this table; piece 38 is listed here as the arc's Tier-2 completion entry. The dogfood-driven extension — pieces 41–47, hardening the fold pipeline and cross-repo transport — is tracked in [`_planning/dogfood-backlog.md`](_planning/dogfood-backlog.md), not in this table; the stack is not closed at 38 or at any later piece, and new pieces are added there as dogfood cycles surface them.)
 
 ## Contribution Constraints
 

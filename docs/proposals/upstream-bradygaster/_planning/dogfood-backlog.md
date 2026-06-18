@@ -88,12 +88,25 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | D (Tier 1) | Focused unit test pinning `deriveStateBranch`'s flat `squad-state` fallback for every invalid callsign shape (uppercase, underscore, dot, leading digit, over-length); `deriveStateBranch` is unchanged (coverage only) |
 | E (Tier 2, decision) | Ambiguous resolution (no tracking remote, no `origin`, more than one remote) — fail with an actionable error naming `stateRemote` (recommended) vs. fall back to the first-listed remote |
 
+### Piece 47 — Monorepo team-root git-dir resolution and sync registry robustness
+
+`docs/proposals/upstream-bradygaster/47-monorepo-gitdir-and-sync-registry-robustness.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Resolve the team root's real git directory via `git rev-parse --absolute-git-dir` (cwd = teamRoot) and place the isolated publish index inside it in `publishTeamRootToInbox`, instead of assuming a literal `<teamRoot>/.git` — fixes a live-reproduced monorepo `--push` failure where the team root is a subdirectory and the real `.git` is at the repo root |
+| B (Tier 1) | Use that same resolved git directory as the `--git-dir` for the `ls-tree` / `cat-file` calls in `hydrateTeamRootFromStateRef` (the pull-side sibling of A) so a monorepo subdirectory team root hydrates correctly |
+| C (Tier 1) | Thread `--registry-path` through `sync` into every `loadRegistryFromDisk({ registryPath })` call (the SDK helper already accepts it and `init` honours it; `sync` currently ignores it and always reads the default registry); default behaviour unchanged when absent |
+| D (Tier 2, decision) | `SQUAD_TEAM_ROOT` override + registry-sourced callsign/state — augment the override from a matching registry entry (best-effort, env-only fallback when none matches; recommended) vs. add explicit `--callsign`/state flags to `sync`, so a cross-repo `--push` from an env-overridden team root no longer fails the callsign guard |
+
 ---
-
+
 ## Planned (candidate pieces — no spec yet)
 
-None. Piece 46 was the last planned piece on this stack and is now specced (above); there is
-no piece 47.
+None currently. Piece 46 closed the originally-planned stack; piece 47 reopened it from a
+fresh dogfooding pass (a live-reproduced monorepo team-root transport defect plus two sync
+registry-resolution gaps) and is now specced (above). Further pieces are added here as new
+dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
 
