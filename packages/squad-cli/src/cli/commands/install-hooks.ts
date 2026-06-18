@@ -12,6 +12,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
@@ -112,38 +113,128 @@ fi
 
 export interface InstallHooksOptions {
   force?: boolean;
+  /**
+   * @internal Test seam — inject a known post-commit sync invocation instead of
+   * resolving it from the running process (see .squad/decisions/inbox/piece-45-triage.md).
+   * Mirrors the `_installCrossRepoHookFn` seam convention in commands/assign.ts.
+   */
+  _squadInvocation?: string;
+}
+
+/**
+ * Convert a filesystem path to a POSIX/MSYS form safe for embedding in a
+ * `#!/bin/sh` script run by git's sh (Git Bash / MSYS on Windows). A Windows
+ * drive path (`C:\foo bar\node.exe`) becomes `/c/foo bar/node.exe`; a POSIX path
+ * is returned unchanged. Conversion is driven by the path shape (a drive-letter /
+ * backslash path is converted) so it is deterministic regardless of the host the
+ * install runs on.
+ */
+function toPosixShPath(p: string): string {
+  const slashed = p.replace(/\\/g, '/');
+  return slashed.replace(/^([A-Za-z]):\//, (_m, d: string) => `/${d.toLowerCase()}/`);
+}
+
+/** Single-quote a string for POSIX sh, escaping any embedded single quotes. */
+function shSingleQuote(s: string): string {
+  return `'${s.split("'").join("'\\''")}'`;
+}
+
+/**
+ * Resolve the CLI entry script of the running process so an installed hook can
+ * re-run the same CLI build that wrote it. Probes the built `cli-entry.js`
+ * relative to this module, then `process.argv[1]` when it names a runnable CLI
+ * entry. Returns an absolute path, or null when no *runnable* entry can be
+ * resolved.
+ *
+ * Only a built `.js` entry (or an installed bin shim) is accepted: a `.ts`
+ * source entry is deliberately rejected because a plain `node` hook cannot
+ * execute it (its `.js` import specifiers resolve to non-existent files in a
+ * source tree), so embedding it would write a hook that fails at commit time.
+ * When no runnable entry is found the caller degrades to the bare `squad`
+ * invocation (piece-45 decision B1) rather than embedding a broken one.
+ *
+ * Parameters default to the running module/process and exist for testability.
+ */
+export function resolveCliEntry(
+  moduleUrl: string = import.meta.url,
+  argv1: string | undefined = process.argv[1],
+): string | null {
+  try {
+    const dir = path.dirname(fileURLToPath(moduleUrl)); // <root>/cli/commands
+    const builtEntry = path.resolve(dir, '../../cli-entry.js');
+    if (fs.existsSync(builtEntry)) return builtEntry;
+  } catch {
+    // import.meta / file URL unavailable — fall through to argv[1].
+  }
+  if (argv1) {
+    const resolved = path.resolve(argv1);
+    const base = path.basename(resolved);
+    const isRunnableEntry = base === 'cli-entry.js' || /^squad(-cli|-test)?(\.js)?$/.test(base);
+    if (isRunnableEntry && fs.existsSync(resolved)) return resolved;
+  }
+  return null;
+}
+
+/**
+ * Build the `squad sync` invocation embedded in the cross-repo post-commit hook.
+ * When the CLI entry resolves, returns a resolved `<node> <cli-entry> sync --push
+ * --quiet` invocation with both paths converted to MSYS/POSIX form and single-
+ * quoted so it survives git's sh on every platform. When the entry cannot be
+ * resolved (`entryPath` is null), falls back to the bare `squad sync --push
+ * --quiet` (piece-45 decision B1: never break an install that previously worked).
+ */
+export function buildSquadSyncInvocation(execPath: string, entryPath: string | null): string {
+  if (!entryPath) return 'squad sync --push --quiet';
+  const node = shSingleQuote(toPosixShPath(execPath));
+  const entry = shSingleQuote(toPosixShPath(entryPath));
+  return `${node} ${entry} sync --push --quiet`;
+}
+
+/** Resolve the post-commit sync invocation for the running process (B1 fallback). */
+function resolveSquadSyncInvocation(): string {
+  return buildSquadSyncInvocation(process.execPath, resolveCliEntry());
 }
 
 /**
  * Hook template for the cross-repo post-commit hook — HOST clone variant.
  * Filters out .squad/-only commits: publishes only when non-.squad/ files changed.
  * Uses git diff-tree --root (correct on root commit and shallow clones; never HEAD~1).
+ *
+ * The `invocation` is the resolved CLI entrypoint (see buildSquadSyncInvocation),
+ * embedded so the hook runs the same CLI build that installed it instead of a bare
+ * `squad` resolved from the global PATH.
  */
-const CROSS_REPO_HOST_POST_COMMIT_TEMPLATE = `#!/bin/sh
+function crossRepoHostPostCommitTemplate(invocation: string): string {
+  return `#!/bin/sh
 ${SQUAD_HOOK_MARKER}
 # Squad cross-repo publish hook (host clone — filtered)
 # Installed by: squad assign --inbox-handle
 # Only publishes when a non-.squad/ file changed in this commit.
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
   if git diff-tree --no-commit-id --name-only -r --root HEAD | grep -qv '^\\.squad/'; then
-    squad sync --push --quiet
+    ${invocation}
   fi
 fi
 `;
+}
 
 /**
  * Hook template for the cross-repo post-commit hook — PRODUCT clone variant.
  * Fires on ANY commit (unfiltered). The product commit is only the trigger;
  * publishTeamRootToInbox snapshots the host .squad/ working tree.
+ *
+ * The `invocation` is the resolved CLI entrypoint (see buildSquadSyncInvocation).
  */
-const CROSS_REPO_PRODUCT_POST_COMMIT_TEMPLATE = `#!/bin/sh
+function crossRepoProductPostCommitTemplate(invocation: string): string {
+  return `#!/bin/sh
 ${SQUAD_HOOK_MARKER}
 # Squad cross-repo publish hook (product clone — unfiltered)
 # Installed by: squad assign
 if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
-  squad sync --push --quiet
+  ${invocation}
 fi
 `;
+}
 
 /**
  * Hook template for the product .squad/-forbid pre-commit guard.
@@ -311,9 +402,12 @@ export function installCrossRepoHook(repoPath: string, options: InstallHooksOpti
 
   // Determine variant: host clone has .squad/team.md, product does not.
   const isHost = fs.existsSync(path.join(repoPath, '.squad', 'team.md'));
+  // Resolve the CLI entrypoint at install time so the hook runs the same CLI
+  // build that installed it, not a bare `squad` from the global PATH.
+  const invocation = options._squadInvocation ?? resolveSquadSyncInvocation();
   const template = isHost
-    ? CROSS_REPO_HOST_POST_COMMIT_TEMPLATE
-    : CROSS_REPO_PRODUCT_POST_COMMIT_TEMPLATE;
+    ? crossRepoHostPostCommitTemplate(invocation)
+    : crossRepoProductPostCommitTemplate(invocation);
 
   const hooksDir = getHooksDir(repoPath);
   fs.mkdirSync(hooksDir, { recursive: true });

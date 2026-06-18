@@ -433,7 +433,8 @@ describe('Two-hook decoupled model (P38)', () => {
     expect(content).toContain('--root');
     expect(content).toContain('grep -qv');
     expect(content).toContain('.squad/');
-    expect(content).toContain('squad sync --push --quiet');
+    // piece 45: invocation suffix is invariant across resolved / bare-fallback forms.
+    expect(content).toContain('sync --push --quiet');
   });
 
   it('P38.TH2 installCrossRepoHook installs unfiltered hook in product clone', () => {
@@ -447,7 +448,8 @@ describe('Two-hook decoupled model (P38)', () => {
     expect(fs.existsSync(hookPath)).toBe(true);
     const content = fs.readFileSync(hookPath, 'utf-8');
     expect(content).not.toContain('diff-tree');
-    expect(content).toContain('squad sync --push --quiet');
+    // piece 45: invocation suffix is invariant across resolved / bare-fallback forms.
+    expect(content).toContain('sync --push --quiet');
     expect(content).toContain('SQUAD_SYNC_ACTIVE');
   });
 
