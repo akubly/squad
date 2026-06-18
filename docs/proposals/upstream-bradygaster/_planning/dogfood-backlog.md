@@ -67,23 +67,18 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | B (Tier 1) | The cross-repo `sync` pipeline injection resolves a single canonical pipeline path (callsign-named preferred, ADO-before-GitHub tiebreak) and embeds only that one, so a stale alternate-directory copy is never carried into the published snapshot |
 | C (Tier 2, decision) | Whether the scoped install also removes a stale alternate-directory copy — leave it in place and rely on B's single-embed (recommended) vs. remove the superseded copy |
 
+### Piece 45 — Post-commit hook entrypoint resolution
+
+`docs/proposals/upstream-bradygaster/45-post-commit-hook-entrypoint-resolution.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | The cross-repo post-commit hook resolves the CLI entrypoint at install time (`process.execPath` + the `cli-entry` located via `fileURLToPath(import.meta.url)`) and embeds a `<node> <cli-entry> sync --push --quiet` invocation — POSIX-shell-quoted and Windows-absolute-path-safe — in both host and product variants via builder functions, instead of a bare `squad` resolved from the global `PATH`, so the hook runs the same CLI build that installed it; the `SQUAD_SYNC_ACTIVE` guard, host `.squad/`-filter, and marker idempotency are preserved |
+| B (Tier 2, decision) | Fallback when the entrypoint cannot be resolved at install time — resolve-with-fallback-to-bare-`squad` so the install never breaks (recommended) vs. hard-require a resolved entrypoint |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
-
-### Piece 45 — Post-commit hook entrypoint resolution
-
-**Intent.** The squad-installed post-commit hook invokes a bare `squad` resolved from the
-global `PATH`, which risks version skew between the hook and the CLI that installed it. The
-hook should invoke a resolved entrypoint (absolute path, or a pinned/launder-through
-mechanism) so it runs the same CLI version that wrote it.
-
-**Candidate outcomes (assertion-shaped).**
-- The installed post-commit hook invokes a resolved CLI entrypoint, not bare `squad` on the
-  global `PATH`.
-- The hook runs the same CLI version/build that installed it (no global-install skew).
-
-**Source class:** post-commit hook invokes bare `squad`.
 
 ### Piece 46 — State-remote resolution hardening and pull/push transport coverage
 
