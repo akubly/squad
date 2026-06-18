@@ -22,6 +22,7 @@ import {
 } from '../../packages/squad-cli/src/cli/commands/sync.js';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import type { Registry } from '@bradygaster/squad-sdk/registry';
+import { SquadError } from '../../packages/squad-cli/src/cli/core/errors.js';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -599,7 +600,6 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
       }]),
       warnings: [],
     });
-
     // Test 1: COPILOT_SESSION_ID present → its value appears in the inbox branch name
     process.env['COPILOT_SESSION_ID'] = 'explicit-sid-xyz';
     await runSync({ direction: 'push', cwd: workRepo, developer: 'dev3', quiet: true });
@@ -616,6 +616,148 @@ describe('runSync — cross-repo CLI dispatch integration (B/C)', { timeout: 120
     const inboxRefs = refs2.filter(r => r.includes('refs/heads/squad/inbox/dev-squad/dev3/'));
     expect(inboxRefs).toHaveLength(2); // two pushes, two inbox branches
     expect(inboxRefs.every(r => !r.includes('undefined'))).toBe(true);
+  });
+});
+
+// ─── Piece 46: resolver + REAL transport, end-to-end (no _transport mock) ─────
+// These prove the hardened resolveRemote and the real git fetch/push together, closing the
+// piece-43 gap where the cross-repo resolution assertions stopped at the mocked _transport
+// seam. The existing mocked plumbing tests above are unchanged.
+describe('piece 46 — resolver + real transport end-to-end', { timeout: 120_000 }, () => {
+  it('B (pull): a cross-repo --pull from a REAL bare state remote whose branch is squad/state/<callsign> (derived) hydrates .squad files', async () => {
+    const base = makeTmpDir('p46-pull');
+    const stateRemote = path.join(base, 'state-remote.git');
+    const publisher = path.join(base, 'publisher');
+    const teamRoot = path.join(base, 'teamroot');
+    const workRepo = path.join(base, 'work');
+    const callsign = 'acme';
+
+    // Real bare state remote with a real squad/state/<callsign> branch carrying .squad files.
+    initBareRepo(stateRemote);
+    initWorkingRepo(publisher, 'origin', stateRemote);
+    execFileSync('git', ['checkout', '--orphan', `squad/state/${callsign}`], { cwd: publisher, stdio: 'pipe' });
+    execFileSync('git', ['rm', '-rf', '--cached', '.'], { cwd: publisher, stdio: 'pipe' });
+    try { fs.rmSync(path.join(publisher, '.gitkeep')); } catch { /* may not exist */ }
+    fs.mkdirSync(path.join(publisher, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(publisher, '.squad', 'decisions.md'), '# Decisions (from state branch)\n');
+    execFileSync('git', ['add', '.squad/decisions.md'], { cwd: publisher, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'state snapshot'], { cwd: publisher, stdio: 'pipe' });
+    execFileSync('git', ['push', 'origin', `squad/state/${callsign}`], { cwd: publisher, stdio: 'pipe' });
+
+    // Team-root host: SOLE remote is named "statehost" (NOT origin), so the resolver must
+    // select it via precedence 2 from the team-root host — proving the cross-repo state remote
+    // is resolved from the host and never from the literal string "origin".
+    initWorkingRepo(teamRoot, 'statehost', stateRemote);
+    // Code clone (cwd for the command): its "origin" deliberately points at an UNRELATED empty
+    // bare repo. If resolution leaked to the code clone's remote, or reverted to literal
+    // "origin", the pull would target the wrong/empty remote and hydrate nothing.
+    const unrelatedRemote = path.join(base, 'unrelated.git');
+    initBareRepo(unrelatedRemote);
+    initWorkingRepo(workRepo, 'origin', unrelatedRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    // Registry entry: callsign present, NO explicit stateBranch (so it derives
+    // squad/state/<callsign>) and NO explicit stateRemote (resolved from the team-root host).
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign,
+        path: path.join(teamRoot, '.squad'),
+        clones: [workGitRoot],
+      }]),
+      warnings: [],
+    });
+
+    // No _transport spy — this exercises the REAL git fetch.
+    await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
+
+    // Real filesystem effect: the derived state branch's .squad file is hydrated into teamRoot.
+    expect(fs.existsSync(path.join(teamRoot, '.squad', 'decisions.md'))).toBe(true);
+    expect(fs.readFileSync(path.join(teamRoot, '.squad', 'decisions.md'), 'utf-8'))
+      .toContain('from state branch');
+  });
+
+  it('C (push): a cross-repo --push to a REAL bare host remote NOT named origin publishes the inbox ref', async () => {
+    const base = makeTmpDir('p46-push');
+    const hostRemote = path.join(base, 'host-remote.git');
+    const teamRoot = path.join(base, 'teamroot');
+    const workRepo = path.join(base, 'work');
+    const callsign = 'acme';
+
+    initBareRepo(hostRemote);
+    // Team-root host: SOLE remote is named "upstream" (not origin) and the branch has no
+    // tracking remote — so resolveRemote must select the sole remote via precedence 2.
+    initWorkingRepo(teamRoot, 'upstream', hostRemote);
+    setupSquadDir(teamRoot);
+
+    initWorkingRepo(workRepo, 'origin', hostRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    // Registry entry: callsign present, NO explicit stateRemote (resolved → sole "upstream").
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign,
+        path: path.join(teamRoot, '.squad'),
+        clones: [workGitRoot],
+        inboxHandle: 'dev1',
+      }]),
+      warnings: [],
+    });
+
+    process.env['COPILOT_SESSION_ID'] = 'p46-push-session';
+
+    // No _transport spy — this exercises the REAL git push to the non-origin remote.
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'dev1', quiet: true });
+
+    // Real ref effect: the inbox ref lands on the bare host remote that "upstream" points at.
+    const refs = listBareRefs(hostRemote);
+    const inboxRefs = refs.filter(r => r.includes(`refs/heads/squad/inbox/${callsign}/dev1/`));
+    expect(inboxRefs).toHaveLength(1);
+    expect(inboxRefs[0]).toContain('p46-push-session');
+  });
+
+  it('E1 (fail-closed): a cross-repo sync whose team-root has ambiguous remotes and no registry stateRemote rejects with an actionable SquadError naming stateRemote', async () => {
+    const base = makeTmpDir('p46-failclosed');
+    const hostA = path.join(base, 'host-a.git');
+    const hostB = path.join(base, 'host-b.git');
+    const teamRoot = path.join(base, 'teamroot');
+    const workRepo = path.join(base, 'work');
+    const callsign = 'acme';
+
+    initBareRepo(hostA);
+    initBareRepo(hostB);
+    // Team-root host: TWO remotes, neither named "origin", and the branch has no tracking
+    // remote — the resolver cannot deterministically choose, so it must fail closed rather
+    // than guess a destination for shared squad state.
+    initWorkingRepo(teamRoot, 'one', hostA);
+    execFileSync('git', ['remote', 'add', 'two', hostB], { cwd: teamRoot, stdio: 'pipe' });
+    setupSquadDir(teamRoot);
+
+    initWorkingRepo(workRepo, 'origin', hostA);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    // Registry entry: callsign present, NO explicit stateRemote — resolution must fail closed.
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign,
+        path: path.join(teamRoot, '.squad'),
+        clones: [workGitRoot],
+        inboxHandle: 'dev1',
+      }]),
+      warnings: [],
+    });
+
+    let thrown: unknown;
+    try {
+      await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
+    } catch (e) { thrown = e; }
+    expect(thrown).toBeInstanceOf(SquadError);
+    expect((thrown as Error).message).toContain('stateRemote');
   });
 });
 

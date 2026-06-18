@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { SquadError } from '../core/errors.js';
 
 const SQUAD_SYNC_ENV = 'SQUAD_SYNC_ACTIVE';
 const STATE_BRANCH_PREFIX = 'squad-state';
@@ -104,20 +105,63 @@ function discoverRemoteStateBranches(cwd: string, remote: string): string[] {
 }
 
 /**
- * Resolve the default remote for the current branch (or fallback to 'origin').
+ * Resolve the default remote for the current branch.
+ *
+ * Precedence:
+ *   1. the current branch's tracking remote (`branch.<name>.remote`) when it names a
+ *      configured remote (git stores `.` for local-tracking branches and can retain stale
+ *      names, so the tracking value is only honored when it is a real remote);
+ *   2. else, when exactly one remote is configured, that sole remote (even when it is not
+ *      named `origin`);
+ *   3. else `origin` only when a remote named `origin` actually exists;
+ *   4. else fail with an actionable error directing the operator to set `stateRemote`
+ *      (deterministic — the resolver never guesses among several remotes).
+ *
+ * The failure is thrown as a `SquadError` so the CLI entrypoint surfaces it as a clean
+ * `✗ <message>` rather than an unhandled crash.
  */
-function resolveRemote(cwd: string): string {
+export function resolveRemote(cwd: string): string {
+  // Enumerate configured remotes up front: the tracking remote is only honored when it names
+  // a real remote, and the sole-remote / origin-existence precedence needs the list anyway.
+  let remotes: string[] = [];
+  try {
+    const out = execFileSync('git', ['remote'], {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    remotes = out ? out.split('\n').map(r => r.trim()).filter(Boolean) : [];
+  } catch {
+    remotes = [];
+  }
+
+  // 1. The current branch's tracking remote, when it names a configured remote.
   try {
     const branch = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
       cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    const remote = execFileSync('git', ['config', `branch.${branch}.remote`], {
+    const tracking = execFileSync('git', ['config', `branch.${branch}.remote`], {
       cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    return remote || 'origin';
+    if (tracking && remotes.includes(tracking)) return tracking;
   } catch {
-    return 'origin';
+    // No HEAD branch or no tracking config — fall through to the remote-list precedence.
   }
+
+  // 2. Exactly one remote configured — select it, even when not named `origin`.
+  if (remotes.length === 1) return remotes[0]!;
+
+  // 3. `origin` only when it actually exists.
+  if (remotes.includes('origin')) return 'origin';
+
+  // 4. Ambiguous (multiple remotes, none `origin`) or none — fail with guidance.
+  throw new SquadError(
+    `squad sync: cannot determine the git remote for "${cwd}".\n` +
+    (remotes.length === 0
+      ? `  No remotes are configured.\n`
+      : `  Multiple remotes are configured (${remotes.join(', ')}) and none is named "origin",\n` +
+        `  and the current branch has no tracking remote.\n`) +
+    `  Set an explicit state remote in the registry entry with 'stateRemote' so the resolver\n` +
+    `  does not have to guess.`,
+  );
 }
 
 /**
@@ -715,7 +759,24 @@ export async function runSync(options: SyncOptions): Promise<void> {
     const cwd = options.cwd ?? process.cwd();
     const quiet = options.quiet ?? false;
     const repoRoot = getRepoRoot(cwd);
-    const remote = options.remote ?? resolveRemote(repoRoot);
+    // Resolve the code-clone remote lazily and memoize it. In cross-repo mode the state
+    // remote resolves from the team-root host, so the code-clone remote is unused — deferring
+    // resolution means a cross-repo sync never throws on an unrelated code-clone remote
+    // configuration (the hardened resolveRemote can throw when no remote is determinable).
+    // On the single-repo path the conventional default remote is `origin`; preserve that soft
+    // default here (the fail-closed hardening applies to the cross-repo state remote).
+    let _codeCloneRemote: string | undefined;
+    const getCodeCloneRemote = (): string => {
+      if (options.remote) return options.remote;
+      if (_codeCloneRemote === undefined) {
+        try {
+          _codeCloneRemote = resolveRemote(repoRoot);
+        } catch {
+          _codeCloneRemote = 'origin';
+        }
+      }
+      return _codeCloneRemote;
+    };
     const isPush = options.direction === 'push' || options.direction === 'both';
     const isPull = options.direction === 'pull' || options.direction === 'both';
 
@@ -805,7 +866,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
     // registry / team-root host, not from the code clone's origin. An explicit
     // stateRemote/stateBranch wins; otherwise the remote resolves from the host clone and
     // the branch derives from the callsign (falling back to the flat legacy `squad-state`).
-    const effectiveStateRemote = crossRepo ? (stateRemote ?? resolveRemote(teamRoot!)) : remote;
+    const effectiveStateRemote = crossRepo ? (stateRemote ?? resolveRemote(teamRoot!)) : getCodeCloneRemote();
     const effectiveStateBranch = deriveStateBranch(stateBranch, registryCallsign);
 
     // ── Inbox-handle resolution chain ─────────────────────────────────────────
@@ -876,7 +937,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
           effectiveStateBranch,
         );
       } else {
-        syncPull(repoRoot, remote, backend, quiet);
+        syncPull(repoRoot, getCodeCloneRemote(), backend, quiet);
       }
     }
 
@@ -907,7 +968,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
         writeLastPublish(teamRoot!);
       } else {
         // Single-repo path: unchanged
-        syncPush(repoRoot, remote, backend, quiet);
+        syncPush(repoRoot, getCodeCloneRemote(), backend, quiet);
         // Write last-publish timestamp after successful single-repo push.
         writeLastPublish(repoRoot);
       }
