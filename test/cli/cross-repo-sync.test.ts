@@ -761,3 +761,247 @@ describe('piece 46 — resolver + real transport end-to-end', { timeout: 120_000
   });
 });
 
+
+// ─── Piece 47 — monorepo team-root git-dir resolution + sync registry robustness ─────────────
+
+/**
+ * Build a MONOREPO host: a working git repo whose real `.git` is at the repo root, with the
+ * `.squad` team root living in a subdirectory (`teamSubdir`). Returns the subdirectory team root.
+ */
+function initMonorepoTeamRoot(repoRoot: string, teamSubdir: string, remoteName: string, remoteUrl: string): string {
+  initWorkingRepo(repoRoot, remoteName, remoteUrl); // real .git at repoRoot
+  const teamRoot = path.join(repoRoot, ...teamSubdir.split('/'));
+  fs.mkdirSync(teamRoot, { recursive: true });
+  setupSquadDir(teamRoot); // .squad files under the subdirectory team root
+  // Sanity: the subdirectory team root must NOT have its own .git (the defect's precondition).
+  expect(fs.existsSync(path.join(teamRoot, '.git'))).toBe(false);
+  return teamRoot;
+}
+
+describe('piece 47 — monorepo team-root git-dir resolution (A/B)', { timeout: 120_000 }, () => {
+  it('A (publish): single-repo team root still publishes (regression guard)', async () => {
+    const base = makeTmpDir('p47-single-push');
+    const bare = path.join(base, 'bare.git');
+    const repo = path.join(base, 'single-root');
+
+    initBareRepo(bare);
+    initWorkingRepo(repo, 'origin', bare);
+    setupSquadDir(repo);
+
+    await publishTeamRootToInbox(repo, 'origin', 'solo', 'sess-single', 'acme');
+
+    const refs = listBareRefs(bare);
+    expect(refs.filter(r => r.includes('/squad/inbox/acme/solo/'))).toHaveLength(1);
+    // The isolated index lives in the repo's own .git and is cleaned up.
+    const stray = fs.readdirSync(path.join(repo, '.git')).filter(f => f.startsWith('squad-publish-index-'));
+    expect(stray).toHaveLength(0);
+  });
+
+  it('A (publish): monorepo subdirectory team root publishes the inbox ref (live-defect regression)', async () => {
+    const base = makeTmpDir('p47-mono-push');
+    const bare = path.join(base, 'bare.git');
+    const repoRoot = path.join(base, 'monorepo');
+
+    initBareRepo(bare);
+    // Team root is teams/acme — real .git is at repoRoot, NOT under teamRoot.
+    const teamRoot = initMonorepoTeamRoot(repoRoot, 'teams/acme', 'origin', bare);
+
+    // Before piece 47 this aborted with `fatal: Unable to create
+    // '<teamRoot>/.git/squad-publish-index-...lock'`. It must now succeed.
+    await publishTeamRootToInbox(teamRoot, 'origin', 'dev1', 'sess-mono', 'acme');
+
+    const refs = listBareRefs(bare);
+    expect(refs.filter(r => r.includes('/squad/inbox/acme/dev1/'))).toHaveLength(1);
+  });
+
+  it('A (publish): the isolated index is cleaned up from the resolved (repo-root) git dir, and none is created under <teamRoot>/.git', async () => {
+    const base = makeTmpDir('p47-mono-cleanup');
+    const bare = path.join(base, 'bare.git');
+    const repoRoot = path.join(base, 'monorepo');
+
+    initBareRepo(bare);
+    const teamRoot = initMonorepoTeamRoot(repoRoot, 'teams/acme', 'origin', bare);
+
+    await publishTeamRootToInbox(teamRoot, 'origin', 'dev1', 'sess-mono-clean', 'acme');
+
+    // No stray index left in the real (repo-root) git directory.
+    const strayInRepoGit = fs.readdirSync(path.join(repoRoot, '.git')).filter(f => f.startsWith('squad-publish-index-'));
+    expect(strayInRepoGit).toHaveLength(0);
+    // And the bogus <teamRoot>/.git path was never created.
+    expect(fs.existsSync(path.join(teamRoot, '.git'))).toBe(false);
+  });
+
+  it('B (hydrate): single-repo team root still hydrates (regression guard)', async () => {
+    const base = makeTmpDir('p47-single-pull');
+    const bare = path.join(base, 'bare.git');
+    const publishRepo = path.join(base, 'publisher');
+    const hydrateRepo = path.join(base, 'hydrate');
+
+    initBareRepo(bare);
+    initWorkingRepo(publishRepo, 'origin', bare);
+    setupSquadDir(publishRepo);
+    await publishTeamRootToInbox(publishRepo, 'origin', 'tester', 'sess-s-pull');
+
+    const stateBranch = listBareRefs(bare).find(r => r.includes('/squad/inbox/tester/'))!.replace('refs/heads/', '');
+
+    initWorkingRepo(hydrateRepo, 'origin', bare);
+    await hydrateTeamRootFromStateRef(hydrateRepo, 'origin', stateBranch);
+
+    expect(fs.readFileSync(path.join(hydrateRepo, '.squad', 'decisions.md'), 'utf-8')).toBe('# Decisions\n');
+  });
+
+  it('B (hydrate): monorepo subdirectory team root hydrates .squad files from the state branch', async () => {
+    const base = makeTmpDir('p47-mono-pull');
+    const bare = path.join(base, 'bare.git');
+    const publishRepo = path.join(base, 'publisher');
+    const repoRoot = path.join(base, 'monorepo');
+
+    initBareRepo(bare);
+    // Publish a snapshot from a normal single-repo publisher to create the state branch.
+    initWorkingRepo(publishRepo, 'origin', bare);
+    setupSquadDir(publishRepo);
+    await publishTeamRootToInbox(publishRepo, 'origin', 'tester', 'sess-mono-pull');
+    const stateBranch = listBareRefs(bare).find(r => r.includes('/squad/inbox/tester/'))!.replace('refs/heads/', '');
+
+    // Hydrate into a MONOREPO subdirectory team root whose real .git is at the repo root.
+    initWorkingRepo(repoRoot, 'origin', bare);
+    const teamRoot = path.join(repoRoot, 'teams', 'acme');
+    fs.mkdirSync(teamRoot, { recursive: true });
+    expect(fs.existsSync(path.join(teamRoot, '.git'))).toBe(false);
+
+    await hydrateTeamRootFromStateRef(teamRoot, 'origin', stateBranch);
+
+    const decisionsPath = path.join(teamRoot, '.squad', 'decisions.md');
+    expect(fs.existsSync(decisionsPath)).toBe(true);
+    expect(fs.readFileSync(decisionsPath, 'utf-8')).toBe('# Decisions\n');
+  });
+});
+
+describe('piece 47 — sync --registry-path threading (C)', { timeout: 120_000 }, () => {
+  it('C: runSync threads --registry-path into loadRegistryFromDisk', async () => {
+    const base = makeTmpDir('p47-regpath');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const docsTeamRoot = path.join(base, 'docs-teamroot');
+    const workRepo = path.join(base, 'work');
+    const registryPath = path.join(base, 'alt-registry.json');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(docsTeamRoot, 'origin', docsRemote);
+    setupSquadDir(docsTeamRoot);
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign: 'docs-squad',
+        path: path.join(docsTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        inboxHandle: 'alice',
+      }]),
+      warnings: [],
+    });
+
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'alice', quiet: true, registryPath });
+
+    // Every registry load in the sync path used the explicit path.
+    expect(loadRegistryFromDisk).toHaveBeenCalledWith({ registryPath });
+    // And it actually published using the resolved entry.
+    expect(listBareRefs(docsRemote).filter(r => r.includes('refs/heads/squad/inbox/docs-squad/alice/'))).toHaveLength(1);
+  });
+
+  it('C: without --registry-path, loadRegistryFromDisk gets the default (undefined) path', async () => {
+    const base = makeTmpDir('p47-regpath-default');
+    const docsRemote = path.join(base, 'docs-remote.git');
+    const docsTeamRoot = path.join(base, 'docs-teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(docsRemote);
+    initWorkingRepo(docsTeamRoot, 'origin', docsRemote);
+    setupSquadDir(docsTeamRoot);
+    initWorkingRepo(workRepo, 'origin', docsRemote);
+    const workGitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: workRepo, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign: 'docs-squad',
+        path: path.join(docsTeamRoot, '.squad'),
+        clones: [workGitRoot],
+        inboxHandle: 'alice',
+      }]),
+      warnings: [],
+    });
+
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'alice', quiet: true });
+
+    expect(loadRegistryFromDisk).toHaveBeenCalledWith({ registryPath: undefined });
+  });
+});
+
+describe('piece 47 — SQUAD_TEAM_ROOT override augments registry config (D1)', { timeout: 120_000 }, () => {
+  it('D1: SQUAD_TEAM_ROOT at a REGISTERED team root resolves the registry callsign and publishes the inbox ref', async () => {
+    const base = makeTmpDir('p47-d1-registered');
+    const hostRemote = path.join(base, 'host-remote.git');
+    const teamRoot = path.join(base, 'teamroot');
+    const workRepo = path.join(base, 'work');
+    const callsign = 'acme';
+
+    initBareRepo(hostRemote);
+    initWorkingRepo(teamRoot, 'origin', hostRemote);
+    setupSquadDir(teamRoot);
+    initWorkingRepo(workRepo, 'origin', hostRemote);
+
+    // Registry entry whose team root (dirname of path) matches the override.
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign,
+        path: path.join(teamRoot, '.squad'),
+        clones: [workRepo],
+        inboxHandle: 'dev1',
+      }]),
+      warnings: [],
+    });
+
+    process.env['SQUAD_TEAM_ROOT'] = teamRoot;
+    process.env['COPILOT_SESSION_ID'] = 'd1-registered';
+
+    // No callsign-guard failure: the override augments the callsign from the matching entry.
+    await runSync({ direction: 'push', cwd: workRepo, developer: 'dev1', quiet: true });
+
+    const inboxRefs = listBareRefs(hostRemote).filter(r => r.includes(`refs/heads/squad/inbox/${callsign}/dev1/`));
+    expect(inboxRefs).toHaveLength(1);
+    expect(inboxRefs[0]).toContain('d1-registered');
+  });
+
+  it('D1: SQUAD_TEAM_ROOT at an UNREGISTERED path behaves as today — no callsign, push hits the callsign guard (exit 1)', async () => {
+    const base = makeTmpDir('p47-d1-unregistered');
+    const hostRemote = path.join(base, 'host-remote.git');
+    const teamRoot = path.join(base, 'teamroot');
+    const workRepo = path.join(base, 'work');
+
+    initBareRepo(hostRemote);
+    initWorkingRepo(teamRoot, 'origin', hostRemote);
+    setupSquadDir(teamRoot);
+    initWorkingRepo(workRepo, 'origin', hostRemote);
+
+    // Registry has no matching entry (null) — the best-effort read finds nothing.
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    process.env['SQUAD_TEAM_ROOT'] = teamRoot;
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code}`);
+    }) as never);
+
+    await expect(
+      runSync({ direction: 'push', cwd: workRepo, developer: 'dev1', quiet: true }),
+    ).rejects.toThrow('process.exit:1');
+
+    // No inbox ref was created — env-only unregistered push fails the guard exactly as before.
+    expect(listBareRefs(hostRemote).filter(r => r.includes('squad/inbox/'))).toHaveLength(0);
+    exitSpy.mockRestore();
+  });
+});

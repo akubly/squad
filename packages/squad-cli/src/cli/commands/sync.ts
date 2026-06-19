@@ -35,6 +35,12 @@ export interface SyncOptions {
   developer?: string;
   /** Dry-run: print pending files and target branch info without publishing. */
   dryRun?: boolean;
+  /**
+   * Alternate registry path (matches `init`'s `--registry-path`). A file path, or a directory
+   * in which `registry.json` is resolved (per the SDK's `resolveRegistryPath`). When absent,
+   * the default user registry is used.
+   */
+  registryPath?: string;
 }
 
 /**
@@ -390,6 +396,41 @@ let _publishSeq = 0;
  * Parameterized: takes all resolved inputs as arguments.
  * Does NOT read config.json, call detectBackend, or query the registry.
  */
+/**
+ * Resolve the real git directory for a team root.
+ *
+ * A team root is not always the top of its own git repository: on a monorepo host the `.squad`
+ * team root lives in a subdirectory (for example `teams/<callsign>/.squad`) and the repository's
+ * real `.git` is at the repo root. `git rev-parse --absolute-git-dir` (run with `cwd: teamRoot`)
+ * discovers the repository by walking upward and returns the actual git directory — the repo's
+ * own `.git` for a single-repo host, the repo-root `.git` for a monorepo subdirectory team root,
+ * and the correct linked-worktree git directory for a worktree checkout. Path separators are
+ * normalized to forward slashes so the value can be passed directly as a `--git-dir` argument.
+ */
+function resolveTeamRootGitDir(teamRoot: string): string {
+  let gitDir: string;
+  try {
+    gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch (err: unknown) {
+    const msg = err instanceof Error
+      ? ((err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? err.message)
+      : String(err);
+    throw new SquadError(
+      `squad sync: could not resolve the git directory for team root "${teamRoot}".\n` +
+      `  The team root must be inside a git repository.\n` +
+      `  git error: ${String(msg).trim()}`,
+    );
+  }
+  if (!gitDir) {
+    throw new SquadError(
+      `squad sync: could not resolve the git directory for team root "${teamRoot}" (empty result).`,
+    );
+  }
+  return gitDir.replace(/\\/g, '/');
+}
+
 export async function publishTeamRootToInbox(
   teamRoot: string,
   remote: string,
@@ -442,9 +483,14 @@ export async function publishTeamRootToInbox(
   const allSquadFiles = enumerateSquadFiles(teamRoot);
   const squadFiles = allSquadFiles.filter(relPath => isAllowlisted(relPath));
 
-  // Step 5: Build snapshot via git plumbing with isolated index
+  // Step 5: Build snapshot via git plumbing with isolated index.
+  // The isolated index must live inside the team root's REAL git directory. On a monorepo host
+  // the team root is a subdirectory and `<teamRoot>/.git` does not exist — the repository's real
+  // `.git` is at the repo root — so resolve the actual git directory via
+  // `git rev-parse --absolute-git-dir` (cwd = teamRoot) rather than assuming `<teamRoot>/.git`.
+  const resolvedGitDir = resolveTeamRootGitDir(teamRoot);
   const indexFile = path.join(
-    teamRoot, '.git',
+    resolvedGitDir,
     `squad-publish-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
   const indexEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
@@ -598,7 +644,11 @@ export async function hydrateTeamRootFromStateRef(
   // Step 4: Write state branch tree files into TEAM_ROOT (does not alter HEAD).
   // Uses ls-tree + cat-file blob to enumerate and write files directly — avoids
   // `git checkout --work-tree` index-state conflicts in nested repo contexts.
-  const normalizedGitDir = path.join(teamRoot, '.git').replace(/\\/g, '/');
+  // Resolve the team root's REAL git directory: on a monorepo host the team root is a
+  // subdirectory and `<teamRoot>/.git` is not a git directory, so assuming it would break the
+  // `--git-dir` ls-tree / cat-file calls below. `git rev-parse --absolute-git-dir` (cwd =
+  // teamRoot) returns the repo-root `.git` for that case and the repo's own `.git` otherwise.
+  const normalizedGitDir = resolveTeamRootGitDir(teamRoot);
   const isolatedEnv = { ...process.env };
   delete isolatedEnv['GIT_DIR'];
   delete isolatedEnv['GIT_WORK_TREE'];
@@ -655,6 +705,8 @@ function writeLastPublish(root: string): void {
  */
 export interface SyncStatusOptions {
   cwd?: string;
+  /** Alternate registry path (matches `init`'s `--registry-path`). */
+  registryPath?: string;
 }
 
 /**
@@ -676,7 +728,7 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
   let stateBranch: string | undefined;
   let inboxHandle: string | undefined;
 
-  const { registry } = loadRegistryFromDisk();
+  const { registry } = loadRegistryFromDisk({ registryPath: options.registryPath });
   const normalizedRoot = normalisedPathKey(repoRoot);
   const entry = registry?.squads.find(e =>
     e.clones?.some(c => normalisedPathKey(c) === normalizedRoot),
@@ -737,7 +789,9 @@ export async function runSyncStatus(options: SyncStatusOptions = {}): Promise<vo
  * Main sync entrypoint.
  *
  * Resolution order (sub-proposal A):
- *   1. SQUAD_TEAM_ROOT env var — explicit override.
+ *   1. SQUAD_TEAM_ROOT env var — explicit override of the team-root path. The override still
+ *      consults the registry (best-effort) to adopt a matching entry's callsign / state config
+ *      (sub-proposal D1); the env value always wins for the path itself.
  *   2. Registry lookup via loadRegistryFromDisk() — find entry whose clones[] contains
  *      the current git root; TEAM_ROOT = path.dirname(entry.path).
  *   3. Fallback to WORK_ROOT/.squad/config.json for single-repo / unregistered contexts.
@@ -790,10 +844,36 @@ export async function runSync(options: SyncOptions): Promise<void> {
     let configJsonPresent = false;
 
     if (process.env['SQUAD_TEAM_ROOT']) {
-      // Explicit env override: bypass registry lookup entirely
+      // Explicit env override: the env value wins for the team-root PATH. Sub-proposal D1:
+      // still consult the registry (best-effort, honouring --registry-path) and, when an entry's
+      // team root matches the override, adopt its callsign / state config. Without this, a
+      // cross-repo --push from an env-overridden team root fails the callsign guard with no flag
+      // to supply one. A missing/unreadable registry or no matching entry is non-fatal — the
+      // env-only case then behaves exactly as before (no registry config).
       teamRoot = process.env['SQUAD_TEAM_ROOT'];
+      try {
+        const { registry } = loadRegistryFromDisk({ registryPath: options.registryPath });
+        const overrideKey = normalisedPathKey(teamRoot);
+        const entry = registry?.squads.find(e =>
+          normalisedPathKey(path.dirname(e.path)) === overrideKey
+        );
+        if (entry) {
+          stateRemote = entry.stateRemote;
+          stateBranch = entry.stateBranch;
+          registryAlias = entry.inboxHandle;
+          registryCallsign = entry.callsign;
+          const entryBackend = entry.stateBackend;
+          if (entryBackend && entryBackend !== 'orphan') {
+            console.warn(
+              `squad sync: warning: entry "${entry.callsign ?? entry.path}" has stateBackend '${entryBackend}' ` +
+              `but shared-squad entries enforce orphan backend. Using 'orphan'.`,
+            );
+          }
+          backend = 'orphan';
+        }
+      } catch { /* best-effort: a missing/unreadable registry must not fail an env-only sync */ }
     } else {
-      const { registry } = loadRegistryFromDisk();
+      const { registry } = loadRegistryFromDisk({ registryPath: options.registryPath });
       const normalizedRoot = normalisedPathKey(repoRoot);
       const entry = registry?.squads.find(e =>
         e.clones?.some(c => normalisedPathKey(c) === normalizedRoot)

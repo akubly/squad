@@ -339,6 +339,7 @@ async function main(): Promise<void> {
       console.log(`  --both              Push and pull (default)`);
       console.log(`  --remote <name>     Remote name (default: origin)`);
       console.log(`  --inbox-handle <handle>  Inbox handle for cross-repo inbox publish`);
+      console.log(`  --registry-path <path>   Alternate registry file (matches init); default registry when absent`);
       console.log(`  --dry-run           Print pending files and target inbox branch without publishing`);
       console.log(`  --quiet             Suppress output\n`);
       console.log(`Environment:`);
@@ -1462,9 +1463,13 @@ async function main(): Promise<void> {
 
   if (cmd === 'sync') {
     const subCmd = args[1];
+    const syncRegistryPathIdx = args.indexOf('--registry-path');
+    const syncRegistryPath = (syncRegistryPathIdx !== -1 && args[syncRegistryPathIdx + 1])
+      ? args[syncRegistryPathIdx + 1]
+      : undefined;
     if (subCmd === 'status') {
       const { runSyncStatus } = await import('./cli/commands/sync.js');
-      await runSyncStatus({ cwd: getSquadStartDir() });
+      await runSyncStatus({ cwd: getSquadStartDir(), registryPath: syncRegistryPath });
       return;
     }
 
@@ -1488,7 +1493,7 @@ async function main(): Promise<void> {
     const syncDryRun = args.includes('--dry-run');
 
     const { runSync } = await import('./cli/commands/sync.js');
-    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun });
+    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun, registryPath: syncRegistryPath });
     return;
   }
 
