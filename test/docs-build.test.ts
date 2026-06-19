@@ -452,7 +452,6 @@ describe('CLI reference and shared-squad guide', () => {
     const content = readFile(cliRefPath);
     expect(content).toContain('--inbox-handle <handle>');
   });
-  });
 
   it('CLI reference does not document the removed register command as available', () => {
     const content = readFile(cliRefPath);
