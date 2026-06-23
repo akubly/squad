@@ -99,14 +99,27 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | C (Tier 1) | Thread `--registry-path` through `sync` into every `loadRegistryFromDisk({ registryPath })` call (the SDK helper already accepts it and `init` honours it; `sync` currently ignores it and always reads the default registry); default behaviour unchanged when absent |
 | D (Tier 2, decision) | `SQUAD_TEAM_ROOT` override + registry-sourced callsign/state — augment the override from a matching registry entry (best-effort, env-only fallback when none matches; recommended) vs. add explicit `--callsign`/state flags to `sync`, so a cross-repo `--push` from an env-overridden team root no longer fails the callsign guard |
 
+### Piece 48 — Shared-host operability: install-fold ergonomics, fold inbox-branch cleanup, and doctor host/payload diagnostics
+
+`docs/proposals/upstream-bradygaster/48-host-operability-fold-cleanup-and-doctor-diagnostics.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Wire the already-declared `install-fold-pipeline --force` option into the conflict gate so a `present+differ` pipeline file is overwritten (with a `.bak` backup) in one step instead of hard-exiting with "delete it manually"; `absent` / `present+match` / no-`--force` behaviour unchanged |
+| B (Tier 1) | Fix the fold templates' inbox-branch cleanup to delete only **successfully-folded** refs (the `$FOLDED_ENTRIES` set, never the full discovered `$SORTED_REFS`) so a failed-fold snapshot is never deleted unfolded, and add `install-fold-pipeline --delete-folded-refs` to enable cleanup at install time (default stays off); applied to all four template copies (squad-cli + squad-sdk, ado + github), kept byte-identical |
+| C (Tier 1) | `squad doctor` host-repo diagnostics: when the current directory resolves to a registered clone whose shared-squad host is elsewhere, warn on a missing host `.squad/`, a missing/empty host fold-pipeline YAML (the gap that silently disables folding), and a missing in-repo `squad.agent.md` — actionable, best-effort, never firing for a single-repo/local squad |
+| D (Tier 1) | Accurate orphan-payload callsign attribution in `doctor`: resolve the owning callsign against known callsigns/source payload names instead of a last-hyphen split (so `squad-probe-agent-collaboration` → `probe`, not `probe-agent`) and flag doubly-prefixed re-namespaced payloads (`squad-<cs>-squad-…`) as orphans rather than silently treating them as owned |
+| E (Tier 2, decision) | `install-fold-pipeline` destination-directory creation — registry-gated auto-create (create only on a registry-confirmed host; recommended) vs. an explicit `--create-dirs` opt-in, replacing the unconditional fail-fast on a missing `.azuredevops`/`.github/workflows` directory |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
 
-None currently. Piece 46 closed the originally-planned stack; piece 47 reopened it from a
-fresh dogfooding pass (a live-reproduced monorepo team-root transport defect plus two sync
-registry-resolution gaps) and is now specced (above). Further pieces are added here as new
-dogfood cycles surface them.
+None currently. Piece 46 closed the originally-planned stack; piece 47 reopened it with a
+live-reproduced monorepo team-root transport defect plus two sync registry-resolution gaps;
+piece 48 continues it from the next dogfooding pass (shared-host operability — install
+ergonomics, fold inbox-branch cleanup hygiene, and two `doctor` diagnostics) and is now specced
+(above). Further pieces are added here as new dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
 
