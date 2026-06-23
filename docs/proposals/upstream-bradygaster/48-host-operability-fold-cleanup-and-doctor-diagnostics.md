@@ -4,10 +4,11 @@
 
 A fresh end-to-end dogfooding pass against the landed stack (piece-47 tip) exercised the
 shared-host operator path — installing the fold pipeline into a host repository, running the
-fold loop, and diagnosing a host with `squad doctor` — and surfaced five operability gaps that
+fold loop, and diagnosing a host with `squad doctor` — and surfaced six operability gaps that
 make the cross-repo workflow harder to set up and harder to keep healthy than it needs to be.
 None is a transport-correctness defect (the fold loop folds correctly once configured); each is
-an ergonomics, lifecycle-hygiene, or diagnostics gap that cost real time during the pass.
+an ergonomics, lifecycle-hygiene, diagnostics, or pipeline-identity gap that cost real time
+during the pass.
 
 1. **`install-fold-pipeline` cannot update an out-of-date pipeline file.** The command already
    declares a `force` option but never wires it into the conflict gate: when the destination
@@ -48,10 +49,26 @@ an ergonomics, lifecycle-hygiene, or diagnostics gap that cost real time during 
    command should create the directory once the host clone is confirmed is a decision, captured
    here as Tier 2.
 
-This piece delivers (A) `install-fold-pipeline --force`, (B) a corrected, install-time-enableable
-fold inbox-branch cleanup, (C) host-repo diagnostics in `doctor`, and (D) accurate orphan-payload
-callsign attribution in `doctor`; and resolves a Tier-2 decision (E) about destination-directory
-creation in `install-fold-pipeline`.
+   6. **The fold pipeline's state-branch write-back depends on an over-privileged build-service
+      account.** The automated fold runs `git push` back to `squad/state/<callsign>` using the
+      pipeline's implicit `System.AccessToken` (the checkout persists credentials), so the push only
+      succeeds once the operator grants the **Project Build Service** account **Contribute** on the
+      state branch — the manual unblock that this dogfooding pass required before the first automated
+      fold succeeded. Granting build-service accounts (PBS/PCBS) elevated repository permissions is
+      precisely the pattern the platform's "Securing Azure DevOps Build Service Accounts" security
+      control flags as over-privileged and places on an active remediation path; the recommended
+      replacement is an Azure DevOps **service connection** backed by a managed identity or service
+      principal (`aka.ms/azdosc`), giving the pipeline a per-resource, least-privilege identity
+      instead of a shared, broadly-scoped account. The fold template hard-codes the `System.AccessToken`
+      path and the setup docs say nothing about either the minimum permission required or the
+      compliant alternative, so every operator rediscovers the grant by hitting a push failure and is
+      steered toward the non-compliant fix.
+
+   This piece delivers (A) `install-fold-pipeline --force`, (B) a corrected, install-time-enableable
+   fold inbox-branch cleanup, (C) host-repo diagnostics in `doctor`, (D) accurate orphan-payload
+   callsign attribution in `doctor`, and (F) a compliant, documented state-branch write-back identity
+   for the fold pipeline; and resolves a Tier-2 decision (E) about destination-directory creation in
+   `install-fold-pipeline`.
 
 Stack position: Part 48 of the cross-repo arc. Branches off piece 47
 (`squad/piece-47-monorepo-gitdir-and-sync-registry-robustness`). Piece 47 reopened the stack
@@ -205,12 +222,13 @@ clone is registry-confirmed is the Tier-2 decision (E).
 
 ## Proposed change
 
-Sub-proposals A, B, C, and D are Tier 1 (concrete, implementation-ready). Sub-proposal E is
+Sub-proposals A, B, C, D, and F are Tier 1 (concrete, implementation-ready). Sub-proposal E is
 Tier 2 (a decision with a safety/surprise cost) gated on the maintainer's choice.
 
 **Recommended implementation order:** A (small, self-contained install flag), then B (fold-template
 correctness + the install flag that enables it), then C and D (the two `doctor` enhancements,
-which share the host/registry resolution already in `runDoctor`), then resolve E and implement the
+which share the host/registry resolution already in `runDoctor`), then F (fold-template identity
+parameter + docs, which touches the same templates as B), then resolve E and implement the
 chosen behavior.
 
 ---
@@ -335,6 +353,55 @@ as an orphan attributed to `probe`; a doubly-prefixed `squad-teamx-squad-convent
 reported as an orphan (not owned); a correctly-namespaced registered payload is not reported;
 the corrected callsign appears in the remediation text.
 
+### F. Compliant, documented state-branch write-back identity for the fold pipeline
+
+**Current behavior:** the ADO fold template checks out `self` with `persistCredentials: true` and
+pushes the folded state to `squad/state/<callsign>` using the implicit `System.AccessToken`. That
+push succeeds only after the operator manually grants the Project Build Service account
+**Contribute** on the state branch — an over-privileged build-service-account grant that the
+platform's "Securing Azure DevOps Build Service Accounts" control flags for remediation. The
+template offers no alternative and the setup docs document neither the required permission nor the
+compliant path.
+
+**Required behavior:** make the fold pipeline's write-back identity explicit and configurable, and
+document both the minimum-permission and the compliant least-privilege paths, **without changing
+the default behavior** for existing installs:
+
+1. **Template parameterization.** The ADO fold template exposes the write-back identity as a
+   templated input (e.g. an optional `serviceConnection` / `azureSubscription` parameter consumed
+   by the checkout and push steps). When the operator supplies a service connection (backed by a
+   managed identity or service principal — `aka.ms/azdosc`), the fold pushes under that
+   per-resource least-privilege identity. When none is supplied, the template renders exactly
+   today's `System.AccessToken` path (no behavior change for current installs).
+2. **Install wiring.** `install-fold-pipeline` accepts an optional flag (e.g.
+   `--fold-service-connection <name>`) that renders the template with the service-connection
+   identity wired in; absent the flag, the rendered pipeline is byte-identical to today's output.
+3. **Documentation.** The fold-pipeline install / shared-host setup docs state, with a generic
+   placeholder (`dev.azure.com/contoso/MyProject`): (a) the minimum write permission the default
+   `System.AccessToken` path requires on the state branch, and that granting the shared build
+   service account Contribute is flagged by the build-service-account security control as
+   over-privileged; and (b) the recommended compliant alternative — an Azure DevOps service
+   connection backed by a managed identity / service principal (`aka.ms/azdosc`) scoped to the
+   state branch — including how to pass it via the install flag.
+
+**Hard constraints:**
+- Default rendering (no service connection supplied) is byte-identical to today's template output;
+  existing installs and the four-copy byte-identity invariant (with B) are preserved.
+- The service-connection path is opt-in and never silently changes an existing pipeline.
+- No internal tenant/organization URL appears in the template or docs; placeholders use
+  `dev.azure.com/contoso/MyProject`, and the compliant alternative is referenced via the public
+  `aka.ms/azdosc` short link and the control name, not an internal portal URL.
+- The GitHub fold template is unaffected by the ADO service-connection mechanism; if a parallel
+  GitHub identity note is added it stays documentation-only and preserves byte-identity of the
+  rendered default.
+
+**Test surface:** (a) a default install (no `--fold-service-connection`) renders an ADO pipeline
+byte-identical to the current template; (b) an install with `--fold-service-connection <name>`
+renders a pipeline whose checkout/push run under the named service connection and that contains no
+reliance on a manually-granted build-service Contribute; (c) the setup docs contain both the
+minimum-permission note and the `aka.ms/azdosc` compliant-alternative guidance with the generic
+placeholder; (d) the four fold-template copies remain byte-identical for the default rendering.
+
 ---
 
 ## Tier 2 (decision)
@@ -401,6 +468,16 @@ For E2, install with `--create-dirs` creates the directory; without it, fail-fas
   and template byte-identity; C's host-finding matrix (missing host `.squad/`, missing/empty fold
   YAML, missing agent, configured host, local-only squad); D's callsign attribution and
   double-prefix detection; and the chosen E behavior.
+- The ADO fold template renders byte-identical to today's output on a default install; an install
+  with `--fold-service-connection <name>` renders a pipeline whose state-branch checkout and push
+  run under the named service connection (managed-identity / service-principal backed) with no
+  reliance on a manually-granted build-service-account Contribute; the GitHub template default
+  rendering is unchanged (F).
+- The fold-pipeline setup docs document both the minimum write permission the default
+  `System.AccessToken` path needs on the state branch (noting the build-service-account control
+  flags a shared-account Contribute grant as over-privileged) and the compliant least-privilege
+  alternative via an Azure DevOps service connection (`aka.ms/azdosc`), using the
+  `dev.azure.com/contoso/MyProject` placeholder and no internal portal URL (F).
 - A `patch` changeset for `@bradygaster/squad-cli` is present (and one for
   `@bradygaster/squad-sdk` if its source is modified for D).
 - No specific internal tenant/host URL appears in any documentation; placeholders use

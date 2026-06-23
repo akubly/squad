@@ -40,11 +40,13 @@ staged before this session proceeds.
 follow-ups" are host administrative actions, NOT stack pieces — ignore them as
 implementation scope.
 
-Piece 48 delivers four Tier-1 sub-proposals and one Tier-2 decision. A, C, and D are
+Piece 48 delivers five Tier-1 sub-proposals and one Tier-2 decision. A, C, and D are
 self-contained CLI/SDK changes; B spans the fold-pipeline templates (all four copies) plus an
-install flag. A, C, D are Tier 1 (implement). E is a Tier-2 decision (destination-directory
-creation in `install-fold-pipeline`) — triage it first and either implement E1 (registry-gated
-auto-create; **recommended**) or E2 (`--create-dirs` opt-in) and record the rationale.
+install flag; F adds an opt-in service-connection identity parameter to the ADO fold template
+plus install wiring and setup docs, defaulting to today's behavior. A, B, C, D, F are Tier 1
+(implement). E is a Tier-2 decision (destination-directory creation in `install-fold-pipeline`) —
+triage it first and either implement E1 (registry-gated auto-create; **recommended**) or E2
+(`--create-dirs` opt-in) and record the rationale.
 
 ---
 
@@ -92,6 +94,7 @@ Before any code changes, triage the sub-proposals below and record decisions in
 | C — `squad doctor` host-repo diagnostics: when cwd resolves to a registered clone whose host is elsewhere, warn on missing host `.squad/`, missing/empty host fold-pipeline YAML, and missing in-repo `squad.agent.md` | Tier 1 | Accept |
 | D — Accurate orphan-payload callsign attribution: resolve the callsign against known source payload names (not a last-hyphen split) so `probe`, not `probe-agent`; flag doubly-prefixed `squad-<cs>-squad-…` payloads as orphans | Tier 1 | Accept |
 | E — `install-fold-pipeline` destination-dir creation: E1 registry-gated auto-create (**recommended**) vs E2 `--create-dirs` opt-in | Tier 2 | Decide — record E1 or E2 with rationale |
+| F — Make the fold pipeline's state-branch write-back identity explicit/compliant: add an opt-in `install-fold-pipeline --fold-service-connection <name>` that renders the ADO template to push under an ADO service connection (managed-identity/SP, `aka.ms/azdosc`) instead of relying on a manually-granted build-service Contribute; default rendering byte-identical to today; document the minimum-permission path and the compliant alternative in setup docs | Tier 1 | Accept |
 
 Record the triage outcome in `.squad/decisions/inbox/piece-48-triage.md` before writing any
 product code.
@@ -113,8 +116,9 @@ before the first product file is modified.
 **c.** Implement TDD: write failing tests first, then implementation, red-to-green. A is the
 install force-mode branch; B is the template correctness fix plus the install flag (edit the
 canonical template and re-sync mirrors — keep all four copies byte-identical); C and D are the
-two doctor enhancements (share `runDoctor`'s host/registry resolution); E is the decided
-behavior. See implementation notes below.
+two doctor enhancements (share `runDoctor`'s host/registry resolution); F is the ADO template
+identity parameter plus install wiring and setup docs (defaults byte-identical to today); E is the
+decided behavior. See implementation notes below.
 
 **d.** Run the scrub gate before committing:
 
@@ -136,10 +140,11 @@ npx changeset add
 ```
 
 Select `patch` for `@bradygaster/squad-cli` (and `patch` for `@bradygaster/squad-sdk` if you
-modified its `copilot-payload.ts` source for D). Summary: "Add `install-fold-pipeline --force`
-and `--delete-folded-refs`; fix the fold pipeline to delete only successfully-folded inbox refs;
-add `squad doctor` host-repo diagnostics (missing host `.squad/`, missing fold YAML, missing
-in-repo agent) and accurate orphan-payload callsign attribution."
+modified its `copilot-payload.ts` source for D). Summary: "Add `install-fold-pipeline --force`,
+`--delete-folded-refs`, and `--fold-service-connection`; fix the fold pipeline to delete only
+successfully-folded inbox refs; add `squad doctor` host-repo diagnostics (missing host `.squad/`,
+missing fold YAML, missing in-repo agent) and accurate orphan-payload callsign attribution; add a
+compliant opt-in service-connection identity for the fold state-branch push."
 
 **f.** Single squashed commit with the required trailer:
 
@@ -147,7 +152,7 @@ in-repo agent) and accurate orphan-payload callsign attribution."
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 ```
 
-Commit body: sub-proposals accepted (A/B/C/D and the E1/E2 outcome), triage outcome, scrub
+Commit body: sub-proposals accepted (A/B/C/D/F and the E1/E2 outcome), triage outcome, scrub
 gate result, and changeset classification.
 
 **g.** Push the branch:
@@ -262,3 +267,35 @@ unchanged. Record the decision and rationale in the triage file.
 Test (E1): a registry-confirmed host with no `.azuredevops/` installs successfully (directory
 created); an unconfirmed/fallback host with no directory still fails fast. (E2): `--create-dirs`
 creates the directory; absent the flag, fail-fast is unchanged.
+
+### Sub-proposal F — compliant fold state-branch write-back identity
+
+The ADO fold template (`packages/squad-cli/templates/fold/ado/fold-squad-state.yml` and the
+`squad-sdk` mirror) checks out `self` with `persistCredentials: true` and pushes the folded state
+to `squad/state/<callsign>` under `System.AccessToken`, which only works after a manual Project
+Build Service **Contribute** grant on the state branch — the over-privileged build-service-account
+pattern flagged by the "Securing Azure DevOps Build Service Accounts" control.
+
+Implement F as an **opt-in, default-preserving** change:
+
+1. **Template parameter.** Add an optional service-connection input to the ADO template (e.g. a
+   pipeline `parameter`/variable consumed by the checkout and the push step). When unset, the
+   rendered YAML is **byte-identical to today** (`System.AccessToken` path). When set, the checkout
+   and `git push origin HEAD:refs/heads/${STATE_BRANCH}` run under the service connection
+   (managed-identity / service-principal backed). Keep the four template copies byte-identical for
+   the default rendering.
+2. **Install wiring.** Add `--fold-service-connection <name>` to `install-fold-pipeline`. When
+   passed, render the template with the service-connection identity; absent the flag, the rendered
+   output is unchanged from today.
+3. **Docs.** In the fold-pipeline install / shared-host setup docs, document (a) the minimum write
+   permission the default `System.AccessToken` path needs on the state branch and that granting the
+   shared build service account Contribute is flagged as over-privileged, and (b) the compliant
+   alternative — an ADO service connection backed by a managed identity / service principal
+   (`aka.ms/azdosc`) scoped to the state branch — and how to wire it via the install flag. Use the
+   `dev.azure.com/contoso/MyProject` placeholder; do **not** reference any internal portal URL.
+
+Test (F): default install (no flag) renders the ADO template byte-identical to current output;
+`--fold-service-connection <name>` renders checkout/push under the named service connection with no
+build-service-Contribute reliance; setup docs contain both the minimum-permission note and the
+`aka.ms/azdosc` guidance with the generic placeholder; the four template copies stay byte-identical
+for the default rendering. The GitHub template default rendering is unchanged.

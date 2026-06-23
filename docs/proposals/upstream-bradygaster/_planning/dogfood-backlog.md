@@ -110,6 +110,7 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | C (Tier 1) | `squad doctor` host-repo diagnostics: when the current directory resolves to a registered clone whose shared-squad host is elsewhere, warn on a missing host `.squad/`, a missing/empty host fold-pipeline YAML (the gap that silently disables folding), and a missing in-repo `squad.agent.md` — actionable, best-effort, never firing for a single-repo/local squad |
 | D (Tier 1) | Accurate orphan-payload callsign attribution in `doctor`: resolve the owning callsign against known callsigns/source payload names instead of a last-hyphen split (so `squad-probe-agent-collaboration` → `probe`, not `probe-agent`) and flag doubly-prefixed re-namespaced payloads (`squad-<cs>-squad-…`) as orphans rather than silently treating them as owned |
 | E (Tier 2, decision) | `install-fold-pipeline` destination-directory creation — registry-gated auto-create (create only on a registry-confirmed host; recommended) vs. an explicit `--create-dirs` opt-in, replacing the unconditional fail-fast on a missing `.azuredevops`/`.github/workflows` directory |
+| F (Tier 1) | Compliant fold state-branch write-back identity: the ADO fold pushes folded state under the implicit `System.AccessToken`, which only works after a manually-granted Project Build Service **Contribute** on the state branch — the over-privileged build-service-account pattern flagged by the "Securing Azure DevOps Build Service Accounts" control. Add an opt-in `install-fold-pipeline --fold-service-connection <name>` that renders the ADO template to push under an ADO service connection (managed-identity / service-principal backed, `aka.ms/azdosc`) for a per-resource least-privilege identity; default rendering stays byte-identical to today, and the setup docs document both the minimum-permission path and the compliant alternative (generic `dev.azure.com/contoso/MyProject` placeholder, no internal portal URL) |
 
 ---
 
@@ -118,8 +119,9 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 None currently. Piece 46 closed the originally-planned stack; piece 47 reopened it with a
 live-reproduced monorepo team-root transport defect plus two sync registry-resolution gaps;
 piece 48 continues it from the next dogfooding pass (shared-host operability — install
-ergonomics, fold inbox-branch cleanup hygiene, and two `doctor` diagnostics) and is now specced
-(above). Further pieces are added here as new dogfood cycles surface them.
+ergonomics, fold inbox-branch cleanup hygiene, two `doctor` diagnostics, and a compliant
+fold-pipeline state-branch identity) and is now specced (above). Further pieces are added here as
+new dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
 
