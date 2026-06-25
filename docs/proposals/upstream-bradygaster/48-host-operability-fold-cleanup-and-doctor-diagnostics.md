@@ -4,11 +4,11 @@
 
 A fresh end-to-end dogfooding pass against the landed stack (piece-47 tip) exercised the
 shared-host operator path — installing the fold pipeline into a host repository, running the
-fold loop, and diagnosing a host with `squad doctor` — and surfaced six operability gaps that
+fold loop, and diagnosing a host with `squad doctor` — and surfaced seven operability gaps that
 make the cross-repo workflow harder to set up and harder to keep healthy than it needs to be.
 None is a transport-correctness defect (the fold loop folds correctly once configured); each is
-an ergonomics, lifecycle-hygiene, diagnostics, or pipeline-identity gap that cost real time
-during the pass.
+an ergonomics, lifecycle-hygiene, diagnostics, pipeline-identity, or CLI-affordance gap that cost
+real time during the pass.
 
 1. **`install-fold-pipeline` cannot update an out-of-date pipeline file.** The command already
    declares a `force` option but never wires it into the conflict gate: when the destination
@@ -64,11 +64,26 @@ during the pass.
       compliant alternative, so every operator rediscovers the grant by hitting a push failure and is
       steered toward the non-compliant fix.
 
+7. **`squad assign`'s `--callsign` flag is overloaded, forcing a redundant restatement of the
+   callsign to clear an origin-collision guard.** In the warm path the positional argument already
+   names the squad to assign to (e.g. `squad assign teamx`). When the current clone's fetch remotes
+   also match the recorded `origins[]` of two or more *other* registered squads, the origin-collision
+   guard (Guard 8) aborts with `ERR_ASSIGN_ORIGIN_AMBIGUITY` and tells the operator to "use an
+   explicit `--callsign` to disambiguate". The only value that clears it is the callsign **already
+   given positionally** — `squad assign teamx --callsign teamx` — because the guard's filter merely
+   drops collision candidates whose callsign differs from `--callsign`, and the target's own entry is
+   already excluded, so naming it a second time empties the candidate set as a side effect rather than
+   by any intentional selection. The same `--callsign` flag means something genuinely different on the
+   cold-start (URL) path — there it supplies the callsign to register the freshly-cloned squad under,
+   which a URL cannot provide. The result is a flag that does two unrelated jobs, an error message
+   that names neither the colliding squads nor the exact remediation, and a warm-path invocation that
+   makes the operator type the same callsign twice for no apparent reason.
+
    This piece delivers (A) `install-fold-pipeline --force`, (B) a corrected, install-time-enableable
    fold inbox-branch cleanup, (C) host-repo diagnostics in `doctor`, (D) accurate orphan-payload
-   callsign attribution in `doctor`, and (F) a compliant, documented state-branch write-back identity
-   for the fold pipeline; and resolves a Tier-2 decision (E) about destination-directory creation in
-   `install-fold-pipeline`.
+   callsign attribution in `doctor`, (F) a compliant, documented state-branch write-back identity
+   for the fold pipeline, and (G) de-overloaded `squad assign` origin-collision disambiguation; and
+   resolves a Tier-2 decision (E) about destination-directory creation in `install-fold-pipeline`.
 
 Stack position: Part 48 of the cross-repo arc. Branches off piece 47
 (`squad/piece-47-monorepo-gitdir-and-sync-registry-robustness`). Piece 47 reopened the stack
@@ -222,14 +237,14 @@ clone is registry-confirmed is the Tier-2 decision (E).
 
 ## Proposed change
 
-Sub-proposals A, B, C, D, and F are Tier 1 (concrete, implementation-ready). Sub-proposal E is
+Sub-proposals A, B, C, D, F, and G are Tier 1 (concrete, implementation-ready). Sub-proposal E is
 Tier 2 (a decision with a safety/surprise cost) gated on the maintainer's choice.
 
 **Recommended implementation order:** A (small, self-contained install flag), then B (fold-template
 correctness + the install flag that enables it), then C and D (the two `doctor` enhancements,
 which share the host/registry resolution already in `runDoctor`), then F (fold-template identity
-parameter + docs, which touches the same templates as B), then resolve E and implement the
-chosen behavior.
+parameter + docs, which touches the same templates as B), then G (the self-contained `squad assign`
+disambiguation fix), then resolve E and implement the chosen behavior.
 
 ---
 
@@ -402,6 +417,53 @@ reliance on a manually-granted build-service Contribute; (c) the setup docs cont
 minimum-permission note and the `aka.ms/azdosc` compliant-alternative guidance with the generic
 placeholder; (d) the four fold-template copies remain byte-identical for the default rendering.
 
+### G. De-overload `squad assign` origin-collision disambiguation
+
+**Current behavior:** when the current clone's fetch remotes match the recorded `origins[]` of two
+or more *other* registered squads, the warm-path origin-collision guard throws
+`ERR_ASSIGN_ORIGIN_AMBIGUITY` and instructs the operator to pass an explicit `--callsign`. The only
+value that clears the guard is the callsign already supplied positionally (the guard filter drops
+candidates whose callsign differs from `--callsign`, and the target's own entry is already
+excluded), so the operator must restate the same callsign — `squad assign teamx --callsign teamx` —
+to clear it by side effect. The same `--callsign` flag has an unrelated, legitimate meaning on the
+cold-start (URL) path, where it names the callsign to register the cloned squad under. The error
+message names neither the colliding squads nor the precise remediation.
+
+**Required behavior:** make the warm-path disambiguation explicit and non-redundant, and make the
+error actionable, **without changing the cold-start meaning of `--callsign`**:
+
+1. **No redundant restatement.** When the positional callsign is present (warm path), the
+   origin-collision guard treats *that* callsign as the operator's intended target for
+   disambiguation — supplying `--callsign <sameValue>` is no longer required to proceed. (The
+   positional callsign is the squad being assigned to; a remote that also matches other squads'
+   recorded origins should not block assigning to the explicitly-named target.)
+2. **Purpose-named override for the genuine multi-match case.** Add a dedicated, self-documenting
+   flag (e.g. `--allow-origin-collision`) that records the assignment while acknowledging the shared
+   origin, for the case where the operator deliberately wants the current remotes associated with the
+   target despite overlapping another squad's origins. `--callsign` retains its cold-start role
+   (naming the registration callsign for a URL assign) and is no longer the warm-path disambiguator.
+3. **Actionable error.** When the guard still fires (genuinely ambiguous and unresolved), the
+   message names the colliding squads, restates the target being assigned to, and gives the exact
+   remediation — e.g. *"Your fetch remotes also match squads `alpha`, `beta`. You are assigning to
+   `teamx`; re-run with `--allow-origin-collision` to record this assignment, or remove the
+   overlapping remote."*
+
+**Hard constraints:**
+- The cold-start (URL) semantics of `--callsign` are unchanged; only the warm-path disambiguation
+  affordance changes.
+- The warm path no longer requires restating the positional callsign via `--callsign` to clear the
+  origin-collision guard.
+- A genuine, unresolved multi-squad origin collision still fails closed (no silent mis-assignment);
+  the new override flag is the explicit opt-in.
+- The error message names the colliding squads and the exact remediation flag.
+
+**Test surface:** (a) a warm-path `squad assign teamx` whose remotes also match two other squads'
+origins succeeds (assigns to `teamx`) without requiring `--callsign teamx`; (b) the
+`ERR_ASSIGN_ORIGIN_AMBIGUITY` path, where it still applies, emits a message naming the colliding
+squads, the target, and the `--allow-origin-collision` remediation; (c) `--allow-origin-collision`
+records the assignment in the multi-match case; (d) the cold-start (URL) path still accepts
+`--callsign` to name the registration callsign, unchanged.
+
 ---
 
 ## Tier 2 (decision)
@@ -467,7 +529,13 @@ For E2, install with `--create-dirs` creates the directory; without it, fail-fas
 - Tests cover: A's four force-mode branches; B's folded-set deletion and install-flag rendering
   and template byte-identity; C's host-finding matrix (missing host `.squad/`, missing/empty fold
   YAML, missing agent, configured host, local-only squad); D's callsign attribution and
-  double-prefix detection; and the chosen E behavior.
+  double-prefix detection; G's warm-path no-redundant-callsign assign, the actionable
+  ambiguity error, and the `--allow-origin-collision` override; and the chosen E behavior. `squad assign <callsign>` whose fetch remotes also match two or more other squads'
+  recorded origins assigns to the named callsign **without** requiring a redundant
+  `--callsign <sameValue>`; a genuinely unresolved multi-squad origin collision still fails closed
+  with an `ERR_ASSIGN_ORIGIN_AMBIGUITY` whose message names the colliding squads, the target, and
+  the `--allow-origin-collision` remediation; `--allow-origin-collision` records the assignment in
+  that case; the cold-start (URL) meaning of `--callsign` is unchanged (G).
 - The ADO fold template renders byte-identical to today's output on a default install; an install
   with `--fold-service-connection <name>` renders a pipeline whose state-branch checkout and push
   run under the named service connection (managed-identity / service-principal backed) with no

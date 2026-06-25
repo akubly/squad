@@ -40,13 +40,14 @@ staged before this session proceeds.
 follow-ups" are host administrative actions, NOT stack pieces — ignore them as
 implementation scope.
 
-Piece 48 delivers five Tier-1 sub-proposals and one Tier-2 decision. A, C, and D are
+Piece 48 delivers six Tier-1 sub-proposals and one Tier-2 decision. A, C, and D are
 self-contained CLI/SDK changes; B spans the fold-pipeline templates (all four copies) plus an
 install flag; F adds an opt-in service-connection identity parameter to the ADO fold template
-plus install wiring and setup docs, defaulting to today's behavior. A, B, C, D, F are Tier 1
-(implement). E is a Tier-2 decision (destination-directory creation in `install-fold-pipeline`) —
-triage it first and either implement E1 (registry-gated auto-create; **recommended**) or E2
-(`--create-dirs` opt-in) and record the rationale.
+plus install wiring and setup docs, defaulting to today's behavior; G is a self-contained
+`squad assign` ergonomics fix (de-overload the warm-path `--callsign` disambiguation). A, B, C, D,
+F, G are Tier 1 (implement). E is a Tier-2 decision (destination-directory creation in
+`install-fold-pipeline`) — triage it first and either implement E1 (registry-gated auto-create;
+**recommended**) or E2 (`--create-dirs` opt-in) and record the rationale.
 
 ---
 
@@ -95,6 +96,7 @@ Before any code changes, triage the sub-proposals below and record decisions in
 | D — Accurate orphan-payload callsign attribution: resolve the callsign against known source payload names (not a last-hyphen split) so `probe`, not `probe-agent`; flag doubly-prefixed `squad-<cs>-squad-…` payloads as orphans | Tier 1 | Accept |
 | E — `install-fold-pipeline` destination-dir creation: E1 registry-gated auto-create (**recommended**) vs E2 `--create-dirs` opt-in | Tier 2 | Decide — record E1 or E2 with rationale |
 | F — Make the fold pipeline's state-branch write-back identity explicit/compliant: add an opt-in `install-fold-pipeline --fold-service-connection <name>` that renders the ADO template to push under an ADO service connection (managed-identity/SP, `aka.ms/azdosc`) instead of relying on a manually-granted build-service Contribute; default rendering byte-identical to today; document the minimum-permission path and the compliant alternative in setup docs | Tier 1 | Accept |
+| G — De-overload `squad assign` warm-path origin-collision disambiguation: a warm-path `squad assign <callsign>` whose remotes also match ≥2 other squads' origins assigns to the named callsign without requiring a redundant `--callsign <sameValue>`; add a purpose-named `--allow-origin-collision` opt-in for the genuine multi-match case; make `ERR_ASSIGN_ORIGIN_AMBIGUITY` name the colliding squads, the target, and the remediation; cold-start (URL) `--callsign` semantics unchanged | Tier 1 | Accept |
 
 Record the triage outcome in `.squad/decisions/inbox/piece-48-triage.md` before writing any
 product code.
@@ -117,8 +119,9 @@ before the first product file is modified.
 install force-mode branch; B is the template correctness fix plus the install flag (edit the
 canonical template and re-sync mirrors — keep all four copies byte-identical); C and D are the
 two doctor enhancements (share `runDoctor`'s host/registry resolution); F is the ADO template
-identity parameter plus install wiring and setup docs (defaults byte-identical to today); E is the
-decided behavior. See implementation notes below.
+identity parameter plus install wiring and setup docs (defaults byte-identical to today); G is the
+`squad assign` warm-path disambiguation fix (de-overload `--callsign`, add `--allow-origin-collision`,
+actionable error); E is the decided behavior. See implementation notes below.
 
 **d.** Run the scrub gate before committing:
 
@@ -144,7 +147,9 @@ modified its `copilot-payload.ts` source for D). Summary: "Add `install-fold-pip
 `--delete-folded-refs`, and `--fold-service-connection`; fix the fold pipeline to delete only
 successfully-folded inbox refs; add `squad doctor` host-repo diagnostics (missing host `.squad/`,
 missing fold YAML, missing in-repo agent) and accurate orphan-payload callsign attribution; add a
-compliant opt-in service-connection identity for the fold state-branch push."
+compliant opt-in service-connection identity for the fold state-branch push; de-overload
+`squad assign` warm-path origin-collision disambiguation (no redundant `--callsign`, new
+`--allow-origin-collision`, actionable ambiguity error)."
 
 **f.** Single squashed commit with the required trailer:
 
@@ -152,7 +157,7 @@ compliant opt-in service-connection identity for the fold state-branch push."
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 ```
 
-Commit body: sub-proposals accepted (A/B/C/D/F and the E1/E2 outcome), triage outcome, scrub
+Commit body: sub-proposals accepted (A/B/C/D/F/G and the E1/E2 outcome), triage outcome, scrub
 gate result, and changeset classification.
 
 **g.** Push the branch:
@@ -299,3 +304,40 @@ Test (F): default install (no flag) renders the ADO template byte-identical to c
 build-service-Contribute reliance; setup docs contain both the minimum-permission note and the
 `aka.ms/azdosc` guidance with the generic placeholder; the four template copies stay byte-identical
 for the default rendering. The GitHub template default rendering is unchanged.
+
+### Sub-proposal G — de-overload `squad assign` origin-collision disambiguation
+
+The relevant code is `packages/squad-cli/src/commands/assign.ts` (Guard 8, the origin-collision
+check in the warm path) and `assign-args.ts` (the `--callsign` flag parse). Confirm the live shapes
+before changing them:
+- The warm-path positional callsign flows `callsignOrUrl` → `rawArg` → `_warmPath`'s `callsign`.
+- Guard 8 builds `originMatchingEntries` by filtering `existingSquads` where `e.callsign !== callsign`
+  (target already excluded) **and** `opts.callsign && e.callsign !== opts.callsign` (the overloaded
+  warm-path use of the flag). `>= 2` throws `ERR_ASSIGN_ORIGIN_AMBIGUITY`; `=== 1` warns and proceeds.
+- The cold-start path (`_coldStart`) uses `opts.callsign` legitimately as `opts.callsign ??
+  _deriveCallsignFromUrl(url)` to name the registration callsign. **Do not change that.**
+
+Implement:
+1. **Remove the redundant `--callsign` requirement in the warm path.** The warm-path positional
+   callsign is the disambiguation target; Guard 8 should not require `--callsign <sameValue>` to
+   proceed when remotes also match other squads' origins. Drop the `opts.callsign`-based filter line
+   from the warm-path guard (keep the `e.callsign === callsign` self-exclusion).
+2. **Add `--allow-origin-collision`** to `AssignCliArgs` / `parseAssignArgs` (boolean, like `--yes`).
+   When set, the warm path records the assignment even in the genuine ≥2-match case instead of
+   throwing. Without it, an unresolved genuine multi-match still fails closed.
+3. **Make the error actionable.** Reword `ERR_ASSIGN_ORIGIN_AMBIGUITY` to name the colliding squads
+   (already available as `names`), restate the target callsign, and direct the operator to
+   `--allow-origin-collision` (or to remove the overlapping remote). Keep the error code stable.
+4. **Decide the default-flow semantics deliberately:** with the redundant filter gone, define when
+   the guard still throws. Recommended: the positional target is always assignable; the guard throws
+   only when there is **no** positional target to anchor disambiguation (cannot occur on the warm
+   path, which always has one) — i.e. in practice the warm path proceeds and surfaces the
+   `=== 1`-style warning for any overlap, while `--allow-origin-collision` silences it. Record the
+   exact chosen semantics in the triage file so the test matrix matches.
+
+Test (G): (a) warm-path assign to `teamx` whose remotes also match two other squads' origins
+(`alpha`, `beta`) succeeds without `--callsign teamx`; (b) where the guard still applies, the thrown
+`ERR_ASSIGN_ORIGIN_AMBIGUITY` message names `alpha`, `beta`, the target `teamx`, and
+`--allow-origin-collision`; (c) `--allow-origin-collision` records the assignment in the multi-match
+case; (d) the cold-start URL path still honors `--callsign` to name the registration callsign,
+unchanged. Use only generic placeholder callsigns (`teamx`, `alpha`, `beta`) in tests and docs.
