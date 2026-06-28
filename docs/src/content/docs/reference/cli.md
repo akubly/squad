@@ -38,7 +38,7 @@ squad init
 | `squad start [--tunnel] [--port N] [--command cmd]` | Start Copilot with remote phone access via PTY and WebSocket | No |
 | `squad status` | Show which squad is active and why | Yes |
 | `squad doctor` | Validate squad setup integrity and diagnose issues (alias: `heartbeat`) | Yes |
-| `squad install-fold-pipeline <github\|ado> [--callsign <name>]` | Install the fold pipeline definition at the host repository root | Yes |
+| `squad install-fold-pipeline <github\|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>]` | Install the fold pipeline definition at the host repository root | Yes |
 | `squad upgrade` | Upgrade Squad-owned files to latest version | Yes |
 | `squad upgrade --state-backend <type>` | Migrate state backend (`orphan`, `two-layer`); installs git hooks automatically | Yes |
 | `squad upgrade --migrate-directory` | Rename legacy `.ai-team/` directory to `.squad/` | Yes |
@@ -250,7 +250,7 @@ Install the CI definition that folds Squad inbox branches into state branches.
 **Synopsis:**
 
 ```text
-squad install-fold-pipeline <github|ado> [--callsign <name>]
+squad install-fold-pipeline <github|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>]
 ```
 
 **Behavior:**
@@ -258,8 +258,13 @@ squad install-fold-pipeline <github|ado> [--callsign <name>]
 - Writes the definition at the host repository root: `.github/workflows/fold-squad-state.yml` for GitHub or `.azuredevops/fold-squad-state.yml` for ADO.
 - Without `--callsign`, installs one callsign-generic pipeline that discovers inbox callsigns at run time and folds each into `squad/state/<callsign>`.
 - With `--callsign <name>`, installs a scoped pipeline for that callsign only.
+- `--force` overwrites an existing pipeline file whose contents differ, saving the prior version to a `.bak` sibling first.
+- `--delete-folded-refs` renders the pipeline with inbox-branch cleanup enabled, so a successfully-folded `squad/inbox/<callsign>/<handle>` ref is deleted after its commits are folded. The default leaves cleanup **off** (`DELETE_FOLDED_REFS=false`); only refs that actually folded are ever deleted.
+- `--fold-service-connection <name>` (ADO only) renders the state-branch write-back to push under the named Azure DevOps service connection instead of the implicit build-service identity (see compliance note below). Omitting the flag renders a pipeline byte-identical to the default.
 
-**Prerequisite:** the CI service identity must have **Contribute**, **Create branch**, and **Force push** permission on the host repository (for example, `dev.azure.com/contoso/MyProject`) because the fold job creates and force-updates `squad/state/<callsign>` branches.
+**Prerequisite (default `System.AccessToken` path):** with no `--fold-service-connection`, the ADO fold job pushes `squad/state/<callsign>` under the project's build-service identity (`System.AccessToken`). The **minimum** permission that path requires on the host repository (for example, `dev.azure.com/contoso/MyProject`) is **Contribute**, **Create branch**, and **Force push** on the `squad/state/*` branches, because the job creates and force-updates those branches. Granting the shared Project Build Service account **Contribute** at the repository level is flagged as over-privileged by the **Securing Azure DevOps Build Service Accounts** control and should be remediated.
+
+**Compliant least-privilege alternative (recommended):** pass `--fold-service-connection <name>` to push under a per-resource Azure DevOps service connection backed by a managed identity or service principal (`aka.ms/azdosc`), scoped to only the state branches. This avoids granting the shared build service account repository-wide Contribute. Create the service connection in your project (for example, `dev.azure.com/contoso/MyProject`), grant it the minimum branch permission above on `squad/state/*`, then run `squad install-fold-pipeline ado --fold-service-connection <name>`. The rendered pipeline authenticates the checkout and push with that identity instead of `System.AccessToken`. The GitHub workflow is unaffected by this mechanism and continues to use its workflow `GITHUB_TOKEN`.
 
 **Azure DevOps run serialization:** the ADO fold pipeline runs as a stage with `lockBehavior: sequential` that references a protected Environment named `squad-fold`, so queued runs serialize through an exclusive lock and the fetch→fold→push critical section for a `squad/state/<callsign>` branch never overlaps across runs (`trigger.batch: true` still coalesces bursts and `--force-with-lease` remains the integrity backstop). As a one-time onboarding step, create the `squad-fold` Environment in your project (for example, under `dev.azure.com/contoso/MyProject`), add an **Exclusive lock** check to it, and grant the pipeline permission to use it. The GitHub workflow serializes runs through its `concurrency` group and needs no additional setup.
 

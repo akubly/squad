@@ -70,6 +70,19 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(raw).toContain('--force-with-lease');
   });
 
+  it('deletes only successfully-folded refs, driven by FOLDED_ENTRIES not the full discovered set (piece 48 B)', () => {
+    // The cleanup loop must iterate the successfully-folded refs, never $SORTED_REFS,
+    // so a ref whose fold commit failed is never deleted unfolded.
+    expect(raw).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref')");
+    expect(raw).toContain('done <<< "$FOLDED_REF_LIST"');
+    // The fold loop still iterates $SORTED_REFS exactly once; the delete loop no longer does.
+    expect(raw.split('done <<< "$SORTED_REFS"').length - 1).toBe(1);
+  });
+
+  it('keeps the inbox-branch cleanup gated off by default (DELETE_FOLDED_REFS:-false) (piece 48 B)', () => {
+    expect(raw).toContain('if [ "${DELETE_FOLDED_REFS:-false}" = "true" ]; then');
+  });
+
   it('discovers distinct callsigns at run time from live inbox refs', () => {
     expect(raw).toContain("git ls-remote --heads origin 'refs/heads/squad/inbox/*'");
     expect(raw).toContain("sed -nE 's#^[0-9a-f]+\\srefs/heads/squad/inbox/([^/]+)/.*#\\1#p'");

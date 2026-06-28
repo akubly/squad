@@ -350,16 +350,25 @@ async function main(): Promise<void> {
     }
     if (cmd === 'install-fold-pipeline') {
       console.log(`\n${b}squad install-fold-pipeline${r} — Install a fold pipeline into the host repository\n`);
-      console.log(`Usage: squad install-fold-pipeline <github|ado> [--callsign <name>]\n`);
+      console.log(`Usage: squad install-fold-pipeline <github|ado> [--callsign <name>] [--force]`);
+      console.log(`                                   [--delete-folded-refs] [--fold-service-connection <name>]\n`);
       console.log(`Installs a repository-root pipeline definition that folds Squad inbox refs into`);
       console.log(`squad/state/<callsign> branches. Without --callsign, the pipeline discovers`);
       console.log(`callsigns at run time and folds each callsign independently.\n`);
       console.log(`Options:`);
-      console.log(`  --callsign <name>  Generate a pipeline scoped to one callsign\n`);
+      console.log(`  --callsign <name>                 Generate a pipeline scoped to one callsign`);
+      console.log(`  --force                           Overwrite an existing, differing pipeline file`);
+      console.log(`                                    (the prior content is saved to <file>.bak)`);
+      console.log(`  --delete-folded-refs              Render the pipeline with inbox-branch cleanup`);
+      console.log(`                                    enabled (deletes only successfully-folded refs)`);
+      console.log(`  --fold-service-connection <name>  (ado) Push the folded state branch under the`);
+      console.log(`                                    named Azure DevOps service connection identity`);
+      console.log(`                                    instead of the build-service account\n`);
       console.log(`Prerequisite: the CI service identity must have Contribute, Create branch,`);
       console.log(`and Force push permission on the host repository (for example,`);
       console.log(`dev.azure.com/contoso/MyProject) because the job creates and force-updates`);
-      console.log(`squad/state/<callsign> branches.\n`);
+      console.log(`squad/state/<callsign> branches. See the fold-pipeline setup docs for the`);
+      console.log(`least-privilege --fold-service-connection alternative (aka.ms/azdosc).\n`);
       return;
     }
     if (cmd === 'assign') {
@@ -372,7 +381,8 @@ async function main(): Promise<void> {
       console.log(`  --state-remote <name>        Git remote name for state operations`);
       console.log(`  --state-branch <name>        Orphan branch holding folded canonical state`);
       console.log(`  --skills-from <sel>          Skill source: host, none, or local path`);
-      console.log(`  --callsign <name>            Override callsign (warm-path disambiguation)`);
+      console.log(`  --callsign <name>            Cold-start: callsign to register the cloned squad under`);
+      console.log(`  --allow-origin-collision     Record the assignment despite remotes matching other squads' origins`);
       console.log(`  --yes                        Auto-apply git-rm-cached + .gitignore entries\n`);
       return;
     }
@@ -1341,7 +1351,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, yes } = parseAssignArgs(args.slice(1));
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, yes, allowOriginCollision } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1355,6 +1365,7 @@ async function main(): Promise<void> {
         stateRemote,
         stateBranch,
         yes,
+        allowOriginCollision,
         cwd: getSquadStartDir(),
       });
       // Emit warnings only on result kinds that carry them.
@@ -1500,13 +1511,17 @@ async function main(): Promise<void> {
   if (cmd === 'install-fold-pipeline') {
     const platform = args[1] as string | undefined;
     if (platform !== 'github' && platform !== 'ado') {
-      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado> [--callsign <name>]`);
+      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>]`);
       return;
     }
     const callsignIdx = args.indexOf('--callsign');
     const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
+    const force = args.includes('--force');
+    const deleteFoldedRefs = args.includes('--delete-folded-refs');
+    const fscIdx = args.indexOf('--fold-service-connection');
+    const foldServiceConnection = (fscIdx !== -1 && args[fscIdx + 1]) ? args[fscIdx + 1] : undefined;
     const { installFoldPipeline } = await import('./cli/commands/install-fold-pipeline.js');
-    await installFoldPipeline(platform, { cwd: getSquadStartDir(), callsign });
+    await installFoldPipeline(platform, { cwd: getSquadStartDir(), callsign, force, deleteFoldedRefs, foldServiceConnection });
     return;
   }
 

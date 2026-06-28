@@ -38,6 +38,77 @@ export interface InstallFoldPipelineOptions {
   force?: boolean;
   /** Optional callsign to scope the pipeline trigger and fold target to this squad. */
   callsign?: string;
+  /**
+   * When true, render the pipeline with the inbox-branch cleanup default
+   * (DELETE_FOLDED_REFS) set to true. Default (unset) renders false so cleanup
+   * stays off unless an operator opts in.
+   */
+  deleteFoldedRefs?: boolean;
+  /**
+   * Optional Azure DevOps service connection name (ADO platform only). When set,
+   * the rendered ADO pipeline checks out and pushes the folded state branch under
+   * the named service connection's identity (managed identity / service principal)
+   * instead of the build-service account's System.AccessToken. When unset, the
+   * rendered output is byte-identical to the default template.
+   */
+  foldServiceConnection?: string;
+}
+
+/**
+ * Apply render-time substitutions for the --delete-folded-refs install flag.
+ *
+ * Flips the rendered pipeline's DELETE_FOLDED_REFS default to `true`. Anchored,
+ * minimal replacements so unrelated template text is never disturbed. A no-op when
+ * the flag is unset (cleanup stays off by default).
+ */
+function applyDeleteFoldedRefs(content: string, platform: 'github' | 'ado'): string {
+  if (platform === 'ado') {
+    const nl = content.includes('\r\n') ? '\r\n' : '\n';
+    return content.replace(
+      `name: DELETE_FOLDED_REFS${nl}    value: 'false'`,
+      `name: DELETE_FOLDED_REFS${nl}    value: 'true'`,
+    );
+  }
+  return content.replace('${DELETE_FOLDED_REFS:-false}', '${DELETE_FOLDED_REFS:-true}');
+}
+
+/**
+ * Apply render-time substitutions for the --fold-service-connection install flag (ADO only).
+ *
+ * Renders the state-branch checkout and push to run under the named Azure DevOps
+ * service connection (managed-identity / service-principal backed) instead of the
+ * build-service account's System.AccessToken — the compliant, least-privilege
+ * alternative (see aka.ms/azdosc). A no-op for the GitHub platform and when unset,
+ * keeping the default rendering byte-identical to the committed template.
+ */
+function applyFoldServiceConnection(content: string, serviceConnection: string): string {
+  const nl = content.includes('\r\n') ? '\r\n' : '\n';
+  // Stop persisting the build-service credentials on the checkout.
+  let out = content.replace('persistCredentials: true', 'persistCredentials: false');
+
+  // Acquire a bearer token from the service connection's identity and wire it into
+  // git's auth header for every subsequent step in this job.
+  const authStep =
+    `                  displayName: Configure git identity${nl}` +
+    nl +
+    `                - task: AzureCLI@2${nl}` +
+    `                  displayName: Authenticate git push via Azure service connection${nl}` +
+    `                  inputs:${nl}` +
+    `                    azureSubscription: ${serviceConnection}${nl}` +
+    `                    scriptType: bash${nl}` +
+    `                    scriptLocation: inlineScript${nl}` +
+    `                    inlineScript: |${nl}` +
+    `                      AZDO_TOKEN=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)${nl}` +
+    `                      git config --global http.extraheader "AUTHORIZATION: bearer $AZDO_TOKEN"${nl}`;
+  out = out.replace(`                  displayName: Configure git identity${nl}`, authStep);
+
+  // The build-service token is no longer used — drop its env exposure.
+  out = out.replace(
+    `${nl}                  env:${nl}                    SYSTEM_ACCESSTOKEN: $(System.AccessToken)`,
+    '',
+  );
+
+  return out;
 }
 
 function tryGetRepoRoot(cwd: string): string | undefined {
@@ -134,15 +205,23 @@ export async function installFoldPipeline(
   };
   const targetDir = platformDirMap[platform];
 
-  // Fail fast if the target directory does not exist.
-  // Do NOT create missing parent directories — host clone must be bootstrapped first.
+  // Fail fast if the target directory does not exist — UNLESS the host was resolved
+  // from a matching registry entry (E1: registry-gated auto-create). A registry-confirmed
+  // host is a known, intended target (the operator already ran `squad assign`), so creating
+  // the platform directory there is safe. For config-fallback / unconfirmed hosts, preserve
+  // today's fail-fast: never create directories in a repo the registry has not confirmed.
   if (!fs.existsSync(targetDir)) {
-    console.error(
-      `✗ Target directory does not exist: ${targetDir}\n` +
-      `  Bootstrap the shared-squad host clone pipeline directory before running install-fold-pipeline.`,
-    );
-    process.exit(1);
-    return;
+    if (entry) {
+      fs.mkdirSync(targetDir, { recursive: true });
+      console.log(`${GREEN}✓${RESET} Created pipeline directory in registered host: ${targetDir}`);
+    } else {
+      console.error(
+        `✗ Target directory does not exist: ${targetDir}\n` +
+        `  Bootstrap the shared-squad host clone pipeline directory before running install-fold-pipeline.`,
+      );
+      process.exit(1);
+      return;
+    }
   }
 
   // ── Source template path ───────────────────────────────────────────────────
@@ -189,6 +268,16 @@ export async function installFoldPipeline(
     templateContent = rawTemplate;
   }
 
+  // ── Install-flag render substitutions ─────────────────────────────────────
+  // Applied after callsign parameterization so they compose with it. Both are
+  // no-ops by default, keeping the default rendering byte-identical to the template.
+  if (options.deleteFoldedRefs) {
+    templateContent = applyDeleteFoldedRefs(templateContent, platform);
+  }
+  if (options.foldServiceConnection && platform === 'ado') {
+    templateContent = applyFoldServiceConnection(templateContent, options.foldServiceConnection);
+  }
+
   const filename = callsign ? `fold-squad-state.${callsign}.yml` : 'fold-squad-state.yml';
   const destPath = path.join(targetDir, filename);
 
@@ -199,10 +288,17 @@ export async function installFoldPipeline(
       console.log(`${GREEN}✓${RESET} ${filename} already installed and up to date.`);
       return;
     }
-    // Content differs — conflict guard.
+    // Content differs — conflict guard, unless --force overwrites with a backup.
+    if (options.force) {
+      const backupPath = `${destPath}.bak`;
+      fs.writeFileSync(backupPath, existing, 'utf-8');
+      fs.writeFileSync(destPath, templateContent, 'utf-8');
+      console.log(`${GREEN}✓${RESET} Overwrote ${filename} (previous content backed up to ${backupPath}).`);
+      return;
+    }
     console.error(
       `✗ ${filename} exists at ${destPath} with different content.\n` +
-      `  Review and delete it manually before re-running install-fold-pipeline.`,
+      `  Review and delete it manually before re-running install-fold-pipeline, or pass --force to overwrite (a .bak backup is written).`,
     );
     process.exit(1);
     return;

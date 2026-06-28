@@ -375,6 +375,9 @@ export function uninstallCopilotPayload(opts: UninstallCopilotPayloadOpts): Unin
 export interface DiagnoseCopilotPayloadOpts {
   /** Registered callsigns from the registry. */
   knownCallsigns: string[];
+  /** Known source skill/agent base names (e.g. 'agent-collaboration', 'squad-conventions').
+   *  Used to attribute the owning callsign of a multi-word payload precisely. */
+  knownSkillBases?: string[];
   copilotHome?: string;
 }
 
@@ -391,6 +394,7 @@ export interface DiagnoseCopilotPayloadResult {
 export function diagnoseCopilotPayload(opts: DiagnoseCopilotPayloadOpts): DiagnoseCopilotPayloadResult {
   const copilotHome = opts.copilotHome ?? path.join(os.homedir(), '.copilot');
   const { knownCallsigns } = opts;
+  const knownSkillBases = opts.knownSkillBases ?? [];
   for (const cs of knownCallsigns) {
     assertValidCallsign(cs);
   }
@@ -402,16 +406,10 @@ export function diagnoseCopilotPayload(opts: DiagnoseCopilotPayloadOpts): Diagno
     for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith('squad-')) continue;
 
-      let owned = false;
-      for (const cs of knownCallsigns) {
-        if (entry.name.startsWith(`squad-${cs}-`)) {
-          owned = true;
-          break;
-        }
-      }
+      const owned = _isOwnedPayload(entry.name, knownCallsigns, knownSkillBases);
 
       if (!owned) {
-        const candidate = _extractCandidateCallsign(entry.name);
+        const candidate = _extractCandidateCallsign(entry.name, knownSkillBases, knownCallsigns);
         if (candidate !== null) {
           orphans.push({
             kind: 'skill',
@@ -433,16 +431,10 @@ export function diagnoseCopilotPayload(opts: DiagnoseCopilotPayloadOpts): Diagno
       // Strip .agent.md before parsing.
       const base = entry.name.slice(0, -'.agent.md'.length);
 
-      let owned = false;
-      for (const cs of knownCallsigns) {
-        if (base.startsWith(`squad-${cs}-`)) {
-          owned = true;
-          break;
-        }
-      }
+      const owned = _isOwnedPayload(base, knownCallsigns, knownSkillBases);
 
       if (!owned) {
-        const candidate = _extractCandidateCallsign(base);
+        const candidate = _extractCandidateCallsign(base, knownSkillBases, knownCallsigns);
         if (candidate !== null) {
           orphans.push({
             kind: 'agent',
@@ -545,9 +537,67 @@ function _copyDirRecursive(src: string, dest: string): number {
  *
  * Returns null when the name doesn't contain enough segments to parse.
  */
-function _extractCandidateCallsign(name: string): string | null {
+/**
+ * Determine whether a `squad-…` payload name is owned by a registered callsign.
+ *
+ * A payload `squad-<cs>-<rest>` is owned when `<cs>` is a registered callsign AND
+ * `<rest>` is not itself a re-namespaced squad payload. A `<rest>` that begins with
+ * `squad-` is a stale double-prefix artifact UNLESS it names a real skill/agent base
+ * (e.g. the built-in `squad-conventions`), so `squad-<cs>-squad-conventions` is owned.
+ */
+function _isOwnedPayload(name: string, knownCallsigns: string[], knownSkillBases: string[] = []): boolean {
+  for (const cs of knownCallsigns) {
+    const prefix = `squad-${cs}-`;
+    if (name.startsWith(prefix)) {
+      const rest = name.slice(prefix.length);
+      // A `squad-` rest is a stale double-prefix artifact ONLY when it isn't a real
+      // skill/agent base (e.g. the built-in `squad-conventions`): squad-<cs>-squad-conventions
+      // is a legitimately-owned skill, not a re-namespacing orphan.
+      if (rest.startsWith('squad-') && !knownSkillBases.includes(rest)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Attribute the owning callsign of a `squad-…` payload.
+ *
+ * Resolution order:
+ *  1. Strip a known source skill/agent base-name suffix, so a multi-word payload
+ *     `squad-<cs>-<skillBase>` attributes to `<cs>` (e.g. `squad-probe-agent-collaboration`
+ *     → `probe`, and the doubly-prefixed `squad-teamx-squad-conventions` → `teamx`).
+ *  2. Failing a catalog match, prefer the longest registered callsign that prefixes the name.
+ *  3. Fall back to a trailing-hyphen split (legacy heuristic) so single-word and
+ *     uncatalogued payloads still attribute deterministically.
+ */
+function _extractCandidateCallsign(
+  name: string,
+  knownSkillBases: string[] = [],
+  knownCallsigns: string[] = [],
+): string | null {
   if (!name.startsWith('squad-')) return null;
   const withoutPrefix = name.slice('squad-'.length);
+
+  // 1. Known skill/agent base-name suffix strip (longest base first).
+  const basesByLength = [...knownSkillBases].sort((a, b) => b.length - a.length);
+  for (const base of basesByLength) {
+    if (withoutPrefix === base) continue; // no callsign segment remains
+    if (withoutPrefix.endsWith(`-${base}`)) {
+      const candidate = withoutPrefix.slice(0, -(base.length + 1));
+      if (candidate.length > 0) return candidate;
+    }
+  }
+
+  // 2. Longest registered callsign that prefixes the name.
+  const prefixMatches = knownCallsigns
+    .filter(cs => withoutPrefix === cs || withoutPrefix.startsWith(`${cs}-`))
+    .sort((a, b) => b.length - a.length);
+  if (prefixMatches.length > 0 && prefixMatches[0]!.length < withoutPrefix.length) {
+    return prefixMatches[0]!;
+  }
+
+  // 3. Legacy trailing-hyphen split.
   const lastDash = withoutPrefix.lastIndexOf('-');
   if (lastDash <= 0) return null;
   return withoutPrefix.slice(0, lastDash);

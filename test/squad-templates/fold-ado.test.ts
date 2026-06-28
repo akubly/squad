@@ -157,4 +157,18 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(trigger['batch']).toBe(true);
     expect(raw).toContain('--force-with-lease');
   });
+
+  it('deletes only successfully-folded refs, driven by FOLDED_ENTRIES not the full discovered set (piece 48 B)', () => {
+    // The cleanup loop must iterate the successfully-folded refs, never $SORTED_REFS,
+    // so a ref whose fold commit failed is never deleted unfolded.
+    expect(raw).toContain("FOLDED_REF_LIST=`echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref'`");
+    expect(raw).toContain('done <<< "$FOLDED_REF_LIST"');
+    // The fold loop still iterates $SORTED_REFS exactly once; the delete loop no longer does.
+    expect(raw.split('done <<< "$SORTED_REFS"').length - 1).toBe(1);
+  });
+
+  it('keeps the inbox-branch cleanup gated off by default (DELETE_FOLDED_REFS=false) (piece 48 B)', () => {
+    expect(raw).toMatch(/name: DELETE_FOLDED_REFS\r?\n\s+value: 'false'/);
+    expect(raw).toContain('if [ "$(DELETE_FOLDED_REFS)" = "true" ]; then');
+  });
 });

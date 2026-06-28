@@ -425,6 +425,16 @@ describe('CLI reference and shared-squad guide', () => {
     expect(content).toContain('The doctor exits with code 1 when it finds error-severity issues; otherwise it exits 0.');
   });
 
+  it('CLI reference documents the fold-pipeline service-connection compliance path (piece 48 F)', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('--fold-service-connection <name>');
+    expect(content).toMatch(/minimum.*permission/i);
+    expect(content).toContain('System.AccessToken');
+    expect(content).toContain('Securing Azure DevOps Build Service Accounts');
+    expect(content).toContain('aka.ms/azdosc');
+    expect(content).toContain('dev.azure.com/contoso/MyProject');
+  });
+
   it('CLI reference does not document the removed register command as available', () => {
     const content = readFile(cliRefPath);
     const commandTable = extractMarkdownTable(content, '| Command | Description |');

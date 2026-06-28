@@ -22,6 +22,7 @@ import { ErrorCategory, SquadError } from '@bradygaster/squad-sdk/adapter/errors
 import { diagnoseCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { findCloseMatch } from '../lib/close-match.js';
+import { TEMPLATE_MANIFEST } from '../cli/core/templates.js';
 
 export interface RunDoctorOpts {
   cwd: string;
@@ -226,6 +227,48 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     escalate('warn');
   }
 
+  // Host-repo diagnostics: when cwd is a registered product clone whose shared host
+  // lives elsewhere, inspect that host working tree for the gaps that silently break
+  // the cross-repo fold flow. Best-effort — never throws.
+  if (cwdCloneMatches.length === 1) {
+    const cloneEntry = cwdCloneMatches[0]!;
+    const hostSquadDir = cloneEntry.path;
+    const hostRepoRoot = path.dirname(hostSquadDir);
+    if (normalisedPathKey(hostRepoRoot) !== cwdNormalised) {
+      try {
+        const label = cloneEntry.callsign ?? cloneEntry.path;
+
+        if (!fs.existsSync(hostSquadDir)) {
+          findings.push(
+            `Host repo issue: the host for "${label}" at ${hostRepoRoot} has no .squad/ directory ` +
+            `(expected at ${hostSquadDir}). Run "squad init" in the host repo to recreate it.`,
+          );
+          escalate('warn');
+        }
+
+        if (!_hostHasFoldPipeline(hostRepoRoot)) {
+          findings.push(
+            `Host repo issue: the host for "${label}" at ${hostRepoRoot} has no fold-pipeline workflow ` +
+            `(no .azuredevops/fold-squad-state*.yml and no .github/workflows/fold-squad-state*.yml). ` +
+            `State folding is silently disabled. Run "squad install-fold-pipeline" in the host repo.`,
+          );
+          escalate('warn');
+        }
+
+        const coordinatorAgent = path.join(hostRepoRoot, '.github', 'agents', 'squad.agent.md');
+        if (!fs.existsSync(coordinatorAgent)) {
+          findings.push(
+            `Host repo issue: the host for "${label}" at ${hostRepoRoot} is missing the in-repo ` +
+            `coordinator agent (.github/agents/squad.agent.md). Run "squad upgrade" in the host repo to restore it.`,
+          );
+          escalate('warn');
+        }
+      } catch {
+        // Host inspection is best-effort; never let it make the doctor throw.
+      }
+    }
+  }
+
   // Stale path check across all entries
   for (const entry of entries) {
     if (!fs.existsSync(entry.path)) {
@@ -321,7 +364,7 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     .map(e => e.callsign)
     .filter((c): c is string => !!c && /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(c));
   try {
-    const { orphans } = diagnoseCopilotPayload({ knownCallsigns, copilotHome });
+    const { orphans } = diagnoseCopilotPayload({ knownCallsigns, knownSkillBases: _knownSkillBases(), copilotHome });
     for (const orph of orphans) {
       findings.push(
         `Orphan ${orph.kind} payload: "${orph.pathOnDisk}" belongs to callsign "${orph.callsign}" ` +
@@ -339,6 +382,50 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
 // ============================================================
 // Internal helpers
 // ============================================================
+
+/**
+ * Source skill/agent base-name catalog, derived from the bundled template
+ * manifest. Used to attribute the owning callsign of namespaced payloads
+ * (e.g. `squad-probe-agent-collaboration` → `probe`).
+ */
+function _knownSkillBases(): string[] {
+  const bases = new Set<string>();
+  for (const entry of TEMPLATE_MANIFEST) {
+    const m = /^skills\/([^/]+)\//.exec(entry.source);
+    if (m) bases.add(m[1]!);
+  }
+  return [...bases];
+}
+
+/**
+ * Whether the host repo carries a non-empty fold-pipeline workflow on either
+ * platform. A missing OR empty fold YAML is the exact gap that silently disables
+ * cross-repo state folding.
+ */
+function _hostHasFoldPipeline(hostRepoRoot: string): boolean {
+  const candidates: string[] = [
+    path.join(hostRepoRoot, '.azuredevops'),
+    path.join(hostRepoRoot, '.github', 'workflows'),
+  ];
+  for (const dir of candidates) {
+    let entries: string[];
+    try {
+      if (!fs.existsSync(dir)) continue;
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!/^fold-squad-state.*\.yml$/.test(name)) continue;
+      try {
+        if (fs.statSync(path.join(dir, name)).size > 0) return true;
+      } catch {
+        // ignore unreadable entries
+      }
+    }
+  }
+  return false;
+}
 
 function _clonePathsOverlap(a: string, b: string): boolean {
   try {

@@ -194,11 +194,12 @@ stages:
                       git push origin HEAD:refs/heads/${STATE_BRANCH} --force-with-lease
 
                       if [ "$(DELETE_FOLDED_REFS)" = "true" ]; then
+                        FOLDED_REF_LIST=`echo "$FOLDED_ENTRIES" | jq -r '.[].ref'`
                         while IFS= read -r REF; do
                           [ -z "$REF" ] && continue
                           echo "  Deleting folded Squad inbox ref: $REF"
                           git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to delete $REF — continuing."
-                        done <<< "$SORTED_REFS"
+                        done <<< "$FOLDED_REF_LIST"
                       fi
                     done
                   displayName: Discover callsigns and fold inbox refs

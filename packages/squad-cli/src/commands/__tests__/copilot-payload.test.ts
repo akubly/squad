@@ -1086,3 +1086,70 @@ describe('hyphenated callsign orphan extraction', () => {
     expect(orphanCallsigns.some(c => c === 'my')).toBe(false);
   });
 });
+
+// ============================================================
+// Piece 48 D: accurate orphan-payload callsign attribution
+// ============================================================
+
+describe('piece 48 D: accurate orphan callsign attribution', () => {
+  let copilotHome: string;
+
+  /** Write a namespaced skill directory directly under the user-scoped skills dir. */
+  function writeUserSkill(dirName: string): void {
+    const dir = path.join(copilotHome, 'skills', dirName);
+    fs.mkdirSync(dir, { recursive: true });
+    writeFile(path.join(dir, 'SKILL.md'), `---\nname: ${dirName}\n---\n# ${dirName}`);
+  }
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    copilotHome = makeDir('d-copilot-home');
+  });
+
+  afterEach(() => fs.rmSync(TEST_ROOT, { recursive: true, force: true }));
+
+  it('D1 attributes a multi-word skill payload to the real callsign (probe, not probe-agent)', () => {
+    writeUserSkill('squad-probe-agent-collaboration');
+    const result = diagnoseCopilotPayload({
+      knownCallsigns: ['alpha'],
+      knownSkillBases: ['agent-collaboration', 'squad-conventions'],
+      copilotHome,
+    });
+    const orphan = result.orphans.find(o => o.pathOnDisk.endsWith('squad-probe-agent-collaboration'));
+    expect(orphan).toBeDefined();
+    expect(orphan!.callsign).toBe('probe');
+  });
+
+  it('D2 reports a genuine double-prefix re-namespace artifact as an orphan, not owned', () => {
+    writeUserSkill('squad-teamx-squad-beta-collaboration');
+    const result = diagnoseCopilotPayload({
+      knownCallsigns: ['teamx', 'beta'],
+      knownSkillBases: ['agent-collaboration', 'squad-conventions'],
+      copilotHome,
+    });
+    const orphan = result.orphans.find(o => o.pathOnDisk.endsWith('squad-teamx-squad-beta-collaboration'));
+    expect(orphan).toBeDefined();
+    expect(orphan!.callsign).toBe('teamx');
+  });
+
+  it('D2b does NOT flag a legitimately-owned squad-conventions skill as an orphan', () => {
+    // squad-conventions is a real built-in skill base, so squad-<cs>-squad-conventions is owned.
+    writeUserSkill('squad-teamx-squad-conventions');
+    const result = diagnoseCopilotPayload({
+      knownCallsigns: ['teamx'],
+      knownSkillBases: ['agent-collaboration', 'squad-conventions'],
+      copilotHome,
+    });
+    expect(result.orphans).toHaveLength(0);
+  });
+
+  it('D3 does not report a correctly-namespaced registered payload as an orphan', () => {
+    writeUserSkill('squad-teamx-agent-collaboration');
+    const result = diagnoseCopilotPayload({
+      knownCallsigns: ['teamx'],
+      knownSkillBases: ['agent-collaboration', 'squad-conventions'],
+      copilotHome,
+    });
+    expect(result.orphans).toHaveLength(0);
+  });
+});

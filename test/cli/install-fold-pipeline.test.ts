@@ -176,26 +176,23 @@ describe('github platform', () => {
     }
   });
 
-  it('D4: missing .github/workflows/ directory exits 1 before any write', async () => {
+  it('D4: missing .github/workflows/ directory is auto-created for a registry-confirmed host (E1)', async () => {
     const docsRepoDir = makeTmpDir('docs-gh-nodir');
     const cloneDir = makeTmpDir('clone-gh-nodir');
     const cloneRoot = initGitRepo(cloneDir);
-    // Do NOT create .github/workflows/
+    // Do NOT create .github/workflows/ — E1 auto-creates it for a registry-confirmed host.
 
-    setupRegistryEntry(docsRepoDir, cloneRoot);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
 
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
-      throw new Error('process.exit called');
-    });
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      await expect(installFoldPipeline('github', { cwd: cloneDir })).rejects.toThrow('process.exit called');
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      await installFoldPipeline('github', { cwd: cloneDir });
     } finally {
-      exitSpy.mockRestore();
       consoleSpy.mockRestore();
     }
+
+    const dest = path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml');
+    expect(fs.existsSync(dest)).toBe(true);
   });
 });
 
@@ -223,11 +220,64 @@ describe('ado platform', () => {
     expect(fs.readFileSync(dest, 'utf-8').length).toBeGreaterThan(0);
   });
 
-  it('D6: missing .azuredevops/ directory exits 1', async () => {
+  it('D6: missing .azuredevops/ directory is auto-created for a registry-confirmed host (E1)', async () => {
     const docsRepoDir = makeTmpDir('docs-ado-nodir');
     const cloneDir = makeTmpDir('clone-ado-nodir');
     const cloneRoot = initGitRepo(cloneDir);
-    // Do NOT create .azuredevops/
+    // Do NOT create .azuredevops/ — E1 auto-creates it for a registry-confirmed host.
+
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const dest = path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml');
+    expect(fs.existsSync(dest)).toBe(true);
+  });
+});
+
+// ─── Tests: sub-proposal A — --force overwrite ──────────────────────────────
+
+describe('install-fold-pipeline --force (A)', () => {
+  it('A-force-1: --force overwrites a present+differ file and writes a .bak backup', async () => {
+    const docsRepoDir = makeTmpDir('docs-force');
+    const cloneDir = makeTmpDir('clone-force');
+    const cloneRoot = initGitRepo(cloneDir);
+    const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    const destPath = path.join(workflowsDir, 'fold-squad-state.yml');
+    fs.writeFileSync(destPath, '# stale different content\n', 'utf-8');
+
+    setupRegistryEntry(docsRepoDir, cloneRoot);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, force: true });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    // Backup holds the prior content; destination now holds the rendered template.
+    expect(fs.existsSync(`${destPath}.bak`)).toBe(true);
+    expect(fs.readFileSync(`${destPath}.bak`, 'utf-8')).toBe('# stale different content\n');
+    expect(fs.readFileSync(destPath, 'utf-8')).not.toBe('# stale different content\n');
+    expect(fs.readFileSync(destPath, 'utf-8').length).toBeGreaterThan(100);
+  });
+
+  it('A-force-2: without --force a present+differ file still exits 1 and writes no .bak', async () => {
+    const docsRepoDir = makeTmpDir('docs-force-off');
+    const cloneDir = makeTmpDir('clone-force-off');
+    const cloneRoot = initGitRepo(cloneDir);
+    const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    const destPath = path.join(workflowsDir, 'fold-squad-state.yml');
+    fs.writeFileSync(destPath, '# stale different content\n', 'utf-8');
 
     setupRegistryEntry(docsRepoDir, cloneRoot);
 
@@ -237,8 +287,108 @@ describe('ado platform', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
+      await expect(installFoldPipeline('github', { cwd: cloneDir })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(fs.existsSync(`${destPath}.bak`)).toBe(false);
+      expect(fs.readFileSync(destPath, 'utf-8')).toBe('# stale different content\n');
+    } finally {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('A-force-3: --force on a present+match file is a no-op (no .bak written)', async () => {
+    const docsRepoDir = makeTmpDir('docs-force-match');
+    const cloneDir = makeTmpDir('clone-force-match');
+    const cloneRoot = initGitRepo(cloneDir);
+    const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    setupRegistryEntry(docsRepoDir, cloneRoot);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      // First install writes the rendered template.
+      await installFoldPipeline('github', { cwd: cloneDir });
+      // Second install with --force: content already matches → no-op, no backup.
+      await installFoldPipeline('github', { cwd: cloneDir, force: true });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const destPath = path.join(workflowsDir, 'fold-squad-state.yml');
+    expect(fs.existsSync(`${destPath}.bak`)).toBe(false);
+  });
+
+  it('A-force-4: --force on an absent file installs normally (no .bak written)', async () => {
+    const docsRepoDir = makeTmpDir('docs-force-absent');
+    const cloneDir = makeTmpDir('clone-force-absent');
+    const cloneRoot = initGitRepo(cloneDir);
+    const workflowsDir = path.join(docsRepoDir, '.github', 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+
+    setupRegistryEntry(docsRepoDir, cloneRoot);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, force: true });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const destPath = path.join(workflowsDir, 'fold-squad-state.yml');
+    expect(fs.existsSync(destPath)).toBe(true);
+    expect(fs.existsSync(`${destPath}.bak`)).toBe(false);
+  });
+});
+
+// ─── Tests: sub-proposal E — destination-dir creation (E1) ──────────────────
+
+describe('install-fold-pipeline destination-dir creation (E1)', () => {
+  it('E1-1: a registry-confirmed host with no .azuredevops/ installs successfully (dir created)', async () => {
+    const docsRepoDir = makeTmpDir('docs-e1-confirmed');
+    const cloneDir = makeTmpDir('clone-e1-confirmed');
+    const cloneRoot = initGitRepo(cloneDir);
+    // No .azuredevops/ created.
+
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(docsRepoRoot, '.azuredevops'))).toBe(true);
+    expect(fs.existsSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'))).toBe(true);
+  });
+
+  it('E1-2: an unconfirmed config-fallback host with no directory still fails fast', async () => {
+    const hostRepoDir = makeTmpDir('host-e1-fallback');
+    const hostRoot = initGitRepo(hostRepoDir);
+    const cloneDir = makeTmpDir('clone-e1-fallback');
+    initGitRepo(cloneDir);
+    // Do NOT create .azuredevops/ in the host.
+
+    // No registry entry matches the clone → host resolved via config.json fallback.
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+    fs.mkdirSync(path.join(cloneDir, '.squad'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cloneDir, '.squad', 'config.json'),
+      JSON.stringify({ version: 1, stateLocation: hostRoot }),
+      'utf-8',
+    );
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
       await expect(installFoldPipeline('ado', { cwd: cloneDir })).rejects.toThrow('process.exit called');
       expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(fs.existsSync(path.join(hostRoot, '.azuredevops'))).toBe(false);
     } finally {
       exitSpy.mockRestore();
       consoleSpy.mockRestore();
@@ -547,5 +697,163 @@ describe('piece 44 A: callsign-named scoped pipeline filename', () => {
     // C1: the generic file is left in place (not removed by the scoped install).
     expect(fs.existsSync(genericPath)).toBe(true);
     expect(fs.readFileSync(genericPath, 'utf-8')).toBe('# pre-existing generic pipeline\n');
+  });
+});
+
+// ─── Tests: sub-proposal B — --delete-folded-refs install flag ──────────────
+
+describe('install-fold-pipeline --delete-folded-refs (B)', () => {
+  it('B-del-1: plain GitHub install renders the cleanup default as false', async () => {
+    const docsRepoDir = makeTmpDir('docs-del-gh-off');
+    const cloneDir = makeTmpDir('clone-del-gh-off');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('${DELETE_FOLDED_REFS:-false}');
+    expect(yaml).not.toContain('${DELETE_FOLDED_REFS:-true}');
+  });
+
+  it('B-del-2: --delete-folded-refs flips the GitHub cleanup default to true', async () => {
+    const docsRepoDir = makeTmpDir('docs-del-gh-on');
+    const cloneDir = makeTmpDir('clone-del-gh-on');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir, deleteFoldedRefs: true });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('${DELETE_FOLDED_REFS:-true}');
+    expect(yaml).not.toContain('${DELETE_FOLDED_REFS:-false}');
+  });
+
+  it('B-del-3: plain ADO install renders the DELETE_FOLDED_REFS variable as false', async () => {
+    const docsRepoDir = makeTmpDir('docs-del-ado-off');
+    const cloneDir = makeTmpDir('clone-del-ado-off');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toMatch(/name: DELETE_FOLDED_REFS\r?\n {4}value: 'false'/);
+  });
+
+  it('B-del-4: --delete-folded-refs flips the ADO DELETE_FOLDED_REFS variable to true', async () => {
+    const docsRepoDir = makeTmpDir('docs-del-ado-on');
+    const cloneDir = makeTmpDir('clone-del-ado-on');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir, deleteFoldedRefs: true });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toMatch(/name: DELETE_FOLDED_REFS\r?\n {4}value: 'true'/);
+  });
+
+  it('B-del-5: the cleanup delete loop drives off the folded set, never the full discovered set', async () => {
+    const docsRepoDir = makeTmpDir('docs-del-loop');
+    const cloneDir = makeTmpDir('clone-del-loop');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    await installFoldPipeline('github', { cwd: cloneDir });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    // The deletion loop must read the successfully-folded refs derived from FOLDED_ENTRIES,
+    // never iterate the full discovered SORTED_REFS set.
+    expect(yaml).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref')");
+    expect(yaml).toContain('done <<< "$FOLDED_REF_LIST"');
+    // The fold loop still iterates $SORTED_REFS exactly once; the delete loop no longer does.
+    expect(yaml.split('done <<< "$SORTED_REFS"').length - 1).toBe(1);
+  });
+});
+
+// ─── Tests: sub-proposal F — --fold-service-connection (ADO) ────────────────
+
+describe('install-fold-pipeline --fold-service-connection (F)', () => {
+  function readCommittedAdoTemplate(): string {
+    return fs.readFileSync(
+      path.join(process.cwd(), 'packages', 'squad-cli', 'templates', 'fold', 'ado', 'fold-squad-state.yml'),
+      'utf-8',
+    );
+  }
+
+  it('F-1: a default ADO install renders byte-identical to the committed template', async () => {
+    const docsRepoDir = makeTmpDir('docs-fsc-default');
+    const cloneDir = makeTmpDir('clone-fsc-default');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toBe(readCommittedAdoTemplate());
+  });
+
+  it('F-2: --fold-service-connection renders checkout/push under the named service connection', async () => {
+    const docsRepoDir = makeTmpDir('docs-fsc-on');
+    const cloneDir = makeTmpDir('clone-fsc-on');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir, foldServiceConnection: 'squad-fold-sc' });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    // Runs under the named service connection identity, not the build-service account.
+    expect(yaml).toContain('azureSubscription: squad-fold-sc');
+    expect(yaml).toContain('persistCredentials: false');
+    expect(yaml).toContain('git config --global http.extraheader');
+    // No reliance on the over-privileged build-service account token.
+    expect(yaml).not.toContain('SYSTEM_ACCESSTOKEN: $(System.AccessToken)');
+    expect(yaml).not.toContain('persistCredentials: true');
+  });
+
+  it('F-3: --fold-service-connection is ignored for the GitHub platform (default rendering preserved)', async () => {
+    const docsRepoDir = makeTmpDir('docs-fsc-gh');
+    const cloneDir = makeTmpDir('clone-fsc-gh');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    const committedGithub = fs.readFileSync(
+      path.join(process.cwd(), 'packages', 'squad-cli', 'templates', 'fold', 'github', 'fold-squad-state.yml'),
+      'utf-8',
+    );
+
+    await installFoldPipeline('github', { cwd: cloneDir, foldServiceConnection: 'squad-fold-sc' });
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toBe(committedGithub);
+    expect(yaml).not.toContain('azureSubscription');
   });
 });

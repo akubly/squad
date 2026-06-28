@@ -261,17 +261,19 @@ describe('C — install-fold-pipeline in --help table (P37)', () => {
 // ─── D: --callsign warm-path disambiguation ───────────────────────────────────
 
 describe('D — callsign warm-path disambiguation (P37)', () => {
-  it('P37.D1 assign.ts originMatchingEntries filter includes opts.callsign discriminator', () => {
+  it('P37.D1 assign.ts originMatchingEntries filter no longer hard-codes the opts.callsign discriminator (piece 48 G de-overload)', () => {
     const src = readFileSync(ASSIGN_SRC, 'utf-8');
-    // The filter must contain an opts.callsign guard so that when the flag is provided,
-    // only entries matching that callsign are counted as "ambiguous".
-    expect(src).toMatch(/opts\.callsign.*e\.callsign|e\.callsign.*opts\.callsign/);
+    // Piece 48 G de-overloads --callsign on the warm path: the origin-collision guard no
+    // longer drops candidates whose callsign differs from opts.callsign. Disambiguation is
+    // now governed by whether the target's own origins match plus --allow-origin-collision.
+    expect(src).not.toContain('opts.callsign && e.callsign !== opts.callsign');
+    expect(src).toContain('targetOriginsMatch');
+    expect(src).toContain('allowOriginCollision');
   });
 
-  it('P37.D2 originMatchingEntries filter short-circuits on opts.callsign mismatch', () => {
+  it('P37.D2 origin-collision guard is gated on targetOriginsMatch and allowOriginCollision (piece 48 G)', () => {
     const src = readFileSync(ASSIGN_SRC, 'utf-8');
-    // The guard should appear near the originMatchingEntries filter definition
-    expect(src).toContain('opts.callsign && e.callsign !== opts.callsign');
+    expect(src).toContain('!targetOriginsMatch && !opts.allowOriginCollision');
   });
 });
 
@@ -506,12 +508,12 @@ describe('A — sync direction positional behavioral (P37)', () => {
 // ─── D3/D4: Behavioral callsign warm-path disambiguation tests ────────────────
 
 describe('D — callsign warm-path disambiguation behavioral (P37)', () => {
-  it('P37.D3 behavioral: opts.callsign discriminator narrows originMatchingEntries to single entry', () => {
+  it('P37.D3 behavioral: the origin-collision filter no longer narrows on opts.callsign (piece 48 G de-overload)', () => {
     const src = readFileSync(ASSIGN_SRC, 'utf-8');
 
     // Extract the originMatchingEntries filter block from assign.ts.
-    // Old code lacked "if (opts.callsign && e.callsign !== opts.callsign) return false;"
-    // so old code would yield 2 entries even with opts.callsign set.
+    // Piece 48 G removed "if (opts.callsign && e.callsign !== opts.callsign) return false;"
+    // so the filter now yields every other origin-matching squad regardless of opts.callsign.
     const filterStart = src.indexOf('const originMatchingEntries = existingSquads.filter(e => {');
     expect(filterStart).toBeGreaterThan(-1);
     const afterFilter = src.slice(filterStart);
@@ -540,19 +542,17 @@ describe('D — callsign warm-path disambiguation behavioral (P37)', () => {
     const normFn = (u: string): string => u;
     const newOrigins = [sharedOrigin];
 
-    // Without opts.callsign: beta + gamma both match → ambiguity (≥ 2 entries)
+    // Without opts.callsign: beta + gamma both match → 2 entries.
     const withoutCallsign = execFilter(squads, 'alpha', {}, normFn, newOrigins);
-    expect(withoutCallsign.length).toBeGreaterThanOrEqual(2);
+    expect(withoutCallsign.length).toBe(2);
 
-    // With opts.callsign = 'beta': gamma is excluded → only beta → 1 entry (no ambiguity)
+    // With opts.callsign = 'beta': the discriminator is gone, so gamma is NOT excluded →
+    // still 2 entries (G no longer uses --callsign to narrow the warm-path collision set).
     const withBeta = execFilter(squads, 'alpha', { callsign: 'beta' }, normFn, newOrigins);
-    expect(withBeta.length).toBe(1);
-    expect((withBeta[0] as { callsign: string }).callsign).toBe('beta');
-
-    // With opts.callsign = 'gamma': beta excluded → only gamma → 1 entry
-    const withGamma = execFilter(squads, 'alpha', { callsign: 'gamma' }, normFn, newOrigins);
-    expect(withGamma.length).toBe(1);
-    expect((withGamma[0] as { callsign: string }).callsign).toBe('gamma');
+    expect(withBeta.length).toBe(2);
+    const withBetaNames = withBeta.map(e => (e as { callsign: string }).callsign);
+    expect(withBetaNames).toContain('beta');
+    expect(withBetaNames).toContain('gamma');
   });
 
   it('P37.D4 behavioral: without opts.callsign, two origin-matching entries preserved (ambiguity unchanged)', () => {

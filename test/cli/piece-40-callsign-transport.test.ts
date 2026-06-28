@@ -944,7 +944,7 @@ describe('D — Origin-ambiguity guard behaviors (assign.ts)', { timeout: 30_000
     }
   });
 
-  it('D2: 3-squad same remote without --callsign → ERR_ASSIGN_ORIGIN_AMBIGUITY', async () => {
+  it('D2: target with non-matching origins + 2 other same-remote squads → ERR_ASSIGN_ORIGIN_AMBIGUITY (piece 48 G)', async () => {
     const base = makeTmpDir('d2-three-squad-ambiguous');
     const hostDirA = path.join(base, 'host-a');
     const hostDirB = path.join(base, 'host-b');
@@ -957,12 +957,15 @@ describe('D — Origin-ambiguity guard behaviors (assign.ts)', { timeout: 30_000
     const squadDirC = makeSquadHost(hostDirC, 'gamma');
     const registryPath = path.join(base, 'registry.json');
     fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    // Piece 48 G: the positional target (gamma) has no recorded origin that matches the
+    // clone's remotes, while alpha + beta both do — so the remotes look like they belong
+    // elsewhere and the assignment is genuinely ambiguous. The guard fires without --callsign.
     writeRegistryDirect(registryPath, {
       version: 1,
       squads: [
         { callsign: 'alpha', path: squadDirA, origins: ['https://example.com/shared.git'] },
         { callsign: 'beta', path: squadDirB, origins: ['https://example.com/shared.git'] },
-        { callsign: 'gamma', path: squadDirC, origins: ['https://example.com/shared.git'] },
+        { callsign: 'gamma', path: squadDirC, origins: [] },
       ],
     });
 
@@ -970,7 +973,7 @@ describe('D — Origin-ambiguity guard behaviors (assign.ts)', { timeout: 30_000
       registry: makeRegistry([
         { callsign: 'alpha', path: squadDirA, origins: ['https://example.com/shared.git'] },
         { callsign: 'beta', path: squadDirB, origins: ['https://example.com/shared.git'] },
-        { callsign: 'gamma', path: squadDirC, origins: ['https://example.com/shared.git'] },
+        { callsign: 'gamma', path: squadDirC, origins: [] },
       ]),
       warnings: [],
     });

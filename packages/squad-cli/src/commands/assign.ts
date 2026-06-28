@@ -289,6 +289,9 @@ export interface SquadAssignOpts {
   _installProductSquadForbidHookFn?: (productRepoPath: string) => void;
   /** When true, automatically run git rm --cached + .gitignore install for tracked allowlisted files. */
   yes?: boolean;
+  /** --allow-origin-collision: warm-path opt-in to record the assignment despite the current
+   *  fetch remotes also matching two or more other squads' recorded origins. */
+  allowOriginCollision?: boolean;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -532,23 +535,29 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
 
   const originMatchingEntries = existingSquads.filter(e => {
     if (e.callsign === callsign) return false;
-    if (opts.callsign && e.callsign !== opts.callsign) return false;
     const entryOrigins = (e.origins ?? []).map(normalizeRemoteUrl);
     return normalizedNewOrigins.some(no => entryOrigins.includes(no));
   });
 
-  if (originMatchingEntries.length >= 2) {
+  // The positional callsign names the target squad being assigned to. If the target's own
+  // recorded origins already match the current remotes, an overlap with other squads is not
+  // ambiguous — the operator explicitly named where this clone belongs.
+  const targetEntryOrigins = (entry.origins ?? []).map(normalizeRemoteUrl);
+  const targetOriginsMatch = normalizedNewOrigins.some(no => targetEntryOrigins.includes(no));
+
+  if (originMatchingEntries.length >= 2 && !targetOriginsMatch && !opts.allowOriginCollision) {
     const names = originMatchingEntries.map(e => `"${e.callsign ?? e.path}"`).join(', ');
     throw new AssignError(
       'ERR_ASSIGN_ORIGIN_AMBIGUITY',
-      `The current fetch remotes match origins in multiple squads: ${names}.\n` +
-      '  Use an explicit --callsign to disambiguate.',
+      `Your fetch remotes also match origins registered for squads ${names}.\n` +
+      `  You are assigning to "${callsign}". Re-run with --allow-origin-collision to record ` +
+      `this assignment, or remove the overlapping remote.`,
     );
   }
-  if (originMatchingEntries.length === 1) {
+  if (originMatchingEntries.length >= 1) {
+    const names = originMatchingEntries.map(e => `"${e.callsign ?? e.path}"`).join(', ');
     warnings.push(
-      `Warning: current fetch remotes also match origins registered for squad ` +
-      `"${originMatchingEntries[0]!.callsign ?? originMatchingEntries[0]!.path}". Proceeding.`,
+      `Warning: current fetch remotes also match origins registered for squad ${names}. Proceeding.`,
     );
   }
 

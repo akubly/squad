@@ -18,6 +18,7 @@ export interface AssignCliArgs {
   stateRemote: string | undefined;
   stateBranch: string | undefined;
   yes: boolean;
+  allowOriginCollision: boolean;
 }
 
 const NAMED_FLAGS = [
@@ -71,6 +72,7 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     stateRemote: argValue(args, '--state-remote'),
     stateBranch: argValue(args, '--state-branch'),
     yes: args.includes('--yes'),
+    allowOriginCollision: args.includes('--allow-origin-collision'),
   };
 }
 

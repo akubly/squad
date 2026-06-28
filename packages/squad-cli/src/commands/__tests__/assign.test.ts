@@ -424,6 +424,66 @@ describe('runAssign: origin collision', () => {
       }),
     ).rejects.toThrow(/ERR_ASSIGN_ORIGIN_AMBIGUITY/);
   });
+
+  it('G1 warm path: assigning to the named target whose own origins match succeeds despite 2+ other matches, without --callsign', async () => {
+    // teamx's own origins include the shared remote; beta + gamma also match it.
+    const hostDirX = makeDir('hostX');
+    const squadPathX = makeSquadHost(hostDirX);
+    const localRegistryPath = path.join(TEST_ROOT, 'g1-registry.json');
+    writeRegistry(localRegistryPath, [
+      { callsign: 'teamx', path: squadPathX, origins: ['github.com/example/shared'], clones: [] },
+      { callsign: 'beta', path: path.join(hostDir2, '.squad'), origins: ['github.com/example/shared'], clones: [] },
+      { callsign: 'gamma', path: path.join(hostDir3, '.squad'), origins: ['github.com/example/shared'], clones: [] },
+    ]);
+
+    const result = await runAssign({
+      callsignOrUrl: 'teamx',
+      registryPath: localRegistryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => ['https://github.com/example/shared'],
+    });
+
+    expect(result.kind).toBe('assigned');
+    expect((result as { callsign: string }).callsign).toBe('teamx');
+  });
+
+  it('G2 genuine ambiguity error names colliding squads, the target, and --allow-origin-collision', async () => {
+    // alpha (target) has empty origins; beta + gamma match the remote → still ambiguous.
+    await expect(
+      runAssign({
+        callsignOrUrl: 'alpha',
+        registryPath,
+        cwd: cloneDir,
+        getGitRoot: (dir) => dir,
+        getRemoteUrls: () => ['https://github.com/example/shared'],
+      }),
+    ).rejects.toThrow(/"beta".*"gamma"|"gamma".*"beta"/);
+
+    await expect(
+      runAssign({
+        callsignOrUrl: 'alpha',
+        registryPath,
+        cwd: cloneDir,
+        getGitRoot: (dir) => dir,
+        getRemoteUrls: () => ['https://github.com/example/shared'],
+      }),
+    ).rejects.toThrow(/assigning to "alpha"|--allow-origin-collision/);
+  });
+
+  it('G3 --allow-origin-collision records the assignment in the multi-match case', async () => {
+    const result = await runAssign({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      getGitRoot: (dir) => dir,
+      getRemoteUrls: () => ['https://github.com/example/shared'],
+      allowOriginCollision: true,
+    });
+
+    expect(result.kind).toBe('assigned');
+    expect((result as { callsign: string }).callsign).toBe('alpha');
+  });
 });
 
 describe('runAssign: callsign validation', () => {

@@ -926,3 +926,115 @@ describe('runDoctor: orphan payload wiring', () => {
     expect(orphanFinding).toBeDefined();
   });
 });
+
+// ============================================================
+// Piece 48 C: host-repo diagnostics for a registered product clone
+// ============================================================
+
+describe('runDoctor: host-repo diagnostics (piece 48 C)', () => {
+  let registryPath: string;
+  let copilotHome: string;
+  let cloneDir: string;
+
+  /**
+   * Build a host repo skeleton at `host-<tag>` with controllable pieces and a
+   * separate registered clone dir. Returns the host repo root.
+   */
+  function makeHostAndClone(
+    tag: string,
+    parts: { squad?: boolean; foldYaml?: 'github' | 'ado' | 'empty' | 'none'; agent?: boolean },
+  ): string {
+    const hostRepoRoot = makeDir(`host-${tag}`);
+    if (parts.squad !== false) {
+      fs.mkdirSync(path.join(hostRepoRoot, '.squad'), { recursive: true });
+    }
+    if (parts.foldYaml === 'github') {
+      const dir = path.join(hostRepoRoot, '.github', 'workflows');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'fold-squad-state.yml'), 'name: fold\non: push\n');
+    } else if (parts.foldYaml === 'ado') {
+      const dir = path.join(hostRepoRoot, '.azuredevops');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'fold-squad-state.yml'), 'trigger: none\n');
+    } else if (parts.foldYaml === 'empty') {
+      const dir = path.join(hostRepoRoot, '.github', 'workflows');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'fold-squad-state.yml'), '');
+    }
+    if (parts.agent !== false) {
+      const dir = path.join(hostRepoRoot, '.github', 'agents');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'squad.agent.md'), '# Coordinator\n');
+    }
+    writeRegistry(registryPath, [{
+      callsign: 'teamx',
+      path: path.join(hostRepoRoot, '.squad'),
+      origins: [],
+      clones: [cloneDir],
+      status: 'active',
+    }]);
+    return hostRepoRoot;
+  }
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    copilotHome = makeDir('c-copilot-home');
+    cloneDir = makeDir('product-clone');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('C01 host missing a fold-pipeline workflow yields a warn finding', async () => {
+    makeHostAndClone('nofold', { squad: true, foldYaml: 'none', agent: true });
+    const result = await runDoctor({ cwd: cloneDir, registryPath, env: {}, copilotHome });
+    const finding = result.findings.find(f => /fold-pipeline workflow/i.test(f) && /silently disabled/i.test(f));
+    expect(finding).toBeDefined();
+    expect(result.severity).toBe('warn');
+  });
+
+  it('C02 host with an empty fold YAML still yields the missing-fold finding', async () => {
+    makeHostAndClone('emptyfold', { squad: true, foldYaml: 'empty', agent: true });
+    const result = await runDoctor({ cwd: cloneDir, registryPath, env: {}, copilotHome });
+    const finding = result.findings.find(f => /fold-pipeline workflow/i.test(f));
+    expect(finding).toBeDefined();
+  });
+
+  it('C03 host missing .squad/ yields the missing-host-.squad finding', async () => {
+    makeHostAndClone('nosquad', { squad: false, foldYaml: 'github', agent: true });
+    const result = await runDoctor({ cwd: cloneDir, registryPath, env: {}, copilotHome });
+    const finding = result.findings.find(f => /no \.squad\/ directory/i.test(f));
+    expect(finding).toBeDefined();
+  });
+
+  it('C04 host missing the in-repo coordinator agent yields that finding', async () => {
+    makeHostAndClone('noagent', { squad: true, foldYaml: 'github', agent: false });
+    const result = await runDoctor({ cwd: cloneDir, registryPath, env: {}, copilotHome });
+    const finding = result.findings.find(f => /coordinator agent/i.test(f) && /squad\.agent\.md/i.test(f));
+    expect(finding).toBeDefined();
+  });
+
+  it('C05 a fully-configured host yields none of the three host findings', async () => {
+    makeHostAndClone('ok', { squad: true, foldYaml: 'ado', agent: true });
+    const result = await runDoctor({ cwd: cloneDir, registryPath, env: {}, copilotHome });
+    const hostFinding = result.findings.find(f => /Host repo issue/i.test(f));
+    expect(hostFinding).toBeUndefined();
+  });
+
+  it('C06 a single-repo / local squad (cwd is the host) emits no host-repo findings', async () => {
+    const hostRepoRoot = makeDir('local-squad-repo');
+    fs.mkdirSync(path.join(hostRepoRoot, '.squad'), { recursive: true });
+    writeRegistry(registryPath, [{
+      callsign: 'teamx',
+      path: path.join(hostRepoRoot, '.squad'),
+      origins: [],
+      clones: [hostRepoRoot],
+      status: 'active',
+    }]);
+    const result = await runDoctor({ cwd: hostRepoRoot, registryPath, env: {}, copilotHome });
+    const hostFinding = result.findings.find(f => /Host repo issue/i.test(f));
+    expect(hostFinding).toBeUndefined();
+  });
+});
