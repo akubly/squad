@@ -1,6 +1,6 @@
 {
   "name": "@wifi-aware/squad-cli",
-  "version": "0.9.6-mc.preview.14",
+  "version": "0.9.6-mc.preview.15",
   "description": "Squad CLI — Command-line interface for the Squad multi-agent runtime",
   "type": "module",
   "bin": {
@@ -213,7 +213,7 @@
     "ink": "^6.8.0",
     "react": "^19.2.4",
     "vscode-jsonrpc": "^8.2.1",
-    "@wifi-aware/squad-sdk": "0.9.6-mc.preview.14"
+    "@wifi-aware/squad-sdk": "0.9.6-mc.preview.15"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
