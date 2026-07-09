@@ -769,8 +769,10 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   // Pre-clone callsign collision check.
   const existingEntry = existingSquads.find(s => s.callsign === callsign);
   if (existingEntry) {
-    const expectedPath = path.join(cloneDest, '.squad');
-    if (normalisedPathKey(existingEntry.path) !== normalisedPathKey(expectedPath)) {
+    const existingKey = normalisedPathKey(existingEntry.path);
+    const rootExpected = normalisedPathKey(path.join(cloneDest, '.squad'));
+    const subDirExpected = normalisedPathKey(path.join(cloneDest, callsign, '.squad'));
+    if (existingKey !== rootExpected && existingKey !== subDirExpected) {
       throw new AssignError(
         'ERR_ASSIGN_CALLSIGN_COLLISION',
         `Callsign "${callsign}" is already registered at a different host path.\n` +
@@ -795,13 +797,20 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   }
 
   // Verify .squad/team.md in the cloned repository. Roll back on failure.
-  const squadDir = path.join(cloneDest, '.squad');
-  const teamMdPath = path.join(squadDir, 'team.md');
-  if (!fs.existsSync(teamMdPath)) {
+  // Resolve team root: check clone root first, then callsign-named subdirectory
+  // (the layout `squad init` produces in monorepo/subfolder mode).
+  const rootTeamMd = path.join(cloneDest, '.squad', 'team.md');
+  const subDirTeamMd = path.join(cloneDest, callsign, '.squad', 'team.md');
+  let resolvedSquadDir: string;
+  if (fs.existsSync(rootTeamMd)) {
+    resolvedSquadDir = path.join(cloneDest, '.squad');
+  } else if (fs.existsSync(subDirTeamMd)) {
+    resolvedSquadDir = path.join(cloneDest, callsign, '.squad');
+  } else {
     try { fs.rmSync(cloneDest, { recursive: true, force: true }); } catch { /* ignore */ }
     throw new AssignError(
       'ERR_ASSIGN_NO_TEAM_MD',
-      `"${cloneDest}" does not contain .squad/team.md. ` +
+      `"${cloneDest}" does not contain .squad/team.md (checked "${rootTeamMd}" and "${subDirTeamMd}"). ` +
       'This repository is not a squad host. Clone directory has been removed.',
     );
   }
@@ -824,7 +833,7 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   const reactivating = existingEntry !== undefined;
   const baseEntry: RegistryEntry = existingEntry
     ? { ...existingEntry }
-    : { callsign, path: squadDir };
+    : { callsign, path: resolvedSquadDir };
 
   const existingClones = baseEntry.clones ?? [];
   const existingOrigins = baseEntry.origins ?? [];
@@ -834,7 +843,7 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
 
   const updatedEntry: RegistryEntry = {
     ...baseEntry,
-    path: squadDir,
+    path: resolvedSquadDir,
     callsign,
     initUri: url,
     clones: existingClones.some(c => normalisedPathKey(c) === normalisedPathKey(clonePath))
@@ -932,7 +941,7 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   return {
     kind: reactivating ? 'reactivated' : 'assigned',
     callsign,
-    hostPath: squadDir,
+    hostPath: resolvedSquadDir,
     clonePath,
     warnings: coldWarnings,
     coordinatorInstalled,

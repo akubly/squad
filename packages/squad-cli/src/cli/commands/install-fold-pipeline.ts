@@ -190,6 +190,13 @@ export async function installFoldPipeline(
     }
   }
 
+  // D1: .squad/-gated self-install — if the current repo IS the state host, target itself.
+  let selfInstall = false;
+  if (!hostRepoRoot && fs.existsSync(path.join(repoRoot, '.squad'))) {
+    hostRepoRoot = repoRoot;
+    selfInstall = true;
+  }
+
   if (!hostRepoRoot) {
     console.error(
       `✗ Could not resolve shared-squad host clone path. Run 'squad assign' to register a host clone.`,
@@ -206,14 +213,14 @@ export async function installFoldPipeline(
   const targetDir = platformDirMap[platform];
 
   // Fail fast if the target directory does not exist — UNLESS the host was resolved
-  // from a matching registry entry (E1: registry-gated auto-create). A registry-confirmed
-  // host is a known, intended target (the operator already ran `squad assign`), so creating
-  // the platform directory there is safe. For config-fallback / unconfirmed hosts, preserve
+  // from a matching registry entry (E1: registry-gated auto-create) or from D1
+  // .squad/-gated self-install. Both represent a confirmed target — creating the
+  // platform directory there is safe. For config-fallback / unconfirmed hosts, preserve
   // today's fail-fast: never create directories in a repo the registry has not confirmed.
   if (!fs.existsSync(targetDir)) {
-    if (entry) {
+    if (entry || selfInstall) {
       fs.mkdirSync(targetDir, { recursive: true });
-      console.log(`${GREEN}✓${RESET} Created pipeline directory in registered host: ${targetDir}`);
+      console.log(`${GREEN}✓${RESET} Created pipeline directory in ${entry ? 'registered' : 'self-hosted'} host: ${targetDir}`);
     } else {
       console.error(
         `✗ Target directory does not exist: ${targetDir}\n` +

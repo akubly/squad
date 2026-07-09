@@ -171,4 +171,32 @@ describe('fold-squad-state.yml (ADO Pipelines)', () => {
     expect(raw).toMatch(/name: DELETE_FOLDED_REFS\r?\n\s+value: 'false'/);
     expect(raw).toContain('if [ "$(DELETE_FOLDED_REFS)" = "true" ]; then');
   });
+
+  it('drops a stale local state branch before the checkout block (piece 49 A1)', () => {
+    const detachIdx = raw.indexOf('git checkout --detach >/dev/null 2>&1 || true');
+    const branchDIdx = raw.indexOf('git branch -D "$STATE_BRANCH" >/dev/null 2>&1 || true');
+    const checkoutIdx = raw.indexOf('if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}"');
+    expect(detachIdx).toBeGreaterThan(-1);
+    expect(branchDIdx).toBeGreaterThan(-1);
+    expect(checkoutIdx).toBeGreaterThan(-1);
+    expect(detachIdx).toBeLessThan(checkoutIdx);
+    expect(branchDIdx).toBeLessThan(checkoutIdx);
+  });
+
+  it('guards the per-ref commit with git diff --cached --quiet (piece 49 A2)', () => {
+    expect(raw).toContain('if git diff --cached --quiet; then');
+    expect(raw).toContain('already folded (no changes)');
+  });
+
+  it('has an explicit parameters: [] block for manual-run affordance (piece 49 B)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('parameters');
+    expect(parsed['parameters']).toEqual([]);
+  });
+
+  it('retains push trigger and schedules alongside the manual-run affordance (piece 49 B)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('trigger');
+    expect(parsed).toHaveProperty('schedules');
+  });
 });

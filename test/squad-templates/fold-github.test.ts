@@ -166,4 +166,33 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(raw).not.toContain('${{ steps.fold.outputs.final_sha }}');
     expect(raw).not.toMatch(/FOLDED_ENTRIES=['"].*\$\{\{/);
   });
+
+  it('drops a stale local state branch before the checkout block (piece 49 A1)', () => {
+    const detachIdx = raw.indexOf('git checkout --detach >/dev/null 2>&1 || true');
+    const branchDIdx = raw.indexOf('git branch -D "$STATE_BRANCH" >/dev/null 2>&1 || true');
+    const checkoutIdx = raw.indexOf('if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}"');
+    expect(detachIdx).toBeGreaterThan(-1);
+    expect(branchDIdx).toBeGreaterThan(-1);
+    expect(checkoutIdx).toBeGreaterThan(-1);
+    expect(detachIdx).toBeLessThan(checkoutIdx);
+    expect(branchDIdx).toBeLessThan(checkoutIdx);
+  });
+
+  it('guards the per-ref commit with git diff --cached --quiet (piece 49 A2)', () => {
+    expect(raw).toContain('if git diff --cached --quiet; then');
+    expect(raw).toContain('already folded (no changes)');
+  });
+
+  it('has on.workflow_dispatch for manual triggering (piece 49 B)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    const on = parsed['on'] as Record<string, unknown>;
+    expect(on).toHaveProperty('workflow_dispatch');
+  });
+
+  it('retains push and schedule triggers alongside workflow_dispatch (piece 49 B)', () => {
+    const parsed = parseYaml(raw) as Record<string, unknown>;
+    const on = parsed['on'] as Record<string, unknown>;
+    expect(on).toHaveProperty('push');
+    expect(on).toHaveProperty('schedule');
+  });
 });

@@ -5,6 +5,7 @@
 # This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - 'squad/inbox/**'
@@ -58,6 +59,12 @@ jobs:
 
             STATE_BRANCH="squad/state/$CALLSIGN"
             echo "Folding inbox refs for $CALLSIGN into $STATE_BRANCH ..."
+
+            # A workspace-reusing (self-hosted) runner can carry a local $STATE_BRANCH from a
+            # previous run; detach and drop it so the checkout/--orphan below is not blocked by
+            # "a branch named ... already exists". Hosted runners start clean, so this is a no-op.
+            git checkout --detach >/dev/null 2>&1 || true
+            git branch -D "$STATE_BRANCH" >/dev/null 2>&1 || true
 
             if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
               git fetch origin "$STATE_BRANCH"
@@ -135,10 +142,14 @@ jobs:
                 | tar -x --exclude='.squad/publish-history.json'
               git add .squad/
 
-              GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
-                git commit \
-                  --author="Squad Fold Pipeline <squad-fold@noreply>" \
-                  -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
+              if git diff --cached --quiet; then
+                echo "  $SHORT_REF already folded (no changes) — recording without commit."
+              else
+                GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+                  git commit \
+                    --author="Squad Fold Pipeline <squad-fold@noreply>" \
+                    -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"
+              fi
 
               ENTRY=$(jq -n \
                 --arg ref "$REF" \

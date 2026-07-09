@@ -4,6 +4,10 @@
 # Trigger: push to any branch under refs/heads/squad/inbox/* (serialized by batch: true).
 # This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
 
+# Manual run: use "Run pipeline" in the CI platform UI. No parameters required —
+# a manual run folds every discovered callsign exactly as the scheduled sweep does.
+parameters: []
+
 trigger:
   batch: true
   branches:
@@ -72,6 +76,12 @@ stages:
 
                       STATE_BRANCH="squad/state/$CALLSIGN"
                       echo "Folding inbox refs for $CALLSIGN into $STATE_BRANCH ..."
+
+                      # A workspace-reusing (self-hosted) runner can carry a local $STATE_BRANCH from a
+                      # previous run; detach and drop it so the checkout/--orphan below is not blocked by
+                      # "a branch named ... already exists". Hosted runners start clean, so this is a no-op.
+                      git checkout --detach >/dev/null 2>&1 || true
+                      git branch -D "$STATE_BRANCH" >/dev/null 2>&1 || true
 
                       if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
                         git fetch origin "$STATE_BRANCH"
@@ -149,16 +159,13 @@ stages:
                           | tar -x --exclude='.squad/publish-history.json'
                         git add .squad/
 
-                        if GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
-                          git commit \
-                            --author="Squad Fold Pipeline <squad-fold@noreply>" \
-                            -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"; then
-                          ENTRY=`jq -n \
-                            --arg ref "$REF" \
-                            --arg sha "$REF_SHA" \
-                            --arg alias "$DEV_ALIAS" \
-                            --arg pubAt "$PUB_AT" \
-                            '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+                        if git diff --cached --quiet; then
+                          echo "  $SHORT_REF already folded (no changes) — recording without commit."
+                          ENTRY=`jq -n --arg ref "$REF" --arg sha "$REF_SHA" --arg alias "$DEV_ALIAS" --arg pubAt "$PUB_AT" '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+                          FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+                        elif GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+                          git commit --author="Squad Fold Pipeline <squad-fold@noreply>" -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"; then
+                          ENTRY=`jq -n --arg ref "$REF" --arg sha "$REF_SHA" --arg alias "$DEV_ALIAS" --arg pubAt "$PUB_AT" '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
                           FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
                         else
                           echo "##vso[task.logissue type=warning]WARNING: Fold commit failed for $REF — not recording it in publish-history.json."

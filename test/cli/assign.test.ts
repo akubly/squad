@@ -462,3 +462,186 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
     expect(hookCalls).toHaveLength(0);
   });
 });
+
+// ─── Piece 49 — subfolder team-root resolution ──────────────────────────────
+
+describe('squad assign — piece-49 subfolder team-root resolution (warm path)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeTmpDir('p49');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  });
+
+  it('P49.C1 .squad/team.md at clone root assigns as today (regression)', async () => {
+    const cloneDir = path.join(dir, 'dest');
+    const productClone = path.join(dir, 'product');
+    fs.mkdirSync(productClone, { recursive: true });
+    const registryPath = path.join(dir, 'registry.json');
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    writeRegistry(registryPath, { version: 1, squads: [] });
+
+    const written: unknown[] = [];
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'https://example.com/host.git',
+      cloneTo: cloneDir,
+      callsign: 'alpha',
+      registryPath,
+      cwd: productClone,
+      getGitRoot: () => productClone,
+      getRemoteUrls: () => [],
+      cloneCommand: async (_url: string, dest: string) => {
+        const sq = path.join(dest, '.squad');
+        fs.mkdirSync(sq, { recursive: true });
+        fs.writeFileSync(path.join(sq, 'team.md'), '# alpha\n', 'utf8');
+      },
+      _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'alpha')); writeRegistry(_fp, reg); },
+    }));
+
+    const entry = written[0] as Record<string, unknown>;
+    expect(entry).toBeDefined();
+    // Root host: entry.path should end with /.squad (not callsign-prefixed)
+    expect((entry['path'] as string).replace(/\\/g, '/')).toContain('dest/.squad');
+    expect((entry['path'] as string).replace(/\\/g, '/')).not.toContain('alpha/.squad');
+  });
+
+  it('P49.C2 <callsign>/.squad/team.md assigns and registers subfolder .squad', async () => {
+    const cloneDir = path.join(dir, 'dest');
+    const productClone = path.join(dir, 'product');
+    fs.mkdirSync(productClone, { recursive: true });
+    const registryPath = path.join(dir, 'registry.json');
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    writeRegistry(registryPath, { version: 1, squads: [] });
+
+    const written: unknown[] = [];
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'https://example.com/host.git',
+      cloneTo: cloneDir,
+      callsign: 'bravo',
+      registryPath,
+      cwd: productClone,
+      getGitRoot: () => productClone,
+      getRemoteUrls: () => [],
+      cloneCommand: async (_url: string, dest: string) => {
+        // Subfolder layout: <dest>/bravo/.squad/team.md
+        const sq = path.join(dest, 'bravo', '.squad');
+        fs.mkdirSync(sq, { recursive: true });
+        fs.writeFileSync(path.join(sq, 'team.md'), '# bravo\n', 'utf8');
+      },
+      _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'bravo')); writeRegistry(_fp, reg); },
+    }));
+
+    const entry = written[0] as Record<string, unknown>;
+    expect(entry).toBeDefined();
+    // Subfolder host: entry.path should be <cloneDir>/bravo/.squad
+    expect((entry['path'] as string).replace(/\\/g, '/')).toContain('bravo/.squad');
+  });
+
+  it('P49.C3 neither root nor callsign subdir → ERR_ASSIGN_NO_TEAM_MD naming both paths + clone rolled back', async () => {
+    const cloneDir = path.join(dir, 'dest');
+    const productClone = path.join(dir, 'product');
+    fs.mkdirSync(productClone, { recursive: true });
+    const registryPath = path.join(dir, 'registry.json');
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    writeRegistry(registryPath, { version: 1, squads: [] });
+
+    const err = await runAssign(baseOpts({
+      callsignOrUrl: 'https://example.com/host.git',
+      cloneTo: cloneDir,
+      callsign: 'charlie',
+      registryPath,
+      cwd: productClone,
+      getGitRoot: () => productClone,
+      getRemoteUrls: () => [],
+      cloneCommand: async (_url: string, dest: string) => {
+        // No .squad anywhere
+        fs.mkdirSync(dest, { recursive: true });
+        fs.writeFileSync(path.join(dest, 'README.md'), '# hi\n', 'utf8');
+      },
+    })).catch(e => e);
+
+    expect(err).toBeInstanceOf(AssignError);
+    expect((err as AssignError).code).toBe('ERR_ASSIGN_NO_TEAM_MD');
+    // Error message should mention both paths
+    expect((err as AssignError).message).toContain('.squad');
+    expect((err as AssignError).message).toContain('charlie');
+    // Clone should be rolled back
+    expect(fs.existsSync(cloneDir)).toBe(false);
+  });
+
+  it('P49.C4 differently-named subdir (not callsign) → still fails (no arbitrary scan)', async () => {
+    const cloneDir = path.join(dir, 'dest');
+    const productClone = path.join(dir, 'product');
+    fs.mkdirSync(productClone, { recursive: true });
+    const registryPath = path.join(dir, 'registry.json');
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    writeRegistry(registryPath, { version: 1, squads: [] });
+
+    const err = await runAssign(baseOpts({
+      callsignOrUrl: 'https://example.com/host.git',
+      cloneTo: cloneDir,
+      callsign: 'delta',
+      registryPath,
+      cwd: productClone,
+      getGitRoot: () => productClone,
+      getRemoteUrls: () => [],
+      cloneCommand: async (_url: string, dest: string) => {
+        // A .squad/team.md exists in a subdir named "other", not "delta"
+        const sq = path.join(dest, 'other', '.squad');
+        fs.mkdirSync(sq, { recursive: true });
+        fs.writeFileSync(path.join(sq, 'team.md'), '# other\n', 'utf8');
+      },
+    })).catch(e => e);
+
+    expect(err).toBeInstanceOf(AssignError);
+    expect((err as AssignError).code).toBe('ERR_ASSIGN_NO_TEAM_MD');
+  });
+
+  it('P49.C5 subfolder-registered host can be reactivated without collision error', async () => {
+    const cloneDir = path.join(dir, 'dest');
+    const productClone = path.join(dir, 'product');
+    fs.mkdirSync(productClone, { recursive: true });
+    const registryPath = path.join(dir, 'registry.json');
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+
+    // Pre-seed a registry entry for a subfolder host (as piece 49 C would create).
+    const subfolderSquadDir = path.join(cloneDir, 'echo', '.squad');
+    writeRegistry(registryPath, {
+      version: 1,
+      squads: [{
+        callsign: 'echo',
+        path: subfolderSquadDir,
+        status: 'inactive' as const,
+      }],
+    });
+
+    const written: unknown[] = [];
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'https://example.com/host.git',
+      cloneTo: cloneDir,
+      callsign: 'echo',
+      registryPath,
+      cwd: productClone,
+      getGitRoot: () => productClone,
+      getRemoteUrls: () => [],
+      cloneCommand: async (_url: string, dest: string) => {
+        // Subfolder layout: <dest>/echo/.squad/team.md
+        const sq = path.join(dest, 'echo', '.squad');
+        fs.mkdirSync(sq, { recursive: true });
+        fs.writeFileSync(path.join(sq, 'team.md'), '# echo\n', 'utf8');
+      },
+      _writeRegistryFn: (_fp, reg) => { written.push(reg.squads.find(s => s.callsign === 'echo')); writeRegistry(_fp, reg); },
+    }));
+
+    const entry = written[0] as Record<string, unknown>;
+    expect(entry).toBeDefined();
+    // Must resolve to the subfolder .squad path (reactivation succeeded, no collision)
+    expect((entry['path'] as string).replace(/\\/g, '/')).toContain('echo/.squad');
+  });
+});

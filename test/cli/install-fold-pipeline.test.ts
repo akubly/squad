@@ -857,3 +857,88 @@ describe('install-fold-pipeline --fold-service-connection (F)', () => {
     expect(yaml).not.toContain('azureSubscription');
   });
 });
+
+// ─── Piece 49: D1 .squad/-gated self-install ─────────────────────────────────
+
+describe('install-fold-pipeline D1 self-host (.squad/-gated)', () => {
+  it('P49.D1-1: run inside a .squad-bearing state repo with no registry entry installs into that repo root', async () => {
+    const stateRepoDir = makeTmpDir('p49-self');
+    const stateRoot = initGitRepo(stateRepoDir);
+    // Place a .squad dir in the state repo to indicate it IS the host
+    fs.mkdirSync(path.join(stateRoot, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(stateRoot, '.squad', 'team.md'), '# self\n', 'utf8');
+
+    // No registry entry pointing here
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: stateRoot });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const dest = path.join(stateRoot, '.github', 'workflows', 'fold-squad-state.yml');
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(fs.readFileSync(dest, 'utf-8').length).toBeGreaterThan(100);
+  });
+
+  it('P49.D1-2: a dir that is neither registered clone nor .squad state repo still fails fast', async () => {
+    const plainDir = makeTmpDir('p49-plain');
+    initGitRepo(plainDir);
+    // No .squad dir, no registry entry
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(installFoldPipeline('github', { cwd: plainDir })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errOutput = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(errOutput).toContain('squad assign');
+    } finally {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('P49.D1-3: config-stateLocation fallback host with missing target dir still fails fast (no auto-create leak)', async () => {
+    const hostRepoDir = makeTmpDir('p49-cfg-host');
+    const hostRoot = initGitRepo(hostRepoDir);
+    // The state host has .squad/ (it's a real host) but is resolved via config, not D1.
+    fs.mkdirSync(path.join(hostRoot, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(hostRoot, '.squad', 'team.md'), '# cfg\n', 'utf8');
+
+    const cloneDir = makeTmpDir('p49-cfg-clone');
+    initGitRepo(cloneDir);
+    // No registry entry
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+    // config.json points to the host via stateLocation
+    fs.mkdirSync(path.join(cloneDir, '.squad'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cloneDir, '.squad', 'config.json'),
+      JSON.stringify({ version: 1, stateLocation: hostRoot }),
+      'utf-8',
+    );
+    // Do NOT create .github/workflows/ in the host — must fail fast
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(installFoldPipeline('github', { cwd: cloneDir })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      // Must NOT have auto-created the directory
+      expect(fs.existsSync(path.join(hostRoot, '.github', 'workflows'))).toBe(false);
+    } finally {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+});
