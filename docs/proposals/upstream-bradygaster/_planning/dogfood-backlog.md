@@ -113,16 +113,29 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | F (Tier 1) | Compliant fold state-branch write-back identity: the ADO fold pushes folded state under the implicit `System.AccessToken`, which only works after a manually-granted Project Build Service **Contribute** on the state branch — the over-privileged build-service-account pattern flagged by the "Securing Azure DevOps Build Service Accounts" control. Add an opt-in `install-fold-pipeline --fold-service-connection <name>` that renders the ADO template to push under an ADO service connection (managed-identity / service-principal backed, `aka.ms/azdosc`) for a per-resource least-privilege identity; default rendering stays byte-identical to today, and the setup docs document both the minimum-permission path and the compliant alternative (generic `dev.azure.com/contoso/MyProject` placeholder, no internal portal URL) |
 | G (Tier 1) | De-overload `squad assign` warm-path origin-collision disambiguation: when the current clone's remotes also match ≥2 *other* squads' recorded origins, the guard throws `ERR_ASSIGN_ORIGIN_AMBIGUITY` and the only value that clears it is the callsign already given positionally (`squad assign teamx --callsign teamx`) — because `--callsign` is overloaded (its cold-start role is to name the registration callsign for a URL assign). Make the warm path assign to the positional target without a redundant `--callsign`, add a purpose-named `--allow-origin-collision` opt-in for the genuine multi-match case, and make the error name the colliding squads, the target, and the remediation; cold-start `--callsign` semantics unchanged |
 
+### Piece 49 — Self-hosted fold runners and multi-squad host onboarding
+
+`docs/proposals/upstream-bradygaster/49-self-hosted-fold-runners-and-multi-squad-host-onboarding.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Fold-template self-hosted-runner durability, all four copies byte-identical: (A1) detach and `git branch -D "$STATE_BRANCH"` before the checkout/`--orphan` block so a workspace-reusing (self-hosted) runner's stale local state branch does not abort the first-fold orphan checkout with "a branch named … already exists" (hosted runners start clean, so it is a no-op there); (A2) guard the per-ref commit with `git diff --cached --quiet` so an idempotent/already-folded snapshot skips the empty commit but is still recorded in `$FOLDED_ENTRIES` (and thus cleaned up), converging the GitHub template (which aborts the run today) with the ADO template (which drops the ref today) — a genuine fold failure is still excluded and not deleted |
+| B (Tier 1) | Add a manual on-demand fold trigger: `workflow_dispatch:` on the GitHub template and an explicit manual-run affordance on the ADO template (rendered fold body unchanged), so an operator can fold immediately instead of pushing a throwaway inbox ref or waiting up to fifteen minutes for the scheduled sweep; four copies byte-identical |
+| C (Tier 1) | `squad assign` subfolder team-root resolution: the warm-path clone validation resolves the team root as `<cloneDest>/.squad/team.md` (today) else `<cloneDest>/<callsign>/.squad/team.md` (the per-callsign subfolder layout that `init`'s monorepo/`agentFileRoot` mode already produces, #939), registers the entry against the resolved team root, and fails `ERR_ASSIGN_NO_TEAM_MD` — naming both checked paths — only when neither exists; closes the init↔assign asymmetry that blocks onboarding a multi-squad host; single-squad-at-root hosts unchanged; no arbitrary `*/.squad` scan |
+| D (Tier 2, decision) | `install-fold-pipeline` targeting a self-hosting state repository — D1 `.squad/`-gated self-install (when registry-entry and `.squad/config.json` `stateLocation` resolution are both empty and the current repo root holds `.squad/`, target the current repo root via `git rev-parse --show-toplevel` instead of exiting with the `squad assign` guidance; recommended) vs. D2 an explicit `--host-root`/`--here` opt-in |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
 
 None currently. Piece 46 closed the originally-planned stack; piece 47 reopened it with a
 live-reproduced monorepo team-root transport defect plus two sync registry-resolution gaps;
-piece 48 continues it from the next dogfooding pass (shared-host operability — install
+piece 48 continued it from the next dogfooding pass (shared-host operability — install
 ergonomics, fold inbox-branch cleanup hygiene, two `doctor` diagnostics, a compliant
-fold-pipeline state-branch identity, and a `squad assign` disambiguation ergonomics fix) and is
-now specced (above). Further pieces are added here as
+fold-pipeline state-branch identity, and a `squad assign` disambiguation ergonomics fix); piece 49
+continues it from the pass that took the host onto a self-hosted CI runner and toward a multi-squad
+layout (self-hosted-runner fold-template durability, a manual fold trigger, and subfolder team-root
+onboarding in `squad assign`) and is now specced (above). Further pieces are added here as
 new dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
