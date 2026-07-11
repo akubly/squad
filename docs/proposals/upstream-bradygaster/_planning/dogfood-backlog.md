@@ -124,6 +124,64 @@ These need no new piece; confirm them in the next end-to-end dogfood run.
 | C (Tier 1) | `squad assign` subfolder team-root resolution: the warm-path clone validation resolves the team root as `<cloneDest>/.squad/team.md` (today) else `<cloneDest>/<callsign>/.squad/team.md` (the per-callsign subfolder layout that `init`'s monorepo/`agentFileRoot` mode already produces, #939), registers the entry against the resolved team root, and fails `ERR_ASSIGN_NO_TEAM_MD` — naming both checked paths — only when neither exists; closes the init↔assign asymmetry that blocks onboarding a multi-squad host; single-squad-at-root hosts unchanged; no arbitrary `*/.squad` scan |
 | D (Tier 2, decision) | `install-fold-pipeline` targeting a self-hosting state repository — D1 `.squad/`-gated self-install (when registry-entry and `.squad/config.json` `stateLocation` resolution are both empty and the current repo root holds `.squad/`, target the current repo root via `git rev-parse --show-toplevel` instead of exiting with the `squad assign` guidance; recommended) vs. D2 an explicit `--host-root`/`--here` opt-in |
 
+### Piece 50 — Subfolder-host and self-hosted-runner hardening
+
+`docs/proposals/upstream-bradygaster/50-subfolder-host-and-self-hosted-runner-hardening.md`
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Cross-repo `sync` resolves the effective state remote in the team-root/host-clone git context: use the registry `stateRemote` only when it exists in that context, else fall back to `resolveRemote(teamRoot)` (the host clone's `origin`), else fail with an error naming the host git root and remediation — fixes the opaque `'<remote>' does not appear to be a git repository` when the operator added the state remote to the product clone; single-repo path unchanged |
+| B (Tier 1) | CRLF-safe fold-ref cleanup: `tr -d '\r'` + `${REF%$'\r'}` in the `--delete-folded-refs` loop (and defensively in the other refspec-feeding `jq \| while read` loops) so the first ref in a multi-ref batch on a self-hosted Windows runner is no longer passed as an invalid refspec and orphaned; all four template copies byte-identical |
+| C (Tier 1) | `squad assign` installs the host-side cross-repo hook at the host git root resolved via `git rev-parse --show-toplevel` (cwd = resolved team root) instead of `dirname(entry.path)`, so a subfolder-hosted squad (`<hostRoot>/<callsign>/.squad`) installs the hook at `<hostRoot>` instead of failing "not a git repository root"; closes the hook-side half of the init↔assign subfolder asymmetry piece 49 §C opened |
+| D (Tier 1) | `install-fold-pipeline` self-install (piece 49 §D1) also recognizes a `<callsign>/.squad/team.md` subfolder host, not only a root-level `.squad/`, and installs at the git root; a non-squad repo still fails fast with the `squad assign` guidance |
+| E (Tier 1) | `squad doctor` subfolder-host accuracy: (E1) resolve `.github/agents/squad.agent.md` against `git rev-parse --show-toplevel` not the cwd; (E2) suppress the "Local `.squad/` directory found" advisory for a registered team root (incl. the subfolder form), keeping it for an unregistered stray |
+| F (Tier 2, decision) | `install-fold-pipeline` self-hosted runner target — F1 `--runner "<labels>"` renders `runs-on: [<labels>]` + `defaults.run.shell: bash` for non-Linux labels (recommended) vs. F2 keep `ubuntu-latest` and document the manual edit |
+
+### Piece 51 — Publish-allowlist completion and team-root state hygiene
+
+`docs/proposals/upstream-bradygaster/51-publish-allowlist-completion-and-team-root-state-hygiene.md`
+
+Topology-agnostic; prerequisite for the Pole-A pieces 52–53. Completes the ephemeral/scratch
+classification so every mutable team-root path has a defined home (fold or gitignore).
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Extend `PUBLISH_ALLOWLIST` for unambiguous append-only state: EXACT `history.md`, `orchestration-log.md`, `casting-history.json`, `casting-registry.json`; PREFIX `casting/`, `files/onboarding/` — so these no longer drift permanently between clones |
+| B (Tier 2, decision) | Fold per-agent `agents/<name>/history.md` without folding the durable `agents/<name>/charter.md` — B1 a suffix/glob allowlist matcher (recommended) vs. B2 relocate histories under a folded `history/agents/` prefix |
+| C (Tier 1) | Declare machine-local scratch (`raw-agent-output.md`, `run-output.md`, `publish-metadata.json`) and pipeline-owned `publish-history.json` in the managed `.gitignore`, and assert `publish-history.json` is excluded from every publish snapshot (fold pipeline is its sole writer) |
+| D (Tier 1) | `install-fold-pipeline` installs the same allowlist-aware `.gitignore` that `init` does (shared idempotent helper), closing the leak where a host onboarded only via `install-fold-pipeline` has no `.gitignore` and a `git add -A` sweeps folded state onto the product branch; never a blanket `.squad/` here (that is piece 52) |
+| E (Tier 2, decision) | `casting-registry.json` fold semantics — E1 fold last-writer-wins (recommended) vs. E2 machine-local (gitignore, never fold) |
+
+### Piece 52 — Infra-only main and the durable config lane (Pole A)
+
+`docs/proposals/upstream-bradygaster/52-infra-only-main-and-durable-config-lane.md`
+
+Pole-A pivot: **no squad content or state lands on `main`.** Reverses `init`'s Sub-proposal J intent
+(durable-on-`main`). Establishes topology + durable storage; the transport is piece 53.
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Under the orphan backend, `init` and `install-fold-pipeline` write a **blanket** team-root `.squad/` ignore (`applyBlanketGitignore`) instead of the allowlist-scoped one; `main` retains only the fold workflow, the `.gitignore`, and a README; provide a one-time Pole-B→Pole-A migration (`git rm -r --cached`, seed the config orphan, commit infra-only `main`) |
+| B (Tier 1) | Introduce the durable orphan `squad/config/<callsign>` (no `main` ancestor, tree = durable `.squad/**` only) and a genesis seeding step (commit-tree plumbing); the branch advances only by reviewed merge (piece 53); register `configBranch`/`configRemote` on the entry |
+| C (Tier 1) | Define `CONFIG_ALLOWLIST` (durable: charters, roster, routing, `config.json`, templates, process docs) as the deterministic complement of piece 51's ephemeral+scratch partition; a total, disjoint classifier test asserts every path is in exactly one lane (guard against future category-3 drift) |
+| D (Tier 2, decision) | Uniform vs. hybrid infra-only rule — D1 uniform across all topologies incl. dedicated squad-host repos (recommended) vs. D2 hybrid (dedicated squad-host repos may keep durable on `main`) |
+
+### Piece 53 — Hands-off durable review: config-inbox and auto-PR
+
+`docs/proposals/upstream-bradygaster/53-hands-off-durable-review-config-inbox-and-auto-pr.md`
+
+Capstone of the Pole-A trilogy: durable governance becomes as hands-off as ephemeral state, with one
+human approval. Publish → auto-PR → approve/merge → hydrate.
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | A durable publish lane: `squad sync --push-config` snapshots the team root filtered to `CONFIG_ALLOWLIST` and pushes to `squad/config-inbox/<callsign>/<dev>/<ts>`; refactor `publishTeamRootToInbox(payloadAllowlist, inboxPrefix, …)` so the ephemeral and durable lanes share one filter and cannot cross-contaminate |
+| B (Tier 1) | GitHub auto-PR config pipeline: on push to `squad/config-inbox/**`, assemble a candidate and `gh pr create` into `squad/config/<callsign>`; document the `GITHUB_TOKEN` downstream-CI caveat (use a PAT/App token if the lane runs CI) and ship a `CODEOWNERS` reviewer-routing snippet |
+| C (Tier 1) | ADO auto-PR config pipeline: `az repos pr create` under `System.AccessToken` targeting `squad/config/<callsign>`; document the build-service "Contribute to pull requests" grant, `System.AccessToken` exposure, "Limit job authorization scope", and a required-reviewer branch policy; kept behaviorally aligned with GitHub |
+| D (Tier 1) | Durable hydrate on `sync --pull` from `squad/config/<callsign>` (via `configRemote`/`configBranch`, resolved per piece 50 §A) alongside the state hydrate; disjoint path sets compose without clobbering; `.last-config-hydrate-sha` sentinel + idempotent re-pull; skip with a notice when `configBranch` is unset |
+| E (Tier 1) | Surface unpromoted durable changes: `squad status`/session-end diffs `CONFIG_ALLOWLIST` files against the hydrated config tip and prints a one-line `run 'squad sync --push-config' to open a review PR` nudge; no blocking, no auto-publish |
+| F (Tier 2, decision) | One inbox lane or two — F1 physically distinct `squad/inbox/**` (fold/force-push) and `squad/config-inbox/**` (auto-PR) lanes, prefix determines handling (recommended) vs. F2 a single superset lane the pipeline demultiplexes |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
