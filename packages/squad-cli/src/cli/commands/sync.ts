@@ -171,6 +171,63 @@ export function resolveRemote(cwd: string): string {
 }
 
 /**
+ * Resolve the effective state remote for a cross-repo team root, IN the team-root git
+ * context (piece 50 §A).
+ *
+ * In cross-repo mode both transport halves run git with `cwd = teamRoot`, whose git directory
+ * is the HOST clone — so the effective state remote must name a remote that exists in the host
+ * clone, not in the product clone where `sync` is invoked. Precedence:
+ *
+ *   1. the registry entry's `stateRemote`, but ONLY when it resolves in the team-root git
+ *      context (`git -C <teamRoot> remote get-url <name>` succeeds);
+ *   2. else `resolveRemote(teamRoot)` — the host clone's own resolvable remote (piece 46 §A
+ *      precedence: tracking remote; else sole remote; else `origin` when it exists);
+ *   3. else fail with an actionable `SquadError` naming the HOST clone git root, the missing
+ *      remote, and both remediations.
+ *
+ * A configured-but-absent `stateRemote` (the piece-50 dogfood failure) now falls through to
+ * the host clone's resolvable remote instead of being passed to git unvalidated.
+ */
+export function resolveStateRemote(teamRoot: string, configuredStateRemote: string | undefined): string {
+  // 1. Registry stateRemote, honored only when it exists in the team-root (host clone) context.
+  if (configuredStateRemote) {
+    try {
+      execFileSync('git', ['-C', teamRoot, 'remote', 'get-url', configuredStateRemote], {
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return configuredStateRemote;
+    } catch {
+      // Configured but absent in the host clone — fall through to host-clone resolution.
+    }
+  }
+
+  // 2. Fall back to the host clone's own resolvable remote.
+  try {
+    return resolveRemote(teamRoot);
+  } catch {
+    // 3. Nothing resolvable — fail with an error that points at the HOST clone, not the product.
+    let hostRoot = teamRoot;
+    try {
+      hostRoot = execFileSync('git', ['-C', teamRoot, 'rev-parse', '--show-toplevel'], {
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim() || teamRoot;
+    } catch { /* not a work tree — name the team root itself */ }
+
+    throw new SquadError(
+      `squad sync: cannot resolve the cross-repo state remote in the host clone at "${hostRoot}".\n` +
+      (configuredStateRemote
+        ? `  The registry entry's stateRemote "${configuredStateRemote}" does not name a remote in the\n` +
+          `  host clone, and no fallback remote could be resolved there.\n`
+        : `  No registry stateRemote is set and no remote could be resolved in the host clone.\n`) +
+      `  Remediate by either:\n` +
+      `    - adding the remote to the host clone: ` +
+      `git -C "${hostRoot}" remote add ${configuredStateRemote ?? '<name>'} <url>\n` +
+      `    - or clearing the registry entry's stateRemote so the host clone's "origin" is used.`,
+    );
+  }
+}
+
+/**
  * Resolve the state branch for a registry entry. An explicit `stateBranch` wins; otherwise,
  * when a valid callsign is present, derive the namespaced `squad/state/<callsign>` branch
  * (matching the fold pipeline's target and the value assign/init persist for new entries).
@@ -941,12 +998,14 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
     const crossRepo = teamRoot !== undefined;
 
-    // ── Piece 43: cross-repo state remote / branch resolution ─────────────────
+    // ── Piece 43/50: cross-repo state remote / branch resolution ──────────────
     // The state remote and the squad/state/<callsign> branch are resolved from the
     // registry / team-root host, not from the code clone's origin. An explicit
-    // stateRemote/stateBranch wins; otherwise the remote resolves from the host clone and
-    // the branch derives from the callsign (falling back to the flat legacy `squad-state`).
-    const effectiveStateRemote = crossRepo ? (stateRemote ?? resolveRemote(teamRoot!)) : getCodeCloneRemote();
+    // stateRemote wins ONLY when it exists in the team-root git context (piece 50 §A);
+    // otherwise resolution falls back to the host clone's own remote, or fails with an
+    // actionable error naming the host git root. The branch derives from the callsign
+    // (falling back to the flat legacy `squad-state`).
+    const effectiveStateRemote = crossRepo ? resolveStateRemote(teamRoot!, stateRemote) : getCodeCloneRemote();
     const effectiveStateBranch = deriveStateBranch(stateBranch, registryCallsign);
 
     // ── Inbox-handle resolution chain ─────────────────────────────────────────

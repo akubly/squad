@@ -52,6 +52,15 @@ export interface InstallFoldPipelineOptions {
    * rendered output is byte-identical to the default template.
    */
   foldServiceConnection?: string;
+  /**
+   * Optional self-hosted runner label set (GitHub platform only), e.g.
+   * "self-hosted,Windows,X64". When set, the GitHub template is rendered with
+   * `runs-on: [<labels>]` and, for a non-Linux label set, `defaults.run.shell: bash`
+   * so the POSIX fold body runs under Git-Bash. When unset, the rendered output is
+   * byte-identical to the default template (`runs-on: ubuntu-latest`, no shell). The
+   * ADO template is agent-pool-driven and unaffected.
+   */
+  runner?: string;
 }
 
 /**
@@ -109,6 +118,49 @@ function applyFoldServiceConnection(content: string, serviceConnection: string):
   );
 
   return out;
+}
+
+/**
+ * Apply render-time substitutions for the --runner install flag (GitHub only, F1).
+ *
+ * Renders the fold job's `runs-on: ubuntu-latest` as `runs-on: [<labels>]` for a
+ * self-hosted runner label set. When the label set is non-Linux (no `ubuntu`/`linux`
+ * label), also injects a job-level `defaults.run.shell: bash` so the POSIX fold body
+ * runs under Git-Bash on Windows/macOS self-hosted runners. A no-op when the label set
+ * is empty, keeping the default rendering byte-identical to the committed template.
+ */
+function applyRunner(content: string, runner: string): string {
+  const labels = runner.split(',').map(s => s.trim()).filter(Boolean);
+  if (labels.length === 0) {
+    return content;
+  }
+  const nl = content.includes('\r\n') ? '\r\n' : '\n';
+  const linuxLike = labels.some(l => /^(ubuntu|linux)/i.test(l));
+  let replacement = `    runs-on: [${labels.join(', ')}]`;
+  if (!linuxLike) {
+    replacement += `${nl}    defaults:${nl}      run:${nl}        shell: bash`;
+  }
+  return content.replace('    runs-on: ubuntu-latest', replacement);
+}
+
+/**
+ * Recognize the callsign-named subfolder host layout `init` produces: a repo whose
+ * root holds at least one `<callsign>/.squad/team.md`. Used by D1 self-install to
+ * accept a subfolder host that has no root-level `.squad/`. Deliberately does NOT
+ * match an arbitrary `<dir>/.squad` — only callsign-named subdirectories with a team.md.
+ */
+function hasSubfolderSquadHost(repoRoot: string): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(repoRoot, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some(e =>
+    e.isDirectory() &&
+    CALLSIGN_RE.test(e.name) &&
+    fs.existsSync(path.join(repoRoot, e.name, '.squad', 'team.md')),
+  );
 }
 
 function tryGetRepoRoot(cwd: string): string | undefined {
@@ -191,8 +243,12 @@ export async function installFoldPipeline(
   }
 
   // D1: .squad/-gated self-install — if the current repo IS the state host, target itself.
+  // Piece 50 §D extends this to the callsign-named subfolder host layout (piece 49): a repo
+  // whose root has no `.squad/` but holds at least one `<callsign>/.squad/team.md`. The fold
+  // pipeline is repo-level and callsign-generic, so the install target is the git root either way.
   let selfInstall = false;
-  if (!hostRepoRoot && fs.existsSync(path.join(repoRoot, '.squad'))) {
+  if (!hostRepoRoot &&
+      (fs.existsSync(path.join(repoRoot, '.squad')) || hasSubfolderSquadHost(repoRoot))) {
     hostRepoRoot = repoRoot;
     selfInstall = true;
   }
@@ -283,6 +339,9 @@ export async function installFoldPipeline(
   }
   if (options.foldServiceConnection && platform === 'ado') {
     templateContent = applyFoldServiceConnection(templateContent, options.foldServiceConnection);
+  }
+  if (options.runner && platform === 'github') {
+    templateContent = applyRunner(templateContent, options.runner);
   }
 
   const filename = callsign ? `fold-squad-state.${callsign}.yml` : 'fold-squad-state.yml';

@@ -614,14 +614,28 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   // Install cross-repo post-commit hook in BOTH clones: host (filtered) and product (unfiltered).
   // Each install is independent — one failure must not abort the other.
   // Supersedes piece-34 host-only constraint (.squad/decisions.md:998).
-  const docsRepoPath = path.dirname(entry.path);
-  try {
-    installCrossRepoHookFn(docsRepoPath);
-  } catch (err) {
+  //
+  // Piece 50 §C: resolve the HOST git root via git rev-parse (cwd = the resolved team-root
+  // directory) instead of dirname(entry.path). For a subfolder host the team root is
+  // <hostRoot>/<callsign>/.squad, so dirname(entry.path) is <hostRoot>/<callsign> — NOT a git
+  // root, and the install would abort. rev-parse yields <hostRoot> for both root-hosted and
+  // subfolder-hosted squads, mirroring piece 49 §C's subfolder resolution on the validation side.
+  const teamRootDir = path.dirname(entry.path);
+  const docsRepoPath = gitRootFn(teamRootDir);
+  if (!docsRepoPath) {
     warnings.push(
-      `Could not install cross-repo hook at host "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
-      `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
+      `Could not install cross-repo hook: "${teamRootDir}" is not inside a git work tree. ` +
+      `Run 'squad assign ${callsign}' again once the shared-squad host clone is available.`,
     );
+  } else {
+    try {
+      installCrossRepoHookFn(docsRepoPath);
+    } catch (err) {
+      warnings.push(
+        `Could not install cross-repo hook at host "${docsRepoPath}": ${err instanceof Error ? err.message : String(err)}. ` +
+        `Run 'squad assign ${callsign}' again after the shared-squad host clone is available.`,
+      );
+    }
   }
   try {
     installCrossRepoHookFn(clonePath);

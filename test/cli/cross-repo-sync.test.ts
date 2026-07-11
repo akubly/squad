@@ -18,6 +18,7 @@ import {
   publishTeamRootToInbox,
   hydrateTeamRootFromStateRef,
   runSync,
+  resolveStateRemote,
   _transport,
 } from '../../packages/squad-cli/src/cli/commands/sync.js';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
@@ -757,6 +758,73 @@ describe('piece 46 — resolver + real transport end-to-end', { timeout: 120_000
       await runSync({ direction: 'pull', cwd: workRepo, quiet: true });
     } catch (e) { thrown = e; }
     expect(thrown).toBeInstanceOf(SquadError);
+    expect((thrown as Error).message).toContain('stateRemote');
+  });
+});
+
+
+// ─── Piece 50 §A — cross-repo state-remote resolution in the team-root git context ───────────
+// resolveStateRemote resolves the effective state remote against the HOST clone (teamRoot),
+// never trusting a registry stateRemote that only exists in the product clone.
+describe('piece 50 §A — resolveStateRemote (team-root git context)', { timeout: 120_000 }, () => {
+  it('(i) no stateRemote set and the host clone has only origin → resolves origin', () => {
+    const base = makeTmpDir('p50a-i');
+    const bare = path.join(base, 'host.git');
+    const teamRoot = path.join(base, 'teamroot');
+    initBareRepo(bare);
+    initWorkingRepo(teamRoot, 'origin', bare);
+
+    expect(resolveStateRemote(teamRoot, undefined)).toBe('origin');
+  });
+
+  it('(ii) stateRemote names a remote absent from the host clone → falls back to the host origin', () => {
+    const base = makeTmpDir('p50a-ii');
+    const bare = path.join(base, 'host.git');
+    const teamRoot = path.join(base, 'teamroot');
+    initBareRepo(bare);
+    // Host clone has ONLY origin. The registry stateRemote "squad-state" exists only in the
+    // (absent here) product clone — the natural but wrong place the operator added it.
+    initWorkingRepo(teamRoot, 'origin', bare);
+
+    expect(resolveStateRemote(teamRoot, 'squad-state')).toBe('origin');
+  });
+
+  it('(iii) stateRemote names a remote present in the host clone → uses it', () => {
+    const base = makeTmpDir('p50a-iii');
+    const bareOrigin = path.join(base, 'origin.git');
+    const bareState = path.join(base, 'state.git');
+    const teamRoot = path.join(base, 'teamroot');
+    initBareRepo(bareOrigin);
+    initBareRepo(bareState);
+    initWorkingRepo(teamRoot, 'origin', bareOrigin);
+    execFileSync('git', ['remote', 'add', 'squad-state', bareState], { cwd: teamRoot, stdio: 'pipe' });
+
+    expect(resolveStateRemote(teamRoot, 'squad-state')).toBe('squad-state');
+  });
+
+  it('(iv) neither the stateRemote nor any fallback resolves → SquadError naming the host git root', () => {
+    const base = makeTmpDir('p50a-iv');
+    const bareA = path.join(base, 'a.git');
+    const bareB = path.join(base, 'b.git');
+    const teamRoot = path.join(base, 'teamroot');
+    initBareRepo(bareA);
+    initBareRepo(bareB);
+    // Host clone has TWO remotes, neither named origin, no tracking remote — resolveRemote
+    // cannot deterministically choose, and the configured stateRemote is absent.
+    initWorkingRepo(teamRoot, 'one', bareA);
+    execFileSync('git', ['remote', 'add', 'two', bareB], { cwd: teamRoot, stdio: 'pipe' });
+
+    let thrown: unknown;
+    try {
+      resolveStateRemote(teamRoot, 'squad-state');
+    } catch (e) { thrown = e; }
+
+    expect(thrown).toBeInstanceOf(SquadError);
+    const hostRoot = execFileSync('git', ['-C', teamRoot, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+    expect((thrown as Error).message).toContain(hostRoot);
+    expect((thrown as Error).message).toContain('squad-state');
     expect((thrown as Error).message).toContain('stateRemote');
   });
 });

@@ -15,6 +15,7 @@ import os from 'node:os';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from '../core/squad-file-conventions.js';
 import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
+import { getGitRoot } from '../../lib/git-root.js';
 import { RED, YELLOW, DIM, RESET } from '../core/output.js';
 import type { DoctorFinding, DoctorSeverity } from './doctor-types.js';
 export type { DoctorFinding, DoctorSeverity, DoctorSource, DoctorRepair } from './doctor-types.js';
@@ -562,7 +563,11 @@ function checkCopilotSdkSessionPatch(cwd: string): DoctorCheck {
 }
 
 function checkSquadAgentMd(cwd: string): DoctorCheck {
-  const agentMdPath = path.join(cwd, '.github', 'agents', 'squad.agent.md');
+  // E1 (piece 50): resolve the agent discovery file against the git repository root so a
+  // subfolder host whose coordinator file lives at the git root passes from any working
+  // directory. Fall back to cwd-relative behavior when not inside a git work tree.
+  const base = getGitRoot(cwd) ?? cwd;
+  const agentMdPath = path.join(base, '.github', 'agents', 'squad.agent.md');
   if (!fileExists(agentMdPath)) {
     return {
       name: '.github/agents/squad.agent.md',

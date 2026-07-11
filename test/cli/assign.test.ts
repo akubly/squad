@@ -387,7 +387,7 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
     fs.rmSync(TMP_ROOT, { recursive: true, force: true });
   });
 
-  it('P34.A1 inboxHandle set → installCrossRepoHook called with path.dirname(entry.path)', async () => {
+  it('P34.A1 inboxHandle set → installCrossRepoHook called with the host git root (root host)', async () => {
     const hostDir = path.join(dir, 'host');
     const cloneDir = path.join(dir, 'clone');
     fs.mkdirSync(cloneDir, { recursive: true });
@@ -402,14 +402,52 @@ describe('squad assign — piece-34 cross-repo hook installation (warm path)', (
       registryPath,
       cwd: cloneDir,
       inboxHandle: 'dev1',
-      getGitRoot: () => cloneDir,
+      // Piece 50 §C: the host git root is resolved via git rev-parse from the team-root dir.
+      // For a root host the team-root dir IS the host git root, so identity resolution models
+      // a real work tree where `git rev-parse --show-toplevel` returns the dir itself.
+      getGitRoot: (d) => d,
       getRemoteUrls: () => [],
       _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
     }));
 
-    // installCrossRepoHook must be called once with the docs-repo root (parent of .squad)
-    expect(hookCalls).toHaveLength(1);
+    // The warm path installs the cross-repo hook in BOTH clones: host (first) then product.
+    // Piece 50 §C only changes the host-side root; the host install must target the host git root.
+    expect(hookCalls).toHaveLength(2);
     expect(hookCalls[0]).toBe(hostDir);
+    expect(hookCalls[1]).toBe(cloneDir);
+  });
+
+  it('P50.C subfolder host → installCrossRepoHook called with the host git root, not the callsign subdir', async () => {
+    const hostDir = path.join(dir, 'host');
+    const cloneDir = path.join(dir, 'clone');
+    fs.mkdirSync(cloneDir, { recursive: true });
+    // Subfolder host: the team root is <hostDir>/alpha/.squad.
+    const squadDir = makeSquadHost(path.join(hostDir, 'alpha'), 'alpha');
+    const registryPath = path.join(dir, 'registry.json');
+    makeRegistry(registryPath, squadDir, 'alpha');
+
+    const hookCalls: string[] = [];
+    const teamRootDir = path.normalize(path.join(hostDir, 'alpha'));
+
+    await runAssign(baseOpts({
+      callsignOrUrl: 'alpha',
+      registryPath,
+      cwd: cloneDir,
+      inboxHandle: 'dev1',
+      // git rev-parse --show-toplevel from the subfolder team-root dir resolves the HOST git
+      // root (<hostDir>), never the <hostDir>/alpha subdirectory. Every other dir (the product
+      // clone) resolves to itself.
+      getGitRoot: (d) => (path.normalize(d) === teamRootDir ? hostDir : d),
+      getRemoteUrls: () => [],
+      _installCrossRepoHookFn: (p) => { hookCalls.push(p); },
+    }));
+
+    // Host install (first) targets the resolved host git root, NOT the callsign subdir;
+    // the product install (second) targets the product clone, unchanged.
+    expect(hookCalls).toHaveLength(2);
+    expect(hookCalls[0]).toBe(hostDir);
+    expect(hookCalls[0]).not.toBe(teamRootDir);
+    expect(hookCalls[1]).toBe(cloneDir);
   });
 
   it('P34.A2 inboxHandle set but hook throws → warning emitted, assign succeeds (no throw)', async () => {

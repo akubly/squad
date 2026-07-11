@@ -73,10 +73,20 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
   it('deletes only successfully-folded refs, driven by FOLDED_ENTRIES not the full discovered set (piece 48 B)', () => {
     // The cleanup loop must iterate the successfully-folded refs, never $SORTED_REFS,
     // so a ref whose fold commit failed is never deleted unfolded.
-    expect(raw).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref')");
+    expect(raw).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref' | tr -d '\\r')");
     expect(raw).toContain('done <<< "$FOLDED_REF_LIST"');
     // The fold loop still iterates $SORTED_REFS exactly once; the delete loop no longer does.
     expect(raw.split('done <<< "$SORTED_REFS"').length - 1).toBe(1);
+  });
+
+  it('strips carriage returns from every refspec-feeding pipeline so a CRLF runner never emits an invalid refspec (piece 50 B)', () => {
+    // The --delete-folded-refs cleanup loop is CR-safe: the jq output is CR-stripped and
+    // each read ref is defensively trimmed of a trailing CR before it becomes a refspec.
+    expect(raw).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref' | tr -d '\\r')");
+    expect(raw).toContain("REF=\"${REF%$'\\r'}\"");
+    // The other refspec-feeding pipelines strip CR too (recorded-ref scan + inbox discovery).
+    expect(raw).toContain("jq -r '.[].foldedRefs[].ref // empty' \"$HISTORY_FILE\" 2>/dev/null | tr -d '\\r'");
+    expect(raw).toContain("git ls-remote --heads origin \"refs/heads/squad/inbox/${CALLSIGN}/*\" | awk '{print $2}' | tr -d '\\r'");
   });
 
   it('keeps the inbox-branch cleanup gated off by default (DELETE_FOLDED_REFS:-false) (piece 48 B)', () => {

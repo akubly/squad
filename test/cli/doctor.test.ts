@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import {
   runDoctor,
@@ -32,6 +33,11 @@ const TEST_ROOT = join(process.cwd(), `.test-doctor-${randomBytes(4).toString('h
 async function scaffold(root: string): Promise<void> {
   const sq = join(root, '.squad');
   await mkdir(join(sq, 'agents', 'edie'), { recursive: true });
+  // Piece 50 §E1: doctor resolves the agent discovery file against the git root, so make
+  // the scaffold hermetic — initialise a git repo rooted at this temp dir.
+  try {
+    execFileSync('git', ['init', '-q', root], { stdio: 'ignore' });
+  } catch { /* git unavailable — cwd fallback path still exercised */ }
   await mkdir(join(sq, 'casting'), { recursive: true });
   await writeFile(join(sq, 'team.md'), '# Team\n\n## Members\n\n- Edie\n');
   await writeFile(join(sq, 'routing.md'), '# Routing\n');
@@ -320,6 +326,18 @@ describe('squad doctor', () => {
     expect(agentMdCheck).toBeDefined();
     expect(agentMdCheck?.status).toBe('fail');
     expect(agentMdCheck?.message).toContain('squad upgrade');
+  });
+
+  it('P50.E1: squad.agent.md at the git root passes when doctor runs from a subfolder', async () => {
+    await scaffold(TEST_ROOT);
+    // Subfolder host: coordinator agent file at the git root, doctor run from a nested subdir.
+    const subDir = join(TEST_ROOT, 'alpha-team');
+    await mkdir(subDir, { recursive: true });
+
+    const checks = await runDoctor(subDir);
+    const agentMdCheck = checks.find((c: DoctorCheck) => c.name.includes('squad.agent.md'));
+    expect(agentMdCheck).toBeDefined();
+    expect(agentMdCheck?.status).toBe('pass');
   });
 
   // ── piece-21 FIX-3/FIX-9 — upgrade-managed artifact checks ────────

@@ -779,7 +779,7 @@ describe('install-fold-pipeline --delete-folded-refs (B)', () => {
     const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
     // The deletion loop must read the successfully-folded refs derived from FOLDED_ENTRIES,
     // never iterate the full discovered SORTED_REFS set.
-    expect(yaml).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref')");
+    expect(yaml).toContain("FOLDED_REF_LIST=$(echo \"$FOLDED_ENTRIES\" | jq -r '.[].ref' | tr -d '\\r')");
     expect(yaml).toContain('done <<< "$FOLDED_REF_LIST"');
     // The fold loop still iterates $SORTED_REFS exactly once; the delete loop no longer does.
     expect(yaml.split('done <<< "$SORTED_REFS"').length - 1).toBe(1);
@@ -940,5 +940,185 @@ describe('install-fold-pipeline D1 self-host (.squad/-gated)', () => {
       exitSpy.mockRestore();
       consoleSpy.mockRestore();
     }
+  });
+});
+
+// ─── Piece 50 §D: subfolder-host self-install detection ──────────────────────
+
+describe('install-fold-pipeline P50.D subfolder-host self-install', () => {
+  it('P50.D-1: run inside a subfolder host (<callsign>/.squad/team.md, no root .squad) installs at the git root', async () => {
+    const hostRepoDir = makeTmpDir('p50-subhost');
+    const hostRoot = initGitRepo(hostRepoDir);
+    // Callsign-named subfolder layout `init` produces; NO root-level .squad/.
+    fs.mkdirSync(path.join(hostRoot, 'alpha-team', '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(hostRoot, 'alpha-team', '.squad', 'team.md'), '# alpha\n', 'utf8');
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: hostRoot });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    // Installs at the git root, not inside the callsign subfolder.
+    expect(fs.existsSync(path.join(hostRoot, '.github', 'workflows', 'fold-squad-state.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(hostRoot, 'alpha-team', '.github', 'workflows', 'fold-squad-state.yml'))).toBe(false);
+  });
+
+  it('P50.D-2: subfolder host self-install works when run from a subdirectory of the git root', async () => {
+    const hostRepoDir = makeTmpDir('p50-subhost-cwd');
+    const hostRoot = initGitRepo(hostRepoDir);
+    fs.mkdirSync(path.join(hostRoot, 'bravo-crew', '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(hostRoot, 'bravo-crew', '.squad', 'team.md'), '# bravo\n', 'utf8');
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      // Run from the callsign subdirectory — git rev-parse resolves back to the root.
+      await installFoldPipeline('github', { cwd: path.join(hostRoot, 'bravo-crew') });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(hostRoot, '.github', 'workflows', 'fold-squad-state.yml'))).toBe(true);
+  });
+
+  it('P50.D-3: a repo with a non-callsign */.squad (no team.md) is NOT treated as a subfolder host and fails fast', async () => {
+    const plainDir = makeTmpDir('p50-notsub');
+    const plainRoot = initGitRepo(plainDir);
+    // A stray */.squad without team.md must not qualify as a recognized subfolder host.
+    fs.mkdirSync(path.join(plainRoot, 'vendor', '.squad'), { recursive: true });
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null) => {
+      throw new Error('process.exit called');
+    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(installFoldPipeline('github', { cwd: plainRoot })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errOutput = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(errOutput).toContain('squad assign');
+    } finally {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('P50.D-4: a root-level .squad host still self-installs unchanged', async () => {
+    const hostRepoDir = makeTmpDir('p50-roothost');
+    const hostRoot = initGitRepo(hostRepoDir);
+    fs.mkdirSync(path.join(hostRoot, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(hostRoot, '.squad', 'team.md'), '# root\n', 'utf8');
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({ registry: null, warnings: [] });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: hostRoot });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(hostRoot, '.github', 'workflows', 'fold-squad-state.yml'))).toBe(true);
+  });
+});
+
+// ─── Piece 50 §F1: --runner self-hosted runner target (GitHub only) ──────────
+
+describe('install-fold-pipeline P50.F1 --runner', () => {
+  function readCommittedGithubTemplate(): string {
+    return fs.readFileSync(
+      path.join(process.cwd(), 'packages', 'squad-cli', 'templates', 'fold', 'github', 'fold-squad-state.yml'),
+      'utf-8',
+    );
+  }
+
+  it('P50.F1-1: no --runner renders byte-identical to the committed GitHub template', async () => {
+    const docsRepoDir = makeTmpDir('p50-runner-default');
+    const cloneDir = makeTmpDir('p50-runner-default-clone');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toBe(readCommittedGithubTemplate());
+    expect(yaml).toContain('runs-on: ubuntu-latest');
+    expect(yaml).not.toContain('defaults:');
+  });
+
+  it('P50.F1-2: --runner "self-hosted,Windows,X64" renders runs-on array + defaults.run.shell bash', async () => {
+    const docsRepoDir = makeTmpDir('p50-runner-win');
+    const cloneDir = makeTmpDir('p50-runner-win-clone');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, runner: 'self-hosted,Windows,X64' });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('runs-on: [self-hosted, Windows, X64]');
+    expect(yaml).not.toContain('runs-on: ubuntu-latest');
+    expect(yaml).toMatch(/defaults:\s*\n\s+run:\s*\n\s+shell: bash/);
+  });
+
+  it('P50.F1-3: a Linux self-hosted label set renders the runs-on array WITHOUT injecting a shell default', async () => {
+    const docsRepoDir = makeTmpDir('p50-runner-linux');
+    const cloneDir = makeTmpDir('p50-runner-linux-clone');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.github', 'workflows'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('github', { cwd: cloneDir, runner: 'self-hosted,Linux,X64' });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.github', 'workflows', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toContain('runs-on: [self-hosted, Linux, X64]');
+    expect(yaml).not.toContain('shell: bash');
+    expect(yaml).not.toContain('defaults:');
+  });
+
+  it('P50.F1-4: --runner is ignored for the ADO platform (agent-pool-driven, default rendering preserved)', async () => {
+    const docsRepoDir = makeTmpDir('p50-runner-ado');
+    const cloneDir = makeTmpDir('p50-runner-ado-clone');
+    const cloneRoot = initGitRepo(cloneDir);
+    const docsRepoRoot = setupRegistryEntry(docsRepoDir, cloneRoot);
+    fs.mkdirSync(path.join(docsRepoRoot, '.azuredevops'), { recursive: true });
+
+    const committedAdo = fs.readFileSync(
+      path.join(process.cwd(), 'packages', 'squad-cli', 'templates', 'fold', 'ado', 'fold-squad-state.yml'),
+      'utf-8',
+    );
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await installFoldPipeline('ado', { cwd: cloneDir, runner: 'self-hosted,Windows,X64' });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const yaml = fs.readFileSync(path.join(docsRepoRoot, '.azuredevops', 'fold-squad-state.yml'), 'utf-8');
+    expect(yaml).toBe(committedAdo);
   });
 });

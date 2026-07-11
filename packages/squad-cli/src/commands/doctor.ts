@@ -103,12 +103,11 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
   const env = opts.env ?? {};
   const cwd = opts.cwd;
 
-  // Local .squad/ presence
+  // Local .squad/ presence. The advisory is emitted after the registry loads so a
+  // registered team root (including the subfolder form <hostRoot>/<callsign>/.squad)
+  // can be recognised and the advisory suppressed (piece 50 §E2).
   const localSquadDir = path.join(cwd, '.squad');
   const hasLocalSquad = fs.existsSync(localSquadDir);
-  if (hasLocalSquad) {
-    findings.push(`Local .squad/ directory found at ${localSquadDir}.`);
-  }
 
   // Resolve and load registry
   const registryFilePath = resolveRegistryFilePath({
@@ -125,9 +124,20 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     if (!corruptionFindings) {
       throw error;
     }
+    // Registry is unreadable, so registration cannot be confirmed — surface the advisory.
+    if (hasLocalSquad) {
+      findings.push(`Local .squad/ directory found at ${localSquadDir}.`);
+    }
     findings.push(...corruptionFindings);
     escalate('warn');
     return { severity, findings };
+  }
+
+  // §E2: emit the "Local .squad/ directory found" advisory unless the local .squad/
+  // is a registered team root. A registered root is a legitimate cross-repo binding,
+  // not a stray directory that could shadow one.
+  if (hasLocalSquad && !_localSquadIsRegisteredTeamRoot(registry, localSquadDir)) {
+    findings.push(`Local .squad/ directory found at ${localSquadDir}.`);
   }
 
   if (!hasLocalSquad && !registry) {
@@ -438,6 +448,20 @@ function _clonePathsOverlap(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * §E2: true when the local `.squad/` directory is a registered team root — i.e. it
+ * matches a registry entry `path` (including the subfolder form
+ * `<hostRoot>/<callsign>/.squad`). Used to suppress the stray-`.squad/` advisory for a
+ * legitimate cross-repo binding.
+ */
+function _localSquadIsRegisteredTeamRoot(registry: Registry | null, localSquadDir: string): boolean {
+  if (!registry) {
+    return false;
+  }
+  const key = normalisedPathKey(localSquadDir);
+  return registry.squads.some(e => normalisedPathKey(e.path) === key);
 }
 
 function _diagnoseRegistryCorruption(error: unknown, registryFilePath: string | null): string[] | null {

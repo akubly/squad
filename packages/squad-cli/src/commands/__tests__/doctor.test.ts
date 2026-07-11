@@ -1038,3 +1038,75 @@ describe('runDoctor: host-repo diagnostics (piece 48 C)', () => {
     expect(hostFinding).toBeUndefined();
   });
 });
+
+// ============================================================
+// Piece 50 §E2 — suppress the local .squad/ advisory for a registered team root
+// ============================================================
+
+describe('runDoctor: P50.E2 local .squad/ advisory suppression', () => {
+  let registryPath: string;
+  let copilotHome: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    copilotHome = path.join(TEST_ROOT, 'test-copilot-home');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  const advisoryRe = /Local \.squad\/ directory found/i;
+
+  it('P50.E2-1: a registered subfolder team root suppresses the advisory', async () => {
+    const hostRoot = makeDir('e2-subhost');
+    const callsignDir = path.join(hostRoot, 'alpha');
+    const squadDir = path.join(callsignDir, '.squad');
+    fs.mkdirSync(squadDir, { recursive: true });
+    writeRegistry(registryPath, [{
+      callsign: 'alpha',
+      path: squadDir,
+      origins: ['https://github.com/org/repo.git'],
+      clones: [callsignDir],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({ cwd: callsignDir, registryPath, env: {}, copilotHome });
+    expect(result.findings.some(f => advisoryRe.test(f))).toBe(false);
+  });
+
+  it('P50.E2-2: a registered root-level team root suppresses the advisory', async () => {
+    const hostRoot = makeDir('e2-roothost');
+    const squadDir = path.join(hostRoot, '.squad');
+    fs.mkdirSync(squadDir, { recursive: true });
+    writeRegistry(registryPath, [{
+      callsign: 'bravo',
+      path: squadDir,
+      origins: ['https://github.com/org/repo.git'],
+      clones: [hostRoot],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({ cwd: hostRoot, registryPath, env: {}, copilotHome });
+    expect(result.findings.some(f => advisoryRe.test(f))).toBe(false);
+  });
+
+  it('P50.E2-3: an unregistered stray .squad/ still fires the advisory', async () => {
+    const strayDir = makeDir('e2-stray');
+    fs.mkdirSync(path.join(strayDir, '.squad'), { recursive: true });
+    // Registry exists but does not reference the stray .squad/ — a shadowing risk.
+    const otherHost = makeDir('e2-other');
+    fs.mkdirSync(path.join(otherHost, '.squad'), { recursive: true });
+    writeRegistry(registryPath, [{
+      callsign: 'other',
+      path: path.join(otherHost, '.squad'),
+      origins: ['https://github.com/org/repo.git'],
+      clones: [otherHost],
+      status: 'active',
+    }]);
+
+    const result = await runDoctor({ cwd: strayDir, registryPath, env: {}, copilotHome });
+    expect(result.findings.some(f => advisoryRe.test(f))).toBe(true);
+  });
+});
