@@ -368,19 +368,47 @@ const SESSION_ID_FORBIDDEN_RE = /[\x00-\x20\x7f~^:?*\[\\]|\.\.|\@\{|\/\/|^\/|^\-
  * Allowlisted paths within .squad/ that may be published.
  * Relative to teamRoot, forward-slash separated.
  */
-export const PUBLISH_ALLOWLIST_EXACT = ['.squad/decisions.md', '.squad/.last-publish'];
+export const PUBLISH_ALLOWLIST_EXACT = [
+  '.squad/decisions.md',
+  '.squad/.last-publish',
+  // Piece 51 (A): unambiguous append-only top-level logs. The PREFIX list has the
+  // `orchestration-log/` DIRECTORY but not this top-level `.md` file.
+  '.squad/history.md',
+  '.squad/orchestration-log.md',
+  // Piece 51 (A + E1): last-writer-wins casting state — folded (cheap to reconstruct,
+  // last-writer convergence acceptable) so clones converge instead of drifting.
+  '.squad/casting-history.json',
+  '.squad/casting-registry.json',
+];
 export const PUBLISH_ALLOWLIST_PREFIX = [
   '.squad/decisions/inbox/',
   '.squad/log/',
   '.squad/orchestration-log/',
   '.squad/sessions/',
   '.squad/identity/',
+  // Piece 51 (A): runtime casting state under `casting/` (history.json/registry.json)
+  // and generated onboarding artifacts.
+  '.squad/casting/',
+  '.squad/files/onboarding/',
 ];
 
-function isAllowlisted(relPath: string): boolean {
+/**
+ * Glob matchers for allowlisted paths that need a wildcard segment (piece 51, B1).
+ *
+ * `.squad/agents/<name>/history.md` is ephemeral and folds, while the sibling
+ * `.squad/agents/<name>/charter.md` is durable and must NOT fold into the ephemeral lane
+ * (it is piece-52 reviewable content). A blanket `.squad/agents/` prefix would sweep
+ * charters into state, so per-agent histories are matched by this targeted glob instead.
+ */
+export const PUBLISH_ALLOWLIST_GLOB: RegExp[] = [
+  /^\.squad\/agents\/[^/]+\/history\.md$/,
+];
+
+export function isAllowlisted(relPath: string): boolean {
   const p = relPath.replace(/\\/g, '/');
   if (PUBLISH_ALLOWLIST_EXACT.includes(p)) return true;
-  return PUBLISH_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix));
+  if (PUBLISH_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix))) return true;
+  return PUBLISH_ALLOWLIST_GLOB.some(re => re.test(p));
 }
 
 /**

@@ -24,6 +24,7 @@ import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
 import { writeRemoteConfig } from '../cli/commands/init-remote.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
+import { applyManagedGitignore } from '../cli/commands/allowlist-gitignore.js';
 
 export interface RunInitOpts {
   targetDir?: string;
@@ -225,7 +226,9 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
  * offer (or apply with yes=true) git rm --cached + .gitignore install.
  *
  * Uses exactly the allowlist constants from sync.ts — NEVER a blanket `.squad/`.
- * Idempotent: skips .gitignore entries that already exist.
+ * Piece 51 (D): delegates the actual untrack + managed-block write to the shared
+ * `applyManagedGitignore` helper (also reused by install-fold-pipeline), which is
+ * idempotent and additionally declares the machine-local scratch paths.
  */
 function applyAllowlistGitignore(repoRoot: string, stateBackend?: string, yes?: boolean): void {
   if (stateBackend !== 'orphan') return;
@@ -249,30 +252,10 @@ function applyAllowlistGitignore(repoRoot: string, stateBackend?: string, yes?: 
     return;
   }
 
-  // git rm --cached for each tracked allowlisted file
-  try {
-    execFileSync('git', ['rm', '-r', '--cached', '--', ...trackedAllowlisted], {
-      cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch {
-    console.warn(`squad init: warning: git rm --cached failed for some allowlisted files.`);
-  }
-
-  // Install .gitignore entries (exact allowlist constants only — never blanket .squad/)
-  const gitignorePath = path.join(repoRoot, '.gitignore');
-  let existing = '';
-  try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* file may not exist */ }
-  const lines = existing.endsWith('\n') || existing.length === 0 ? existing : existing + '\n';
-  const toAdd = [...PUBLISH_ALLOWLIST_EXACT, ...PUBLISH_ALLOWLIST_PREFIX].filter(e => {
-    const line = e.endsWith('/') ? e + '\n' : e + '\n';
-    return !existing.split('\n').some(l => l.trim() === e.trimEnd());
-  });
-  if (toAdd.length > 0) {
-    const block = '\n# Squad allowlist — managed by squad init (orphan backend)\n' +
-      toAdd.join('\n') + '\n';
-    fs.writeFileSync(gitignorePath, lines + block, 'utf-8');
-    console.log(`squad init: added ${toAdd.length} .gitignore entries for allowlisted .squad/ paths.`);
-  }
+  const { untracked } = applyManagedGitignore(repoRoot);
+  console.log(
+    `squad init: untracked ${untracked} allowlisted .squad/ file(s) and installed the managed .gitignore block.`,
+  );
 }
 
 /**

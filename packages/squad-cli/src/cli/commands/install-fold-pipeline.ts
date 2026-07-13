@@ -19,8 +19,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
+import { applyManagedGitignore } from './allowlist-gitignore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,6 +165,85 @@ function hasSubfolderSquadHost(repoRoot: string): boolean {
   );
 }
 
+/**
+ * List the callsign-named subfolder team roots under a host repo root
+ * (`<callsign>/.squad/team.md`). Same recognition rule as hasSubfolderSquadHost.
+ */
+function listSubfolderCallsigns(repoRoot: string): string[] {
+  try {
+    return fs.readdirSync(repoRoot, { withFileTypes: true })
+      .filter(e =>
+        e.isDirectory() &&
+        CALLSIGN_RE.test(e.name) &&
+        fs.existsSync(path.join(repoRoot, e.name, '.squad', 'team.md')),
+      )
+      .map(e => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/** Read the `stateBackend` field from a team root's `.squad/config.json`, or null. */
+function readStateBackend(teamRoot: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(teamRoot, '.squad', 'config.json'), 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    return typeof config['stateBackend'] === 'string' ? config['stateBackend'] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Piece 51 (D): install the allowlist-aware managed `.gitignore` at the host git root so a
+ * host onboarded via `install-fold-pipeline` (never `init`) gets the same structural
+ * isolation `init` provides — folded/hydrated ephemeral state cannot be swept onto the
+ * product branch by `git add -A`.
+ *
+ * Scoped to `<callsign>/.squad/**` for subfolder hosts and `.squad/**` for root hosts.
+ * Applies only under the orphan backend. A fold host that never ran `init` has no
+ * `config.json`; since `install-fold-pipeline` is itself a state-branch/orphan operation
+ * and registry entries default to the orphan backend, an unspecified backend is treated as
+ * orphan. A backend explicitly set to a non-orphan value (worktree/local/external) is skipped.
+ *
+ * Each team root is gated on ITS OWN backend: the resolved registry `entry` only speaks for
+ * the single callsign it describes, so in a multi-callsign subfolder host we must read every
+ * sibling's own `config.json` rather than reusing one entry's backend for all of them (doing
+ * so would either untrack a non-orphan sibling's tracked state or skip a genuinely-orphan
+ * sibling and leave the D leak open for it).
+ * NEVER writes a blanket `.squad/` ignore — that is the Pole-A change (piece 52).
+ */
+function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry | undefined, callsign?: string): void {
+  // The registry entry (if any) describes exactly one callsign — the basename of its team root.
+  const entryCallsign = entry ? path.basename(path.dirname(entry.path)) : undefined;
+  // Prefer the entry's persisted backend only for the callsign it actually describes;
+  // fall back to each team root's own config for every other (sibling) callsign.
+  const isOrphan = (teamRoot: string, cs?: string): boolean => {
+    const backend = (entry && cs !== undefined && cs === entryCallsign)
+      ? entry.stateBackend ?? readStateBackend(teamRoot)
+      : readStateBackend(teamRoot);
+    return backend == null || backend === 'orphan';
+  };
+
+  // Root host: `.squad/` directly at the git root. Here the entry (if any) is the root squad.
+  if (fs.existsSync(path.join(hostRepoRoot, '.squad'))) {
+    const rootBackend = entry?.stateBackend ?? readStateBackend(hostRepoRoot);
+    if (rootBackend == null || rootBackend === 'orphan') {
+      applyManagedGitignore(hostRepoRoot, '');
+    }
+    return;
+  }
+
+  // Subfolder host(s): each `<callsign>/.squad/` team root, scoped by its callsign prefix.
+  const callsigns = callsign ? [callsign] : listSubfolderCallsigns(hostRepoRoot);
+  for (const cs of callsigns) {
+    const teamRoot = path.join(hostRepoRoot, cs);
+    if (fs.existsSync(path.join(teamRoot, '.squad', 'team.md')) && isOrphan(teamRoot, cs)) {
+      applyManagedGitignore(hostRepoRoot, `${cs}/`);
+    }
+  }
+}
+
 function tryGetRepoRoot(cwd: string): string | undefined {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -260,6 +341,12 @@ export async function installFoldPipeline(
     process.exit(1);
     return; // unreachable — keeps TypeScript control-flow happy
   }
+
+  // ── Piece 51 (D): install the allowlist-aware managed .gitignore ──────────
+  // Runs before the pipeline write (and any idempotency early-return) so a host
+  // onboarded via install-fold-pipeline always gets the structural isolation that
+  // keeps folded/hydrated ephemeral state off the product branch.
+  installHostGitignore(hostRepoRoot, entry, callsign);
 
   // ── Platform → target directory mapping ───────────────────────────────────
   const platformDirMap: Record<'github' | 'ado', string> = {
