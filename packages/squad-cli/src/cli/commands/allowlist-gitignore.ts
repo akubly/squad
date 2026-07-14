@@ -133,3 +133,71 @@ export function applyManagedGitignore(repoRoot: string, pathPrefix = ''): ApplyM
   if (changed) fs.writeFileSync(gitignorePath, next, 'utf-8');
   return { untracked, changed };
 }
+
+// ─── Piece 52 (A): the BLANKET Pole-A variant ────────────────────────────────
+//
+// Under Pole A, NO squad content or state is tracked on `main`: the durable constitution
+// rides `squad/config/<callsign>` and ephemeral state rides `squad/state/<callsign>`. So the
+// managed block becomes a single blanket `<prefix>.squad/` ignore instead of the allowlist-scoped
+// set above. This deliberately reverses piece 51 / init Sub-proposal J ("never a blanket `.squad/`");
+// it is gated on the durable lane existing (piece 52 §B), not a regression.
+//
+// The blanket block reuses the same markers as the allowlist block, so switching a host from
+// Pole B to Pole A REPLACES the previous block in place (idempotent).
+
+/** The blanket ignore path(s) the Pole-A managed block governs. */
+export function blanketGitignorePaths(pathPrefix = ''): string[] {
+  return [`${pathPrefix}.squad/`];
+}
+
+function buildBlanketBlock(pathPrefix: string): string {
+  return [
+    BLOCK_START,
+    '# Pole A: no squad content or state is tracked on this branch. The durable constitution',
+    '# rides squad/config/<callsign>; ephemeral state rides squad/state/<callsign> (fold pipeline).',
+    `${pathPrefix}.squad/`,
+    BLOCK_END,
+  ].join('\n');
+}
+
+/**
+ * Install (or refresh) the BLANKET Pole-A managed `.gitignore` block at `repoRoot` and untrack
+ * ALL currently-tracked `<pathPrefix>.squad` content — the Pole-B→A migration. Callers that must
+ * preserve durable content (`init`, `install-fold-pipeline`) seed the config orphan (sub-proposal B)
+ * BEFORE calling this, so the `git rm -r --cached` here leaves `main` infra-only with no durable loss.
+ *
+ * Idempotent and marker-delimited: a re-run replaces the previous block (allowlist or blanket).
+ *
+ * @param repoRoot   Directory that receives the `.gitignore` (the git root for a subfolder host).
+ * @param pathPrefix `''` for a root-hosted squad; `'<callsign>/'` for a subfolder host.
+ */
+export function applyBlanketGitignore(repoRoot: string, pathPrefix = ''): ApplyManagedGitignoreResult {
+  // Blanket untrack: remove the WHOLE `<prefix>.squad` subtree from the index (not just the
+  // allowlisted subset), so a Pole-B host's durable files stop being tracked on `main`.
+  let untracked = 0;
+  try {
+    const lsOutput = execFileSync('git', ['ls-files', '--', `${pathPrefix}.squad`], {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const tracked = lsOutput.trim().split('\n').filter(Boolean);
+    if (tracked.length > 0) {
+      // Remove the whole subtree with a SINGLE directory argument. Spreading every tracked
+      // path into argv can exceed Windows' ~32 KB CreateProcess limit on a large Pole-B host;
+      // `-r` already recurses, so one fixed-size arg untracks the entire subtree.
+      execFileSync('git', ['rm', '-r', '--cached', '--', `${pathPrefix}.squad`], {
+        cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      untracked = tracked.length;
+    }
+  } catch {
+    /* not a git repo, or nothing tracked — still install the ignore block below */
+  }
+
+  const gitignorePath = path.join(repoRoot, '.gitignore');
+  let existing = '';
+  try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* absent — create it */ }
+  const next = upsertManagedBlock(existing, buildBlanketBlock(pathPrefix));
+  const changed = next !== existing;
+  if (changed) fs.writeFileSync(gitignorePath, next, 'utf-8');
+  return { untracked, changed };
+}

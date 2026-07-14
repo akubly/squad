@@ -18,6 +18,16 @@ export interface RegistryEntry {
   stateRemote?: string;
   /** Git branch name used for state synchronisation. Default: `'squad-state'` when absent. */
   stateBranch?: string;
+  /**
+   * Git remote hosting the durable config lane (piece 52). Default: `stateRemote` / `'origin'`
+   * when absent. Piece 53's durable publish/hydrate resolves the config orphan through it.
+   */
+  configRemote?: string;
+  /**
+   * Git branch for the durable config orphan (piece 52), e.g. `squad/config/<callsign>`.
+   * Absent on hosts predating Pole A — the durable hydrate is skipped in that case.
+   */
+  configBranch?: string;
   inboxHandle?: string;
   [key: string]: unknown;
 }
@@ -161,6 +171,20 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
     entry.stateBranch = value['stateBranch'];
   }
 
+  if (value['configRemote'] !== undefined) {
+    if (typeof value['configRemote'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} configRemote must be a string.`);
+    }
+    entry.configRemote = value['configRemote'];
+  }
+
+  if (value['configBranch'] !== undefined) {
+    if (typeof value['configBranch'] !== 'string') {
+      throw validationError(`Registry entry ${entryIndex} configBranch must be a string.`);
+    }
+    entry.configBranch = value['configBranch'];
+  }
+
   const rawHandle = value['inboxHandle'];
   if (rawHandle !== undefined) {
     if (typeof rawHandle !== 'string') {
@@ -170,7 +194,7 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
   }
 
   // Preserve unknown forward-compatible fields for round-trip fidelity.
-  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'inboxHandle']);
+  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'configRemote', 'configBranch', 'inboxHandle']);
   for (const [key, val] of Object.entries(value)) {
     if (!knownFields.has(key)) {
       entry[key] = val;

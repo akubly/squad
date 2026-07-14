@@ -22,7 +22,7 @@ import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
 import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
-import { applyManagedGitignore } from './allowlist-gitignore.js';
+import { migratePoleBToA } from './pole-a-migrate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +34,7 @@ const TEMPLATES_ROOT = path.resolve(__dirname, '../../../templates/fold');
 
 const GREEN = '\x1b[32m';
 const RESET = '\x1b[0m';
+const YELLOW = '\x1b[33m';
 
 export interface InstallFoldPipelineOptions {
   cwd?: string;
@@ -195,25 +196,27 @@ function readStateBackend(teamRoot: string): string | null {
 }
 
 /**
- * Piece 51 (D): install the allowlist-aware managed `.gitignore` at the host git root so a
- * host onboarded via `install-fold-pipeline` (never `init`) gets the same structural
- * isolation `init` provides — folded/hydrated ephemeral state cannot be swept onto the
- * product branch by `git add -A`.
+ * Piece 52 (A): install the BLANKET Pole-A `.gitignore` at the host git root so a host
+ * onboarded via `install-fold-pipeline` (never `init`) keeps NO squad content or state on the
+ * product branch. This supersedes piece 51's allowlist-scoped block: under Pole A the durable
+ * constitution rides `squad/config/<callsign>` and ephemeral state rides `squad/state/<callsign>`,
+ * so nothing under `<callsign>/.squad/**` (or `.squad/**` for a root host) is tracked on `main`.
  *
- * Scoped to `<callsign>/.squad/**` for subfolder hosts and `.squad/**` for root hosts.
- * Applies only under the orphan backend. A fold host that never ran `init` has no
- * `config.json`; since `install-fold-pipeline` is itself a state-branch/orphan operation
- * and registry entries default to the orphan backend, an unspecified backend is treated as
- * orphan. A backend explicitly set to a non-orphan value (worktree/local/external) is skipped.
+ * Before the blanket untrack, the durable config orphan is genesis-seeded from each team root's
+ * durable files (sub-proposal B) so a Pole-B host migrates with no durable loss (best-effort,
+ * local `update-ref`; idempotent — an existing config branch is left untouched).
  *
- * Each team root is gated on ITS OWN backend: the resolved registry `entry` only speaks for
- * the single callsign it describes, so in a multi-callsign subfolder host we must read every
- * sibling's own `config.json` rather than reusing one entry's backend for all of them (doing
- * so would either untrack a non-orphan sibling's tracked state or skip a genuinely-orphan
- * sibling and leave the D leak open for it).
- * NEVER writes a blanket `.squad/` ignore — that is the Pole-A change (piece 52).
+ * Applies only under the orphan backend. A fold host that never ran `init` has no `config.json`;
+ * since `install-fold-pipeline` is itself a state-branch/orphan operation and registry entries
+ * default to the orphan backend, an unspecified backend is treated as orphan. A backend explicitly
+ * set to a non-orphan value (worktree/local/external) is skipped.
+ *
+ * Each team root is gated on ITS OWN backend: the resolved registry `entry` only speaks for the
+ * single callsign it describes, so in a multi-callsign subfolder host we read every sibling's own
+ * `config.json` rather than reusing one entry's backend for all of them (doing so would either
+ * untrack a non-orphan sibling's tracked state or skip a genuinely-orphan sibling).
  */
-function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry | undefined, callsign?: string): void {
+async function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry | undefined, callsign?: string): Promise<void> {
   // The registry entry (if any) describes exactly one callsign — the basename of its team root.
   const entryCallsign = entry ? path.basename(path.dirname(entry.path)) : undefined;
   // Prefer the entry's persisted backend only for the callsign it actually describes;
@@ -225,11 +228,31 @@ function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry | undef
     return backend == null || backend === 'orphan';
   };
 
+  const warnAborted = (res: { aborted?: string; unclassified?: string[] }, teamRoot: string): void => {
+    if (res.aborted === 'unclassified') {
+      console.warn(
+        `${YELLOW}⚠ ${teamRoot}: skipped Pole A untrack — ${res.unclassified?.length} tracked ` +
+        `.squad/ file(s) belong to no lane and would be lost. Classify them first.${RESET}`,
+      );
+    } else if (res.aborted === 'unseedable-durable') {
+      console.warn(
+        `${YELLOW}⚠ ${teamRoot}: skipped Pole A untrack — could not seed the durable config orphan ` +
+        `(nothing lost). Ensure a valid callsign is registered.${RESET}`,
+      );
+    }
+  };
+
   // Root host: `.squad/` directly at the git root. Here the entry (if any) is the root squad.
   if (fs.existsSync(path.join(hostRepoRoot, '.squad'))) {
     const rootBackend = entry?.stateBackend ?? readStateBackend(hostRepoRoot);
     if (rootBackend == null || rootBackend === 'orphan') {
-      applyManagedGitignore(hostRepoRoot, '');
+      const res = await migratePoleBToA({
+        repoRoot: hostRepoRoot,
+        teamRoot: hostRepoRoot,
+        pathPrefix: '',
+        callsign: callsign ?? entry?.callsign,
+      });
+      warnAborted(res, hostRepoRoot);
     }
     return;
   }
@@ -239,7 +262,13 @@ function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry | undef
   for (const cs of callsigns) {
     const teamRoot = path.join(hostRepoRoot, cs);
     if (fs.existsSync(path.join(teamRoot, '.squad', 'team.md')) && isOrphan(teamRoot, cs)) {
-      applyManagedGitignore(hostRepoRoot, `${cs}/`);
+      const res = await migratePoleBToA({
+        repoRoot: hostRepoRoot,
+        teamRoot,
+        pathPrefix: `${cs}/`,
+        callsign: cs,
+      });
+      warnAborted(res, teamRoot);
     }
   }
 }
@@ -342,12 +371,11 @@ export async function installFoldPipeline(
     return; // unreachable — keeps TypeScript control-flow happy
   }
 
-  // ── Piece 51 (D): install the allowlist-aware managed .gitignore ──────────
-  // Runs before the pipeline write (and any idempotency early-return) so a host
-  // onboarded via install-fold-pipeline always gets the structural isolation that
-  // keeps folded/hydrated ephemeral state off the product branch.
-  installHostGitignore(hostRepoRoot, entry, callsign);
-
+  // ── Piece 52 (A): install the BLANKET Pole-A .gitignore + seed the durable config orphan ──
+  // Runs before the pipeline write (and any idempotency early-return) so a host onboarded via
+  // install-fold-pipeline keeps no squad content or state on the product branch, and its durable
+  // constitution is genesis-seeded onto squad/config/<callsign> before the blanket untrack.
+  await installHostGitignore(hostRepoRoot, entry, callsign);
   // ── Platform → target directory mapping ───────────────────────────────────
   const platformDirMap: Record<'github' | 'ado', string> = {
     github: path.join(hostRepoRoot, '.github', 'workflows'),

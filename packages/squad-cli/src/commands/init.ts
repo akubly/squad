@@ -23,8 +23,7 @@ import { resolveRegistryFilePath } from './_registry-path.js';
 import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
 import { writeRemoteConfig } from '../cli/commands/init-remote.js';
-import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
-import { applyManagedGitignore } from '../cli/commands/allowlist-gitignore.js';
+import { migratePoleBToA } from '../cli/commands/pole-a-migrate.js';
 
 export interface RunInitOpts {
   targetDir?: string;
@@ -205,57 +204,100 @@ export async function runInit(opts?: RunInitOpts): Promise<RunInitResult> {
 
   if (pendingWrite) {
     const { callsign, registryFilePath: regPath, existing } = pendingWrite;
-    // Sub-proposal B: when --callsign is explicitly provided, default the state branch
-    // to squad/state/<callsign> so the fold pipeline and pull side agree on the namespace.
+    // When --callsign is explicitly provided, default the state and durable-config branches
+    // to squad/state/<callsign> and squad/config/<callsign> so the fold pipeline, the durable
+    // review transport (piece 53), and the pull side all agree on the namespace.
     const stateBranch = opts?.callsign ? `squad/state/${opts.callsign}` : undefined;
-    const validated = upsertEntry({ callsign, path: squadDir, ...(stateBranch ? { stateBranch } : {}) });
+    const configBranch = opts?.callsign ? `squad/config/${opts.callsign}` : undefined;
+    const validated = upsertEntry({
+      callsign,
+      path: squadDir,
+      ...(stateBranch ? { stateBranch } : {}),
+      ...(configBranch ? { configBranch } : {}),
+    });
     const newRegistry = { version: 1 as const, squads: [...existing, validated] };
     fs.mkdirSync(path.dirname(regPath), { recursive: true });
     writeRegistry(regPath, newRegistry);
     const result = { registered: { callsign, path: squadDir } };
-    applyAllowlistGitignore(targetDir, opts?.stateBackend, opts?.yes);
+    await applyPoleAGitignore(targetDir, opts?.stateBackend, opts?.yes, opts?.callsign ?? path.basename(targetDir));
     return result;
   }
 
-  applyAllowlistGitignore(targetDir, opts?.stateBackend, opts?.yes);
+  await applyPoleAGitignore(targetDir, opts?.stateBackend, opts?.yes, opts?.callsign ?? path.basename(targetDir));
   return {};
 }
 
 /**
- * Sub-proposal J: When tracked allowlisted files exist and backend is orphan,
- * offer (or apply with yes=true) git rm --cached + .gitignore install.
+ * Sub-proposal A (Pole A): under the orphan backend, keep NO squad content on the product
+ * branch — install a BLANKET `.squad/` ignore (replacing piece 51's allowlist-scoped block) and,
+ * for a Pole-B host whose `main` already tracks `.squad/` files, migrate: seed the durable config
+ * orphan from those files (sub-proposal B genesis) FIRST, then `git rm -r --cached` them, leaving
+ * `main` infra-only with no durable loss.
  *
- * Uses exactly the allowlist constants from sync.ts — NEVER a blanket `.squad/`.
- * Piece 51 (D): delegates the actual untrack + managed-block write to the shared
- * `applyManagedGitignore` helper (also reused by install-fold-pipeline), which is
- * idempotent and additionally declares the machine-local scratch paths.
+ * The blanket untrack of already-tracked `.squad/` files is gated behind `--yes` (it mutates the
+ * index of a real Pole-B host); installing the ignore block on a fresh host has nothing to untrack
+ * and is always safe. A non-orphan backend is skipped.
  */
-function applyAllowlistGitignore(repoRoot: string, stateBackend?: string, yes?: boolean): void {
-  if (stateBackend !== 'orphan') return;
-  let trackedAllowlisted: string[];
+async function applyPoleAGitignore(
+  repoRoot: string,
+  stateBackend?: string,
+  yes?: boolean,
+  callsign?: string,
+): Promise<void> {
+  // Treat an unspecified backend as orphan — the system default (sync resolves `backend ?? 'orphan'`
+  // and install-fold-pipeline treats `backend == null || 'orphan'` as orphan). Only an EXPLICIT
+  // non-orphan backend opts out, so a default `squad init` activates Pole A like every other wiring.
+  if (stateBackend != null && stateBackend !== 'orphan') return;
+
+  // Detect a Pole-B host: `.squad/` files already tracked on the product branch.
+  let tracked = 0;
   try {
-    const lsOutput = execFileSync('git', ['ls-files', '--', ...PUBLISH_ALLOWLIST_EXACT, ...PUBLISH_ALLOWLIST_PREFIX], {
+    const lsOutput = execFileSync('git', ['ls-files', '--', '.squad'], {
       cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     });
-    trackedAllowlisted = lsOutput.trim().split('\n').filter(Boolean);
+    tracked = lsOutput.trim().split('\n').filter(Boolean).length;
   } catch {
-    return;
+    // Not a git repo — nothing tracked; the blanket ignore block is still installed below.
   }
-  if (trackedAllowlisted.length === 0) return;
 
-  if (!yes) {
+  // Migrating a real Pole-B host untracks its committed durable files — require consent.
+  if (tracked > 0 && !yes) {
     console.warn(
-      `squad init: warning: ${trackedAllowlisted.length} allowlisted .squad/ file(s) are tracked in git.\n` +
-      `  With the orphan backend these files should not be committed to the main branch.\n` +
-      `  Run 'squad init --yes' to automatically untrack them and add .gitignore entries.`,
+      `squad init: warning: ${tracked} .squad/ file(s) are tracked in git.\n` +
+      `  Pole A keeps no squad content on the product branch. Run 'squad init --yes' to migrate:\n` +
+      `  the durable config orphan is seeded and .squad/ is untracked (durable content is preserved).`,
     );
     return;
   }
 
-  const { untracked } = applyManagedGitignore(repoRoot);
-  console.log(
-    `squad init: untracked ${untracked} allowlisted .squad/ file(s) and installed the managed .gitignore block.`,
-  );
+  // Guarded migration: the blanket untrack runs only when it cannot lose durable content
+  // (totality + durable-capture gates live in migratePoleBToA).
+  const res = await migratePoleBToA({ repoRoot, teamRoot: repoRoot, pathPrefix: '', callsign });
+
+  if (res.aborted === 'unclassified') {
+    const sample = (res.unclassified ?? []).slice(0, 10).map(p => `    ${p}`).join('\n');
+    console.warn(
+      `squad init: aborted Pole A migration — ${res.unclassified?.length} tracked .squad/ file(s) ` +
+      `belong to no lane (durable/ephemeral/scratch) and would be lost on a fresh clone.\n` +
+      `  Classify them first, then re-run 'squad init --yes':\n${sample}`,
+    );
+    return;
+  }
+  if (res.aborted === 'unseedable-durable') {
+    console.warn(
+      `squad init: aborted Pole A migration — could not seed the durable config orphan, so tracked ` +
+      `durable files were NOT untracked (nothing lost). Re-run with a valid --callsign.`,
+    );
+    return;
+  }
+  if (res.seededBranch) {
+    console.log(`squad init: seeded durable config orphan ${res.seededBranch}.`);
+  }
+  if (res.untracked > 0) {
+    console.log(`squad init: untracked ${res.untracked} .squad/ file(s) and installed the blanket (Pole A) .gitignore block.`);
+  } else if (res.installed) {
+    console.log('squad init: installed the blanket (Pole A) .gitignore block.');
+  }
 }
 
 /**

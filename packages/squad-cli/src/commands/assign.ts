@@ -879,6 +879,11 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
       : !reactivating && CALLSIGN_RE.test(callsign)
         ? { stateBranch: `squad/state/${callsign}` }
         : {}),
+    // Piece 52 (B): register the durable config lane parallel to state, so piece 53's durable
+    // publish/hydrate can resolve squad/config/<callsign>. configRemote defaults to the state
+    // remote (same host serves both lanes); the derive helpers fall back when it is absent.
+    ...(!reactivating && CALLSIGN_RE.test(callsign) ? { configBranch: `squad/config/${callsign}` } : {}),
+    ...(opts.stateRemote !== undefined ? { configRemote: opts.stateRemote } : {}),
     ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
   };
 

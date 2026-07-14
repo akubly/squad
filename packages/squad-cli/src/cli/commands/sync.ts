@@ -240,6 +240,17 @@ export function deriveStateBranch(stateBranch: string | undefined, callsign: str
 }
 
 /**
+ * Resolve the durable config branch for a registry entry (piece 52, sub-proposal B).
+ * An explicit `configBranch` wins; otherwise a callsign yields `squad/config/<callsign>`.
+ * Returns `undefined` when neither is available — a host predating Pole A has no config lane.
+ */
+export function deriveConfigBranch(configBranch: string | undefined, callsign: string | undefined): string | undefined {
+  if (configBranch) return configBranch;
+  if (callsign && CALLSIGN_RE.test(callsign)) return `squad/config/${callsign}`;
+  return undefined;
+}
+
+/**
  * Pull: fetch remote state branches and fast-forward local refs.
  */
 function syncPull(cwd: string, remote: string, backend: string | null, quiet: boolean): void {
@@ -409,6 +420,68 @@ export function isAllowlisted(relPath: string): boolean {
   if (PUBLISH_ALLOWLIST_EXACT.includes(p)) return true;
   if (PUBLISH_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix))) return true;
   return PUBLISH_ALLOWLIST_GLOB.some(re => re.test(p));
+}
+
+// ─── Piece 52 (C): the durable payload set (CONFIG_ALLOWLIST) ─────────────────
+//
+// Pole A gives the squad's durable constitution its own reviewed home,
+// `squad/config/<callsign>`. CONFIG_ALLOWLIST is the DETERMINISTIC COMPLEMENT of
+// piece 51's ephemeral + machine-local partition: a path is durable iff it is neither
+// ephemeral (`isAllowlisted`) nor machine-local scratch. These constants make that
+// complement explicit so the durable publish (piece 53) carries exactly the constitution
+// and nothing else, and so the classifier below can prove the partition is total & disjoint.
+//
+// Disjointness with the ephemeral lane is by construction:
+//   - `casting-policy.json` is the top-level hyphenated file; the ephemeral `.squad/casting/`
+//     PREFIX governs the runtime `casting/` subtree — the two never overlap.
+//   - durable `files/triage-flow/` is disjoint from the ephemeral `files/onboarding/` prefix.
+//   - the durable per-agent `charter.md` glob is the complement of the ephemeral `history.md` glob.
+
+/**
+ * Durable constitution files (exact paths). Roster/charters/routing/config/process docs.
+ */
+export const CONFIG_ALLOWLIST_EXACT = [
+  '.squad/team.md',
+  '.squad/roster.md',
+  '.squad/routing.md',
+  '.squad/charter.md',
+  '.squad/scribe-charter.md',
+  '.squad/fact-checker-charter.md',
+  '.squad/config.json',
+  '.squad/casting-policy.json',
+  '.squad/ceremonies.md',
+  '.squad/issue-lifecycle.md',
+  '.squad/mcp-config.md',
+  '.squad/multi-agent-format.md',
+  '.squad/copilot-instructions.md',
+  '.squad/constraint-tracking.md',
+  '.squad/skill.md',
+  '.squad/plugin-marketplace.md',
+];
+
+/**
+ * Durable subtrees (prefixes). `templates/**` and authored (non-generated) content.
+ * `files/triage-flow/` is authored; the generated `files/onboarding/` subtree is ephemeral.
+ */
+export const CONFIG_ALLOWLIST_PREFIX = [
+  '.squad/templates/',
+  '.squad/skills/',
+  '.squad/files/triage-flow/',
+];
+
+/**
+ * Glob matchers for durable paths with a wildcard segment. `.squad/agents/<name>/charter.md`
+ * is durable and reviewable — the exact complement of the ephemeral per-agent `history.md`.
+ */
+export const CONFIG_ALLOWLIST_GLOB: RegExp[] = [
+  /^\.squad\/agents\/[^/]+\/charter\.md$/,
+];
+
+export function isConfigAllowlisted(relPath: string): boolean {
+  const p = relPath.replace(/\\/g, '/');
+  if (CONFIG_ALLOWLIST_EXACT.includes(p)) return true;
+  if (CONFIG_ALLOWLIST_PREFIX.some(prefix => p.startsWith(prefix))) return true;
+  return CONFIG_ALLOWLIST_GLOB.some(re => re.test(p));
 }
 
 /**
@@ -679,6 +752,123 @@ export async function publishTeamRootToInbox(
     });
   } finally {
     try { fs.unlinkSync(indexFile); } catch { /* index may not exist if we errored before creating it */ }
+  }
+}
+
+/** Outcome of a config-orphan genesis attempt. */
+export interface SeedConfigOrphanResult {
+  /** The durable config branch ref name (without `refs/heads/`). */
+  configBranch: string;
+  /** Orphan commit sha, or `undefined` when genesis was skipped (branch already existed). */
+  commit?: string;
+  /** True when this call created the branch; false when it already existed (idempotent skip). */
+  seeded: boolean;
+  /** The durable `.squad/**` paths written into the genesis tree. */
+  files: string[];
+}
+
+/**
+ * Genesis-seed the durable orphan branch `squad/config/<callsign>` from TEAM_ROOT's durable
+ * payload (piece 52, sub-proposal B).
+ *
+ * Reuses the same commit-tree plumbing the ephemeral publish uses, with two differences: the
+ * snapshot is filtered to `CONFIG_ALLOWLIST` (the durable constitution only), and the commit is
+ * an ORPHAN — no `main` ancestor — so nothing durable ever descends from the product lineage.
+ *
+ * Genesis is the ONE exception to "the config lane advances only by reviewed merge" (piece 53):
+ * the seed has no prior to review against. The operation is therefore idempotent — if the config
+ * branch already exists it is left untouched (`seeded: false`), so a re-run never clobbers
+ * reviewed history.
+ *
+ * @param teamRoot     Team root whose `.squad/**` durable files seed the orphan.
+ * @param configBranch Target branch ref (without `refs/heads/`), e.g. `squad/config/<callsign>`.
+ * @param opts.remote  When set, publish via `git push <remote>`; otherwise seed a LOCAL ref
+ *                     with `update-ref` (single-repo / self-host genesis, no remote required).
+ */
+export async function seedConfigOrphan(
+  teamRoot: string,
+  configBranch: string,
+  opts: { remote?: string } = {},
+): Promise<SeedConfigOrphanResult> {
+  const { remote } = opts;
+
+  // Idempotency: never re-seed an existing config branch (it advances only by reviewed merge).
+  const branchExists = (): boolean => {
+    try {
+      if (remote) {
+        const out = execFileSync('git', ['ls-remote', '--heads', remote, `refs/heads/${configBranch}`], {
+          cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        return out.length > 0;
+      }
+      execFileSync('git', ['rev-parse', '--verify', `refs/heads/${configBranch}`], {
+        cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const durableFiles = enumerateSquadFiles(teamRoot).filter(rel => isConfigAllowlisted(rel));
+
+  if (branchExists()) {
+    return { configBranch, seeded: false, files: durableFiles };
+  }
+
+  // Build the durable snapshot in an isolated index inside the team root's REAL git dir
+  // (monorepo-safe), exactly like publishTeamRootToInbox.
+  const resolvedGitDir = resolveTeamRootGitDir(teamRoot);
+  const indexFile = path.join(
+    resolvedGitDir,
+    `squad-config-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+  const indexEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
+  const commitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env['GIT_AUTHOR_NAME'] ?? 'Squad',
+    GIT_AUTHOR_EMAIL: process.env['GIT_AUTHOR_EMAIL'] ?? 'squad@system',
+    GIT_COMMITTER_NAME: process.env['GIT_COMMITTER_NAME'] ?? 'Squad',
+    GIT_COMMITTER_EMAIL: process.env['GIT_COMMITTER_EMAIL'] ?? 'squad@system',
+  };
+
+  try {
+    for (const relPath of durableFiles) {
+      const fullPath = path.join(teamRoot, relPath.replace(/\//g, path.sep));
+      const content = fs.readFileSync(fullPath);
+      const sha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: teamRoot, env: indexEnv, input: content,
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${sha},${relPath}`], {
+        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+
+    const treeSha = execFileSync('git', ['write-tree'], {
+      cwd: teamRoot, env: indexEnv, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    // Orphan commit — NO parent, so the durable lane never descends from `main`.
+    const commitSha = execFileSync('git', ['commit-tree', treeSha, '-m', 'squad: config lane genesis'], {
+      cwd: teamRoot, env: commitEnv, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (remote) {
+      execFileSync('git', ['push', remote, `${commitSha}:refs/heads/${configBranch}`], {
+        cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } else {
+      // Create-only: the empty old-value asserts the ref does NOT already exist, so a racing
+      // or false-negative existence check fails safe instead of clobbering reviewed history.
+      execFileSync('git', ['update-ref', `refs/heads/${configBranch}`, commitSha, ''], {
+        cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+
+    return { configBranch, commit: commitSha, seeded: true, files: durableFiles };
+  } finally {
+    try { fs.unlinkSync(indexFile); } catch { /* index may not exist if we errored early */ }
   }
 }
 

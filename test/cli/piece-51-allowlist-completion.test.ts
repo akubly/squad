@@ -333,7 +333,7 @@ describe('D: install-fold-pipeline installs the managed .gitignore (no init)', (
     }
   });
 
-  it('subfolder host: ignore block is scoped to <callsign>/.squad/**', async () => {
+  it('subfolder host: blanket ignore is scoped to <callsign>/.squad/ under Pole A', async () => {
     const repo = initSelfHostRepo(makeTmpDir('d-subfolder'));
     write(repo, 'wifi/.squad/team.md', '# Team\n');
     write(repo, 'wifi/.squad/config.json', '{"stateBackend":"orphan"}');
@@ -343,17 +343,17 @@ describe('D: install-fold-pipeline installs the managed .gitignore (no init)', (
     await installFoldPipeline('github', { cwd: repo });
 
     const gi = fs.readFileSync(path.join(repo, '.gitignore'), 'utf-8');
-    expect(gi).toContain('wifi/.squad/history.md');
-    expect(gi).toContain('wifi/.squad/publish-history.json');
-    // not a blanket ignore
-    expect(gi).not.toMatch(/^wifi\/\.squad\/\s*$/m);
+    // Pole A: a single blanket ignore for the whole subfolder .squad, NOT per-path allowlist entries.
+    expect(gi).toContain('wifi/.squad/');
+    expect(gi).not.toContain('wifi/.squad/history.md');
+    expect(gi).not.toContain('wifi/.squad/publish-history.json');
 
     execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' });
     const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
       cwd: repo, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim().split('\n').filter(Boolean);
-    expect(staged).not.toContain('wifi/.squad/history.md');
-    expect(staged).not.toContain('wifi/.squad/publish-history.json');
+    // Nothing under the subfolder .squad may reach main.
+    expect(staged.some(p => p.startsWith('wifi/.squad/'))).toBe(false);
   });
 
   it('non-orphan host: no managed block is written', async () => {
@@ -397,10 +397,10 @@ describe('D: install-fold-pipeline installs the managed .gitignore (no init)', (
     await installFoldPipeline('github', { cwd: repo });
 
     const gi = fs.readFileSync(path.join(repo, '.gitignore'), 'utf-8');
-    // alpha (orphan) MUST be isolated even though the registry entry is bravo's.
-    expect(gi, 'alpha (orphan) must receive the managed block').toContain('alpha/.squad/history.md');
+    // alpha (orphan) MUST be isolated even though the registry entry is bravo's — Pole A blanket.
+    expect(gi, 'alpha (orphan) must receive the blanket block').toContain('alpha/.squad/');
     // bravo (local/non-orphan) MUST NOT be added to the managed ignore.
-    expect(gi, 'bravo (non-orphan) must not be gitignored').not.toContain('bravo/.squad/history.md');
+    expect(gi, 'bravo (non-orphan) must not be gitignored').not.toContain('bravo/.squad/');
 
     execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' });
     const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
