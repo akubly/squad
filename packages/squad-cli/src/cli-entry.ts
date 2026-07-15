@@ -332,11 +332,12 @@ async function main(): Promise<void> {
     }
     if (cmd === 'sync') {
       console.log(`\n${b}squad sync${r} — Synchronize squad state with remote\n`);
-      console.log(`Usage: squad sync [--push | --pull | --both] [options]\n`);
+      console.log(`Usage: squad sync [--push | --pull | --both | --push-config] [options]\n`);
       console.log(`Options:`);
-      console.log(`  --push              Push squad state to remote`);
-      console.log(`  --pull              Pull squad state from remote`);
+      console.log(`  --push              Push ephemeral squad state to remote`);
+      console.log(`  --pull              Pull squad state (and durable config) from remote`);
       console.log(`  --both              Push and pull (default)`);
+      console.log(`  --push-config       Publish durable config changes to the config-inbox (opens a review PR)`);
       console.log(`  --remote <name>     Remote name (default: origin)`);
       console.log(`  --inbox-handle <handle>  Inbox handle for cross-repo inbox publish`);
       console.log(`  --registry-path <path>   Alternate registry file (matches init); default registry when absent`);
@@ -1491,12 +1492,20 @@ async function main(): Promise<void> {
     const hasPush = args.includes('--push');
     const hasPull = args.includes('--pull');
     const hasBoth = args.includes('--both');
+    const hasPushConfig = args.includes('--push-config');
     let direction: 'push' | 'pull' | 'both' = 'both';
     if (hasPush && !hasPull) direction = 'push';
     else if (hasPull && !hasPush) direction = 'pull';
     else if (hasBoth) direction = 'both';
     else if (subCmd === 'push') direction = 'push';
     else if (subCmd === 'pull') direction = 'pull';
+    else if (hasPushConfig) direction = 'push'; // config-only push: no implicit pull
+
+    // Piece 53 §A: `--push-config` publishes the durable lane. When it is the SOLE direction
+    // flag, suppress the ephemeral state push/pull so a bare `squad sync --push-config` does
+    // not also fold ephemeral state.
+    const pushConfigOnly = hasPushConfig && !hasPush && !hasPull && !hasBoth
+      && subCmd !== 'push' && subCmd !== 'pull';
 
     const remoteIdx = args.indexOf('--remote');
     const syncRemote = remoteIdx !== -1 ? args[remoteIdx + 1] : undefined;
@@ -1508,7 +1517,7 @@ async function main(): Promise<void> {
     const syncDryRun = args.includes('--dry-run');
 
     const { runSync } = await import('./cli/commands/sync.js');
-    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun, registryPath: syncRegistryPath });
+    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun, registryPath: syncRegistryPath, pushConfig: hasPushConfig, pushConfigOnly });
     return;
   }
 
