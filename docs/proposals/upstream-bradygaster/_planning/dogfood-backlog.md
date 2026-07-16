@@ -182,6 +182,24 @@ human approval. Publish → auto-PR → approve/merge → hydrate.
 | E (Tier 1) | Surface unpromoted durable changes: `squad status`/session-end diffs `CONFIG_ALLOWLIST` files against the hydrated config tip and prints a one-line `run 'squad sync --push-config' to open a review PR` nudge; no blocking, no auto-publish |
 | F (Tier 2, decision) | One inbox lane or two — F1 physically distinct `squad/inbox/**` (fold/force-push) and `squad/config-inbox/**` (auto-PR) lanes, prefix determines handling (recommended) vs. F2 a single superset lane the pipeline demultiplexes |
 
+### Piece 54 — Config-pipeline install wiring and publish batching
+
+`docs/proposals/upstream-bradygaster/54-config-pipeline-install-wiring-and-publish-batching.md`
+
+Makes piece 53's durable review loop deployable, runnable, and fast. Mined from a Pole-A cutover onto
+a self-hosted Windows CI host: piece 53's config template exists but is never installed, pins
+`ubuntu-latest` so it can't run self-hosted, publishes via O(2·N) serial git spawns (696 files = 214 s),
+and previews the wrong lane under `--push-config --dry-run`.
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | `install-fold-pipeline` also renders + writes `fold-squad-config.yml` next to `fold-squad-state.yml`, reusing the existing host-root resolution, callsign parameterization, and three-way idempotency gate (callsign-generic by default, `--callsign`-scoped when supplied); `installHostGitignore` still runs exactly once |
+| B (Tier 1) | `--runner` parity for the GitHub config template via the shared piece-50 §F `applyRunner` (`runs-on: [<labels>]` + non-Linux `defaults.run.shell: bash`); default rendering byte-identical to the `ubuntu-latest` base; ADO config template unchanged |
+| C (Tier 1) | Batch the publish git-spawns: one `git hash-object -w --stdin-paths` + one `git update-index --index-info` replace the per-file loop in `publishTeamRootToInbox` and `seedConfigOrphan`; identical resulting tree SHA |
+| D (Tier 1) | Lane-correct `--push-config --dry-run`: one `resolvePublishLane` shared by dry-run and real publish previews the `CONFIG_ALLOWLIST` set + `squad/config-inbox/<callsign>/…` target + config remote |
+| E (Tier 2, decision) | Config-pipeline install command surface — E1 one command writes both pipelines with `--state-only`/`--config-only` escape hatches (recommended) vs. E2 a separate `install-config-pipeline` |
+| F (Tier 2, decision) | Canonicalize subfolder `.gitignore` placement — F1 single root-git-root managed block with one `<prefix>.squad/` line per callsign, migrating a legacy subfolder block (recommended) vs. F2 per-subfolder files; `init` + `install-fold-pipeline` converge idempotently |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
@@ -193,7 +211,10 @@ ergonomics, fold inbox-branch cleanup hygiene, two `doctor` diagnostics, a compl
 fold-pipeline state-branch identity, and a `squad assign` disambiguation ergonomics fix); piece 49
 continues it from the pass that took the host onto a self-hosted CI runner and toward a multi-squad
 layout (self-hosted-runner fold-template durability, a manual fold trigger, and subfolder team-root
-onboarding in `squad assign`) and is now specced (above). Further pieces are added here as
+onboarding in `squad assign`) and is now specced (above); pieces 50-53 continue it (subfolder-host and
+self-hosted-runner hardening, then the Pole-A trilogy of infra-only main and hands-off durable review);
+piece 54 continues it from the Pole-A cutover pass (config-pipeline install wiring, `--runner` parity,
+publish batching, and lane-correct dry-run) and is now specced (above). Further pieces are added here as
 new dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
