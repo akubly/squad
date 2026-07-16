@@ -150,12 +150,42 @@ export function blanketGitignorePaths(pathPrefix = ''): string[] {
   return [`${pathPrefix}.squad/`];
 }
 
-function buildBlanketBlock(pathPrefix: string): string {
+// Piece 54 §F1: a blanket managed line is exactly `<prefix>.squad/` — bare `.squad/` (root host)
+// or `<callsign>/.squad/` (subfolder host). Anchored so an allowlist entry such as
+// `.squad/history.md` or `.squad/casting/` is never mistaken for a blanket line.
+const BLANKET_LINE_RE = /(^|\/)\.squad\/$/;
+
+/**
+ * §F1: extract the set of blanket ignore PREFIXES already carried by the managed block of an
+ * existing `.gitignore` body (`''` for the bare `.squad/` line, `'<callsign>/'` for a subfolder
+ * line). Non-blanket managed lines (e.g. a legacy allowlist block's entries) are ignored, so
+ * switching a host from the allowlist block to the blanket block still replaces those entries.
+ */
+function existingBlanketPrefixes(existing: string): string[] {
+  const startIdx = existing.indexOf(BLOCK_START);
+  if (startIdx === -1) return [];
+  const endIdx = existing.indexOf(BLOCK_END, startIdx);
+  const body = existing.slice(startIdx, endIdx === -1 ? existing.length : endIdx);
+  const prefixes: string[] = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('#')) continue;
+    if (BLANKET_LINE_RE.test(line)) {
+      prefixes.push(line.slice(0, line.length - '.squad/'.length));
+    }
+  }
+  return prefixes;
+}
+
+function buildBlanketBlock(prefixes: string[]): string {
+  // One `<prefix>.squad/` line per callsign, de-duplicated and sorted for a stable, idempotent
+  // block on a multi-callsign subfolder host.
+  const lines = Array.from(new Set(prefixes)).sort().map(p => `${p}.squad/`);
   return [
     BLOCK_START,
     '# Pole A: no squad content or state is tracked on this branch. The durable constitution',
     '# rides squad/config/<callsign>; ephemeral state rides squad/state/<callsign> (fold pipeline).',
-    `${pathPrefix}.squad/`,
+    ...lines,
     BLOCK_END,
   ].join('\n');
 }
@@ -166,7 +196,11 @@ function buildBlanketBlock(pathPrefix: string): string {
  * preserve durable content (`init`, `install-fold-pipeline`) seed the config orphan (sub-proposal B)
  * BEFORE calling this, so the `git rm -r --cached` here leaves `main` infra-only with no durable loss.
  *
- * Idempotent and marker-delimited: a re-run replaces the previous block (allowlist or blanket).
+ * §F1 (canonical placement): the block is a SINGLE managed region in the host git-root `.gitignore`
+ * carrying one `<prefix>.squad/` line per callsign. On a multi-callsign subfolder host this ACCUMULATES
+ * each callsign's line rather than replacing the block, so installing callsign B does not drop the
+ * ignore for callsign A. Idempotent and marker-delimited: a re-run replaces the previous block
+ * (allowlist or blanket) with the merged, de-duplicated set.
  *
  * @param repoRoot   Directory that receives the `.gitignore` (the git root for a subfolder host).
  * @param pathPrefix `''` for a root-hosted squad; `'<callsign>/'` for a subfolder host.
@@ -196,8 +230,39 @@ export function applyBlanketGitignore(repoRoot: string, pathPrefix = ''): ApplyM
   const gitignorePath = path.join(repoRoot, '.gitignore');
   let existing = '';
   try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* absent — create it */ }
-  const next = upsertManagedBlock(existing, buildBlanketBlock(pathPrefix));
+  // Merge this callsign's blanket line into any existing blanket set (accumulate, don't replace).
+  const mergedPrefixes = [...existingBlanketPrefixes(existing), pathPrefix];
+  const next = upsertManagedBlock(existing, buildBlanketBlock(mergedPrefixes));
   const changed = next !== existing;
   if (changed) fs.writeFileSync(gitignorePath, next, 'utf-8');
   return { untracked, changed };
+}
+
+/**
+ * §F1 migration: remove a LEGACY per-subfolder managed block from `<repoRoot>/<subfolder>/.gitignore`,
+ * preserving any non-managed user lines. Older subfolder hosts carried the Pole-A ignore in the
+ * subfolder's own `.gitignore` (a bare `.squad/` line); the canonical placement is now the git-root
+ * block with a `<subfolder>/.squad/` line, so the legacy block is stripped when encountered. The file
+ * is deleted if only the managed block (and whitespace) remained. A no-op — returning false — when the
+ * file or its managed block is absent. Never touches the git-root `.gitignore`.
+ */
+export function removeLegacySubfolderManagedBlock(repoRoot: string, subfolder: string): boolean {
+  if (!subfolder) return false;
+  const legacyPath = path.join(repoRoot, subfolder, '.gitignore');
+  let existing: string;
+  try { existing = fs.readFileSync(legacyPath, 'utf-8'); } catch { return false; }
+  const startIdx = existing.indexOf(BLOCK_START);
+  if (startIdx === -1) return false;
+  const endMarkerIdx = existing.indexOf(BLOCK_END, startIdx);
+  const before = existing.slice(0, startIdx);
+  const after = endMarkerIdx !== -1 ? existing.slice(endMarkerIdx + BLOCK_END.length) : '';
+  let remainder = `${before}${after}`.replace(/\n{3,}/g, '\n\n');
+  if (remainder.trim().length === 0) {
+    fs.rmSync(legacyPath, { force: true });
+    return true;
+  }
+  remainder = remainder.replace(/^\n+/, '');
+  if (!remainder.endsWith('\n')) remainder += '\n';
+  fs.writeFileSync(legacyPath, remainder, 'utf-8');
+  return true;
 }

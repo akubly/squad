@@ -639,6 +639,64 @@ function resolveTeamRootGitDir(teamRoot: string): string {
   return gitDir.replace(/\\/g, '/');
 }
 
+/** One on-disk file to hash and stage: its git-index path (forward-slash) and absolute source. */
+export interface BatchStageEntry {
+  /** Index path (always forward-slash separated, e.g. `.squad/charter.md`). */
+  indexPath: string;
+  /** Absolute on-disk path whose bytes are hashed verbatim. */
+  absPath: string;
+}
+
+/**
+ * Piece 54 §C: batch the publish git-spawns.
+ *
+ * Hash every on-disk file with a SINGLE `git hash-object -w --no-filters --stdin-paths` and stage
+ * them all with a SINGLE `git update-index --index-info`, against the isolated `GIT_INDEX_FILE` in
+ * `env`. This replaces the per-file O(2·N) `hash-object --stdin` + `update-index --add --cacheinfo`
+ * loop (two child processes per file, ~124 ms each on Windows) with an O(1) small constant of two
+ * spawns regardless of file count.
+ *
+ * Byte-for-byte fidelity (so `write-tree` yields the SAME tree SHA as the per-file path):
+ *   - `--no-filters` hashes the raw disk bytes exactly as the old `--stdin` path did. Without it,
+ *     `--stdin-paths` would apply the path's gitattributes (e.g. `text=auto` CRLF normalization)
+ *     and produce a DIFFERENT blob SHA for CRLF content.
+ *   - mode is fixed at `100644` and the index path is the forward-slash `indexPath`, matching the
+ *     old `--cacheinfo 100644,<sha>,<path>` staging exactly.
+ *
+ * git 2.x `hash-object --stdin-paths` has no `-z`, so paths are newline-delimited; a path carrying
+ * an embedded CR/LF would corrupt the path→SHA alignment, so such a path is refused (a git-tracked
+ * `.squad/` path never contains one). A no-op (no spawn) when `entries` is empty.
+ */
+export function batchHashAndStage(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  entries: BatchStageEntry[],
+): void {
+  if (entries.length === 0) return;
+
+  for (const e of entries) {
+    if (/[\r\n]/.test(e.absPath)) {
+      throw new Error(`Cannot batch-hash a path containing a newline: ${e.absPath}`);
+    }
+  }
+
+  const stdinPaths = entries.map(e => e.absPath).join('\n') + '\n';
+  const shaOut = execFileSync('git', ['hash-object', '-w', '--no-filters', '--stdin-paths'], {
+    cwd, env, input: stdinPaths, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const shas = shaOut.split('\n').map(s => s.trim()).filter(Boolean);
+  if (shas.length !== entries.length) {
+    throw new Error(
+      `git hash-object returned ${shas.length} object id(s) for ${entries.length} path(s).`,
+    );
+  }
+
+  const manifest = entries.map((e, i) => `100644 ${shas[i]}\t${e.indexPath}`).join('\n') + '\n';
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd, env, input: manifest, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
 export async function publishTeamRootToInbox(
   teamRoot: string,
   remote: string,
@@ -719,18 +777,15 @@ export async function publishTeamRootToInbox(
   };
 
   try {
-    // Hash and stage each allowlisted file
-    for (const relPath of squadFiles) {
-      const fullPath = path.join(teamRoot, relPath.replace(/\//g, path.sep));
-      const content = fs.readFileSync(fullPath);
-      const sha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
-        cwd: teamRoot, env: indexEnv, input: content,
-        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-      execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${sha},${relPath}`], {
-        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    }
+    // §C: hash + stage ALL allowlisted files in two spawns (was two spawns PER file).
+    batchHashAndStage(
+      teamRoot,
+      indexEnv,
+      squadFiles.map(relPath => ({
+        indexPath: relPath,
+        absPath: path.join(teamRoot, relPath.replace(/\//g, path.sep)),
+      })),
+    );
 
     // §9 PII: sourceWorkRoot is {repo: basename, pathHash: sha256(normalizedAbsPath)} — no raw path
     const normalizedTeamRoot = teamRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -889,17 +944,16 @@ export async function seedConfigOrphan(
   };
 
   try {
-    for (const relPath of durableFiles) {
-      const fullPath = path.join(teamRoot, relPath.replace(/\//g, path.sep));
-      const content = fs.readFileSync(fullPath);
-      const sha = execFileSync('git', ['hash-object', '-w', '--stdin'], {
-        cwd: teamRoot, env: indexEnv, input: content,
-        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-      execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${sha},${relPath}`], {
-        cwd: teamRoot, env: indexEnv, stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    }
+    // §C: hash + stage ALL durable files in two spawns (was two spawns PER file), byte-identical
+    // to the per-file path so the genesis tree SHA is unchanged.
+    batchHashAndStage(
+      teamRoot,
+      indexEnv,
+      durableFiles.map(relPath => ({
+        indexPath: relPath,
+        absPath: path.join(teamRoot, relPath.replace(/\//g, path.sep)),
+      })),
+    );
 
     const treeSha = execFileSync('git', ['write-tree'], {
       cwd: teamRoot, env: indexEnv, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
@@ -1435,20 +1489,41 @@ export async function runSync(options: SyncOptions): Promise<void> {
     // Must run before handle guard so developers can preview without a configured handle.
     if (options.dryRun) {
       const allFiles = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
-      const files = allFiles.filter(isAllowlisted);
       const effectiveAlias = resolvedAlias ?? '(handle required)';
+      const callsignPrefix = registryCallsign ? `${registryCallsign}/` : '';
       console.log(`squad sync --dry-run`);
-      if (isPush) {
-          const callsignPrefix = registryCallsign ? `${registryCallsign}/` : '';
-          console.log(`  Target inbox branch: squad/inbox/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
+
+      // §D: the DURABLE lane. Route `--push-config --dry-run` through the SAME lane resolver the
+      // real publish uses (resolvePublishLane('config')), so the preview shows the CONFIG_ALLOWLIST
+      // set, the squad/config-inbox/<callsign>/… target, and the config remote — never the
+      // ephemeral lane. `--push --dry-run` (below) is unchanged.
+      if (wantConfigPush) {
+        const laneCfg = resolvePublishLane('config');
+        const configFiles = allFiles.filter(laneCfg.filter);
+        console.log(`  Target inbox branch: ${laneCfg.inboxPrefix}/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
+        console.log(`  Would publish to remote: ${crossRepo ? effectiveConfigRemote : effectiveStateRemote}`);
+        console.log(`  Pending durable files (${configFiles.length} of ${allFiles.length} total, after CONFIG_ALLOWLIST filter):`);
+        for (const f of configFiles) {
+          console.log(`    ${f}`);
+        }
+      }
+
+      // The ephemeral (state) lane preview — unchanged. Suppressed when a bare `--push-config`
+      // made the durable lane the sole action (pushConfigOnly ⇒ isPush/isPull are false).
+      if (isPush || isPull) {
+        const laneCfg = resolvePublishLane('state');
+        const files = allFiles.filter(laneCfg.filter);
+        if (isPush) {
+          console.log(`  Target inbox branch: ${laneCfg.inboxPrefix}/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
           console.log(`  Would publish to remote: ${effectiveStateRemote}`);
         }
-      if (isPull) {
-        console.log(`  Would pull from remote: ${effectiveStateRemote}, branch: ${effectiveStateBranch}`);
-      }
-      console.log(`  Pending files (${files.length} of ${allFiles.length} total, after allowlist filter):`);
-      for (const f of files) {
-        console.log(`    ${f}`);
+        if (isPull) {
+          console.log(`  Would pull from remote: ${effectiveStateRemote}, branch: ${effectiveStateBranch}`);
+        }
+        console.log(`  Pending files (${files.length} of ${allFiles.length} total, after allowlist filter):`);
+        for (const f of files) {
+          console.log(`    ${f}`);
+        }
       }
       return;
     }

@@ -24,6 +24,7 @@ import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { runInit as scaffoldInit, type RunInitOptions as ScaffoldInitOptions } from '../cli/core/init.js';
 import { writeRemoteConfig } from '../cli/commands/init-remote.js';
 import { migratePoleBToA } from '../cli/commands/pole-a-migrate.js';
+import { removeLegacySubfolderManagedBlock } from '../cli/commands/allowlist-gitignore.js';
 
 export interface RunInitOpts {
   targetDir?: string;
@@ -249,11 +250,28 @@ async function applyPoleAGitignore(
   // non-orphan backend opts out, so a default `squad init` activates Pole A like every other wiring.
   if (stateBackend != null && stateBackend !== 'orphan') return;
 
-  // Detect a Pole-B host: `.squad/` files already tracked on the product branch.
+  // §F1 (canonical placement): the Pole-A ignore lives in the host git-root `.gitignore` as a
+  // `<prefix>.squad/` line — bare `.squad/` for a root host, `<callsign>/.squad/` for a subfolder
+  // host — NOT in the subfolder's own `.gitignore`. Resolve the git root and this team root's
+  // prefix relative to it; fall back to the team root itself when not inside a git work tree
+  // (a non-git init has nothing to untrack anyway, and writes the block at the team root).
+  let gitRoot = repoRoot;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim() || repoRoot;
+  } catch {
+    /* not a git repo — keep the team root */
+  }
+  const rel = path.relative(gitRoot, repoRoot).replace(/\\/g, '/');
+  const isSubfolder = rel !== '' && !rel.startsWith('..');
+  const pathPrefix = isSubfolder ? `${rel}/` : '';
+
+  // Detect a Pole-B host: `<prefix>.squad/` files already tracked on the product branch.
   let tracked = 0;
   try {
-    const lsOutput = execFileSync('git', ['ls-files', '--', '.squad'], {
-      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    const lsOutput = execFileSync('git', ['ls-files', '--', `${pathPrefix}.squad`], {
+      cwd: gitRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     });
     tracked = lsOutput.trim().split('\n').filter(Boolean).length;
   } catch {
@@ -271,8 +289,13 @@ async function applyPoleAGitignore(
   }
 
   // Guarded migration: the blanket untrack runs only when it cannot lose durable content
-  // (totality + durable-capture gates live in migratePoleBToA).
-  const res = await migratePoleBToA({ repoRoot, teamRoot: repoRoot, pathPrefix: '', callsign });
+  // (totality + durable-capture gates live in migratePoleBToA). The ignore block is written at the
+  // git root with `<prefix>.squad/`, accumulating one line per callsign on a multi-callsign host.
+  const res = await migratePoleBToA({ repoRoot: gitRoot, teamRoot: repoRoot, pathPrefix, callsign });
+
+  // §F1: strip any legacy subfolder managed block (`<callsign>/.gitignore`) now superseded by the
+  // git-root line, preserving user lines. Idempotent — a no-op on a fresh host with no legacy block.
+  if (isSubfolder) removeLegacySubfolderManagedBlock(gitRoot, rel);
 
   if (res.aborted === 'unclassified') {
     const sample = (res.unclassified ?? []).slice(0, 10).map(p => `    ${p}`).join('\n');

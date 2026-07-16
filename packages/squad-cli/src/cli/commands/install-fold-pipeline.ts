@@ -23,6 +23,7 @@ import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
 import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { migratePoleBToA } from './pole-a-migrate.js';
+import { removeLegacySubfolderManagedBlock } from './allowlist-gitignore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +65,16 @@ export interface InstallFoldPipelineOptions {
    * ADO template is agent-pool-driven and unaffected.
    */
   runner?: string;
+  /**
+   * E1 escape hatch: install ONLY the ephemeral state fold pipeline, skipping the durable config
+   * pipeline. Mutually exclusive with `configOnly`. Default (both unset) installs BOTH lanes.
+   */
+  stateOnly?: boolean;
+  /**
+   * E1 escape hatch: install ONLY the durable config pipeline, skipping the state fold pipeline.
+   * Mutually exclusive with `stateOnly`. Default (both unset) installs BOTH lanes.
+   */
+  configOnly?: boolean;
 }
 
 /**
@@ -144,6 +155,156 @@ function applyRunner(content: string, runner: string): string {
     replacement += `${nl}    defaults:${nl}      run:${nl}        shell: bash`;
   }
   return content.replace('    runs-on: ubuntu-latest', replacement);
+}
+
+/**
+ * Scope the callsign-generic STATE fold template to a single callsign: pin the inbox trigger glob,
+ * the callsign-discovery command, and the state-branch target. Factored out of the install path so
+ * the config template (below) can mirror the same shape for its own lane.
+ */
+function parameterizeStateTemplate(rawTemplate: string, platform: 'github' | 'ado', callsign: string): string {
+  if (platform === 'github') {
+    return rawTemplate
+      .replace(/- 'squad\/inbox\/\*\*'/g, `- 'squad/inbox/${callsign}/**'`)
+      .replace(/callsigns="\$\(git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u\)"/,
+        `callsigns="${callsign}"`)
+      .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
+      .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
+      .replace(/squad-state/g, `squad/state/${callsign}`);
+  }
+  return rawTemplate
+    .replace(/- refs\/heads\/squad\/inbox\/\*/g, `- refs/heads/squad/inbox/${callsign}/*`)
+    .replace(/callsigns="`git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u`"/,
+      `callsigns="${callsign}"`)
+    .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
+    .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
+    .replace(/squad-state/g, `squad/state/${callsign}`);
+}
+
+/**
+ * Sub-proposal A: scope the callsign-generic CONFIG (durable auto-PR) template to a single callsign,
+ * mirroring the state template's substitutions but on the durable lane: pin the config-inbox trigger,
+ * the callsign-discovery command, and the `squad/config/<callsign>` branch. Absent `--callsign` the
+ * template is emitted verbatim (callsign-generic — it discovers config-inbox callsigns at run time).
+ */
+function parameterizeConfigTemplate(rawTemplate: string, platform: 'github' | 'ado', callsign: string): string {
+  if (platform === 'github') {
+    return rawTemplate
+      .replace(/- 'squad\/config-inbox\/\*\*'/g, `- 'squad/config-inbox/${callsign}/**'`)
+      .replace(/callsigns="\$\(git ls-remote --heads origin 'refs\/heads\/squad\/config-inbox\/\*'[\s\S]*?\| sort -u\)"/,
+        `callsigns="${callsign}"`)
+      .replace(/CONFIG_BRANCH="squad\/config\/\$CALLSIGN"/g, `CONFIG_BRANCH="squad/config/${callsign}"`)
+      .replace(/'refs\/heads\/squad\/config-inbox\/\*'/g, `'refs/heads/squad/config-inbox/${callsign}/*'`);
+  }
+  return rawTemplate
+    .replace(/- refs\/heads\/squad\/config-inbox\/\*/g, `- refs/heads/squad/config-inbox/${callsign}/*`)
+    .replace(/callsigns="`git ls-remote --heads origin 'refs\/heads\/squad\/config-inbox\/\*'[\s\S]*?\| sort -u`"/,
+      `callsigns="${callsign}"`)
+    .replace(/CONFIG_BRANCH="squad\/config\/\$CALLSIGN"/g, `CONFIG_BRANCH="squad/config/${callsign}"`)
+    .replace(/'refs\/heads\/squad\/config-inbox\/\*'/g, `'refs/heads/squad/config-inbox/${callsign}/*'`);
+}
+
+/** One pipeline lane to render + install into the host CI directory. */
+interface PipelineInstallSpec {
+  /** Which lane — drives parameterization and lane-specific flag applicability. */
+  kind: 'state' | 'config';
+  /** Template basename inside `<TEMPLATES_ROOT>/<platform>/` (e.g. `fold-squad-state.yml`). */
+  templateFile: string;
+  platform: 'github' | 'ado';
+  /** Destination CI directory (already resolved / created). */
+  targetDir: string;
+  callsign?: string;
+  options: InstallFoldPipelineOptions;
+}
+
+/**
+ * Sub-proposal A: render one pipeline lane and write it through the three-way idempotency gate.
+ *
+ * Factored out of `installFoldPipeline` so the state fold and the durable config pipeline share the
+ * SAME render → gate → write path (reused verbatim, per E1). Returns normally on write / idempotent
+ * skip; `process.exit(1)`s on a missing template or an unforced content conflict — each file gated
+ * independently, so a conflict on one lane does not silently skip the other.
+ *
+ * Flag applicability by lane:
+ *   - `--delete-folded-refs` / `--fold-service-connection` are fold-specific → state lane only.
+ *   - `--runner` (§B) applies to both lanes' GitHub templates via the shared `applyRunner`.
+ */
+function renderAndInstallPipeline(spec: PipelineInstallSpec): void {
+  const { kind, templateFile, platform, targetDir, callsign, options } = spec;
+
+  const templatePath = path.join(TEMPLATES_ROOT, platform, templateFile);
+  if (!fs.existsSync(templatePath)) {
+    console.error(
+      `✗ Template not found: ${templatePath}\n` +
+      `  The Squad CLI installation may be incomplete.`,
+    );
+    process.exit(1);
+    return;
+  }
+
+  const rawTemplate = fs.readFileSync(templatePath, 'utf-8');
+
+  // ── Callsign parameterization ─────────────────────────────────────────────
+  let templateContent: string;
+  if (callsign) {
+    templateContent = kind === 'config'
+      ? parameterizeConfigTemplate(rawTemplate, platform, callsign)
+      : parameterizeStateTemplate(rawTemplate, platform, callsign);
+  } else {
+    templateContent = rawTemplate;
+  }
+
+  // ── Install-flag render substitutions ─────────────────────────────────────
+  // Applied after callsign parameterization so they compose. All no-ops by default, keeping the
+  // default rendering byte-identical to the committed template.
+  if (options.deleteFoldedRefs && kind === 'state') {
+    templateContent = applyDeleteFoldedRefs(templateContent, platform);
+  }
+  if (options.foldServiceConnection && platform === 'ado' && kind === 'state') {
+    templateContent = applyFoldServiceConnection(templateContent, options.foldServiceConnection);
+  }
+  // §B: --runner parity — the SAME applyRunner drives the fold and config GitHub templates so the
+  // two never drift. ADO is agent-pool-driven and unaffected.
+  if (options.runner && platform === 'github') {
+    templateContent = applyRunner(templateContent, options.runner);
+  }
+
+  const base = templateFile.replace(/\.yml$/, '');
+  const filename = callsign ? `${base}.${callsign}.yml` : `${base}.yml`;
+  const destPath = path.join(targetDir, filename);
+
+  // ── Three-way idempotency / conflict gate (per file) ──────────────────────
+  if (fs.existsSync(destPath)) {
+    const existing = fs.readFileSync(destPath, 'utf-8');
+    if (existing === templateContent) {
+      console.log(`${GREEN}✓${RESET} ${filename} already installed and up to date.`);
+      return;
+    }
+    if (options.force) {
+      const backupPath = `${destPath}.bak`;
+      fs.writeFileSync(backupPath, existing, 'utf-8');
+      fs.writeFileSync(destPath, templateContent, 'utf-8');
+      console.log(`${GREEN}✓${RESET} Overwrote ${filename} (previous content backed up to ${backupPath}).`);
+      return;
+    }
+    console.error(
+      `✗ ${filename} exists at ${destPath} with different content.\n` +
+      `  Review and delete it manually before re-running install-fold-pipeline, or pass --force to overwrite (a .bak backup is written).`,
+    );
+    process.exit(1);
+    return;
+  }
+
+  // Absent — write template.
+  fs.writeFileSync(destPath, templateContent, 'utf-8');
+  console.log(`${GREEN}✓${RESET} Installed ${kind} pipeline template: ${destPath}`);
+  if (kind === 'state' && !callsign) {
+    console.log(`  Known limitation: the inbox-branch prefix (squad/inbox/) is fixed. To use a different prefix,`);
+    console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
+  }
+  if (platform === 'ado') {
+    console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/${filename} in the portal.`);
+  }
 }
 
 /**
@@ -270,6 +431,10 @@ async function installHostGitignore(hostRepoRoot: string, entry: RegistryEntry |
       });
       warnAborted(res, teamRoot);
     }
+    // §F1: an older subfolder host carried the Pole-A ignore in `<cs>/.gitignore`. The canonical
+    // placement is now the git-root block (written above by migratePoleBToA), so strip any legacy
+    // subfolder managed block, preserving user lines. Idempotent — a no-op once migrated.
+    removeLegacySubfolderManagedBlock(hostRepoRoot, cs);
   }
 }
 
@@ -402,97 +567,37 @@ export async function installFoldPipeline(
     }
   }
 
-  // ── Source template path ───────────────────────────────────────────────────
-  const templatePath = path.join(TEMPLATES_ROOT, platform, 'fold-squad-state.yml');
-  if (!fs.existsSync(templatePath)) {
-    console.error(
-      `✗ Template not found: ${templatePath}\n` +
-      `  The Squad CLI installation may be incomplete.`,
-    );
+  // ── E1: which pipeline lane(s) to install ─────────────────────────────────
+  // Default: BOTH the ephemeral state fold AND the durable config consumer, so onboarding never
+  // leaves a host half-wired (a fold with no config-PR opener — the exact break piece 54 fixes).
+  // --state-only / --config-only are escape hatches; each file is gated for idempotency/conflict
+  // independently by renderAndInstallPipeline.
+  if (options.stateOnly && options.configOnly) {
+    console.error(`✗ --state-only and --config-only are mutually exclusive.`);
     process.exit(1);
     return;
   }
+  const installState = options.configOnly !== true;
+  const installConfig = options.stateOnly !== true;
 
-  const rawTemplate = fs.readFileSync(templatePath, 'utf-8');
-
-  // ── Callsign parameterization ─────────────────────────────────────────────
-  // When --callsign is provided, scope the trigger glob and fold target to this squad.
-  // When absent, emit the callsign-generic template verbatim.
-  let templateContent: string;
-  if (callsign) {
-    if (platform === 'github') {
-      templateContent = rawTemplate
-        // Scope trigger glob (on.push.branches) to this callsign's inbox prefix.
-        .replace(/- 'squad\/inbox\/\*\*'/g, `- 'squad/inbox/${callsign}/**'`)
-        .replace(/callsigns="\$\(git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u\)"/,
-          `callsigns="${callsign}"`)
-        .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
-        // Scope any remaining inbox ref patterns to this callsign namespace.
-        .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
-        .replace(/squad-state/g, `squad/state/${callsign}`);
-    } else {
-      // ADO
-      templateContent = rawTemplate
-        // Scope trigger branch include to this callsign's inbox prefix.
-        .replace(/- refs\/heads\/squad\/inbox\/\*/g, `- refs/heads/squad/inbox/${callsign}/*`)
-        .replace(/callsigns="`git ls-remote --heads origin 'refs\/heads\/squad\/inbox\/\*'[\s\S]*?\| sort -u`"/,
-          `callsigns="${callsign}"`)
-        .replace(/STATE_BRANCH="squad\/state\/\$CALLSIGN"/g, `STATE_BRANCH="squad/state/${callsign}"`)
-        // Scope any remaining inbox ref patterns to this callsign namespace.
-        .replace(/'refs\/heads\/squad\/inbox\/\*'/g, `'refs/heads/squad/inbox/${callsign}/*'`)
-        .replace(/squad-state/g, `squad/state/${callsign}`);
-    }
-  } else {
-    templateContent = rawTemplate;
+  if (installState) {
+    renderAndInstallPipeline({
+      kind: 'state',
+      templateFile: 'fold-squad-state.yml',
+      platform,
+      targetDir,
+      callsign,
+      options,
+    });
   }
-
-  // ── Install-flag render substitutions ─────────────────────────────────────
-  // Applied after callsign parameterization so they compose with it. Both are
-  // no-ops by default, keeping the default rendering byte-identical to the template.
-  if (options.deleteFoldedRefs) {
-    templateContent = applyDeleteFoldedRefs(templateContent, platform);
-  }
-  if (options.foldServiceConnection && platform === 'ado') {
-    templateContent = applyFoldServiceConnection(templateContent, options.foldServiceConnection);
-  }
-  if (options.runner && platform === 'github') {
-    templateContent = applyRunner(templateContent, options.runner);
-  }
-
-  const filename = callsign ? `fold-squad-state.${callsign}.yml` : 'fold-squad-state.yml';
-  const destPath = path.join(targetDir, filename);
-
-  // ── Three-way idempotency / conflict gate ─────────────────────────────────
-  if (fs.existsSync(destPath)) {
-    const existing = fs.readFileSync(destPath, 'utf-8');
-    if (existing === templateContent) {
-      console.log(`${GREEN}✓${RESET} ${filename} already installed and up to date.`);
-      return;
-    }
-    // Content differs — conflict guard, unless --force overwrites with a backup.
-    if (options.force) {
-      const backupPath = `${destPath}.bak`;
-      fs.writeFileSync(backupPath, existing, 'utf-8');
-      fs.writeFileSync(destPath, templateContent, 'utf-8');
-      console.log(`${GREEN}✓${RESET} Overwrote ${filename} (previous content backed up to ${backupPath}).`);
-      return;
-    }
-    console.error(
-      `✗ ${filename} exists at ${destPath} with different content.\n` +
-      `  Review and delete it manually before re-running install-fold-pipeline, or pass --force to overwrite (a .bak backup is written).`,
-    );
-    process.exit(1);
-    return;
-  }
-
-  // Absent — write template.
-  fs.writeFileSync(destPath, templateContent, 'utf-8');
-  console.log(`${GREEN}✓${RESET} Installed fold pipeline template: ${destPath}`);
-  if (!callsign) {
-    console.log(`  Known limitation: the inbox-branch prefix (squad/inbox/) is fixed. To use a different prefix,`);
-    console.log(`  change both the CLI and the fold templates together. Future: bake the prefix into the fold template at install time.`);
-  }
-  if (platform === 'ado') {
-    console.log(`  ℹ️  Configure the ADO pipeline to point to .azuredevops/${filename} in the portal.`);
+  if (installConfig) {
+    renderAndInstallPipeline({
+      kind: 'config',
+      templateFile: 'fold-squad-config.yml',
+      platform,
+      targetDir,
+      callsign,
+      options,
+    });
   }
 }
