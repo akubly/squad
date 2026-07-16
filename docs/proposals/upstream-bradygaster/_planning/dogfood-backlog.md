@@ -200,6 +200,29 @@ and previews the wrong lane under `--push-config --dry-run`.
 | E (Tier 2, decision) | Config-pipeline install command surface — E1 one command writes both pipelines with `--state-only`/`--config-only` escape hatches (recommended) vs. E2 a separate `install-config-pipeline` |
 | F (Tier 2, decision) | Canonicalize subfolder `.gitignore` placement — F1 single root-git-root managed block with one `<prefix>.squad/` line per callsign, migrating a legacy subfolder block (recommended) vs. F2 per-subfolder files; `init` + `install-fold-pipeline` converge idempotently |
 
+### Piece 55 — Managed consumer clone and one-command cold-start onboarding
+
+`docs/proposals/upstream-bradygaster/55-managed-consumer-clone-and-one-command-cold-start.md`
+
+The consumer capstone of the Pole-A line: one command stands up a machine as a hands-off consumer of a
+published shared squad and keeps it fresh. Mined from an onboarding pass that brought a second
+workstation onto two already-published squads and found the intended `squad assign --callsign … --state-remote
+… --state-branch … --skills-from host` reduced to a hand-wired `registry.json` edit, a `squad sync --pull`
+that only works against the project directory (not `.squad`), and a `squad upgrade` — with two residual
+`squad doctor` errors that are false positives no user action can clear.
+
+| Sub-proposal | Summary |
+|---|---|
+| A (Tier 1) | Flag-driven cold-start identity: `--callsign` + `--state-remote`/`--state-branch` (+ optional `--config-remote`/`--config-branch`, `--inbox-handle`, `--skills-from host`) with no positional and no `--clone-to` triggers a managed cold-start; every existing `assign` shape preserved |
+| B (Tier 1) | CLI-managed host clone under `~/.squad/hosts/<callsign>/` (team root `…/.squad`); SDK hosts-root helper; registry `managed: true`; doctor/upgrade treat managed paths as tool-owned; one clone per callsign |
+| C (Tier 1) | Orphan-branch hydrate in cold-start: create the managed clone, write the managed entry, run the same state+config `--pull` hydrate into the managed team root (both sentinels), then verify `team.md` in the hydrated tree — not on `main`; fail fast naming the remote/branches when absent |
+| D (Tier 1) | Auto-wire after first hydrate: run `runUpgrade` against the managed project dir so the repo agent, `.copilot/skills`, gitignore/gitattributes, workflows, global coordinator, and git hooks are installed with zero follow-up |
+| E (Tier 1) | Deterministic hands-off freshness sync from the coordinator `squad.agent.md` session-start hook (managed entries only), plus optional Scribe pull-before-push; no durable charter change |
+| F (Tier 1) | Zero-error `doctor` on a fresh managed host: F1 upgrade/doctor agree on the repo agent path (write at git root); F2 a `squad-<registeredCallsign>-<rest>` payload is owned even when `<rest>` begins with `squad-` |
+| G (Tier 2, decision) | Managed-clone fetch shape — G1 partial + single-branch (`--filter=blob:none`, ref-scoped) (recommended) vs. G2 full clone |
+| H (Tier 2, decision) | Freshness-trigger policy — H1 session-start-always vs. H2 sentinel-age threshold (pull when `.last-hydrate-sha` older than a bounded window) (recommended) |
+| I (Tier 2, decision) | Origin-overlap suppression — I1 suppress the warning between two callsign-distinguished managed entries of one host (recommended) vs. I2 keep + document |
+
 ---
 
 ## Planned (candidate pieces — no spec yet)
@@ -214,7 +237,10 @@ layout (self-hosted-runner fold-template durability, a manual fold trigger, and 
 onboarding in `squad assign`) and is now specced (above); pieces 50-53 continue it (subfolder-host and
 self-hosted-runner hardening, then the Pole-A trilogy of infra-only main and hands-off durable review);
 piece 54 continues it from the Pole-A cutover pass (config-pipeline install wiring, `--runner` parity,
-publish batching, and lane-correct dry-run) and is now specced (above). Further pieces are added here as
+publish batching, and lane-correct dry-run); piece 55 continues it from the consumer-onboarding pass
+(a one-command cold-start that stands up a hands-off consumer into a CLI-managed host clone, with
+orphan-branch hydrate, auto-wire, deterministic freshness sync, and two `doctor` false-positive fixes)
+and is now specced (above). Further pieces are added here as
 new dogfood cycles surface them.
 
 ## Operational follow-ups (host actions, not stack pieces)
