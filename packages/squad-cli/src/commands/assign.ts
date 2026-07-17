@@ -27,7 +27,8 @@ import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
-import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from '../cli/commands/sync.js';
+import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX, resolveStateRemote, deriveStateBranch, deriveConfigBranch, hydrateTeamRootFromStateRef, hydrateTeamRootFromConfigRef } from '../cli/commands/sync.js';
+import { managedHostPath } from '@bradygaster/squad-sdk';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */
@@ -226,6 +227,8 @@ export type AssignErrorCode =
   | 'ERR_ASSIGN_CALLSIGN_COLLISION'
   | 'ERR_ASSIGN_CLONE_FAILED'
   | 'ERR_ASSIGN_NO_TEAM_MD'
+  | 'ERR_ASSIGN_MANAGED_NO_TEAM_MD'
+  | 'ERR_ASSIGN_MANAGED_MISSING_IDENTITY'
   | 'ERR_ASSIGN_INVALID_SKILLS_SOURCE'
   | 'INVALID_ALIAS';
 
@@ -247,7 +250,7 @@ export class AssignError extends ConfigurationError {
  * `alreadyAssigned` and `noOp` variants carry no warnings by design.
  */
 export type SquadAssignResult =
-  | { kind: 'assigned' | 'reactivated'; callsign: string; hostPath: string; clonePath?: string; warnings: string[]; coordinatorInstalled?: boolean }
+  | { kind: 'assigned' | 'reactivated'; callsign: string; hostPath: string; clonePath?: string; warnings: string[]; coordinatorInstalled?: boolean; managed?: boolean; managedHostPath?: string; stateHydrated?: boolean; configHydrated?: boolean; wired?: boolean }
   | { kind: 'alreadyAssigned' | 'noOp'; callsign: string; hostPath: string; clonePath?: string };
 
 export interface SquadAssignOpts {
@@ -281,8 +284,27 @@ export interface SquadAssignOpts {
   stateRemote?: string;
   /** --state-branch <name>: orphan branch holding folded canonical state. */
   stateBranch?: string;
+  /** --config-remote <url|name>: git remote hosting the durable config lane. Defaults to stateRemote. */
+  configRemote?: string;
+  /** --config-branch <name>: durable config orphan branch (e.g. squad/config/<callsign>). */
+  configBranch?: string;
   /** --inbox-handle <handle>: per-developer namespace identifier for inbox branches. */
   inboxHandle?: string;
+  /** Override the managed hosts root home (test seam) → managedHostPath(callsign, home). */
+  home?: string;
+  /**
+   * Injectable seam for the managed cold-start host clone (piece 55, decision G1). Production
+   * default is a blobless, no-checkout clone (`git clone --filter=blob:none --no-checkout`).
+   * Falls back to `cloneCommand` when that is supplied, so a single injected clone stub can
+   * intercept both cold-start shapes in tests.
+   */
+  managedCloneCommand?: (url: string, dest: string) => Promise<void>;
+  /** @internal Injectable seam: state-ref hydrate. Defaults to hydrateTeamRootFromStateRef. */
+  _hydrateStateFn?: (teamRoot: string, remote: string, branch: string) => Promise<void>;
+  /** @internal Injectable seam: config-ref hydrate. Defaults to hydrateTeamRootFromConfigRef. */
+  _hydrateConfigFn?: (teamRoot: string, remote: string, branch: string, managed?: boolean) => Promise<void>;
+  /** @internal Injectable seam: auto-wire install. Defaults to runUpgrade. */
+  _runUpgradeFn?: (dest: string) => Promise<void>;
   /** @internal Injectable seam: override cross-repo hook installer. For testing only. */
   _installCrossRepoHookFn?: (docsRepoPath: string) => void;
   /** @internal Injectable seam: override product .squad/-forbid hook installer. For testing only. */
@@ -316,6 +338,22 @@ async function _defaultCloneCommand(url: string, dest: string): Promise<void> {
   // The `--` separator ensures git treats the next token as a positional
   // URL argument, not as a flag — guarding against values like --upload-pack=…
   _assignExecFileSync('git', ['clone', '--', url, dest], { stdio: 'inherit' });
+}
+
+/**
+ * Default managed-clone command (piece 55, decision G1 — partial + checkout-free).
+ *
+ * The managed host clone is a pure hydration target: it never checks out `main` and never builds,
+ * so we clone blobless and without a working-tree checkout to minimise disk and transfer. The
+ * subsequent orphan-branch hydrate ref-fetches exactly the state/config trees it needs; blobs are
+ * fetched lazily from the promisor remote when the hydrate reads them.
+ */
+async function _defaultManagedCloneCommand(url: string, dest: string): Promise<void> {
+  _assignExecFileSync(
+    'git',
+    ['clone', '--filter=blob:none', '--no-checkout', '--', url, dest],
+    { stdio: 'inherit' },
+  );
 }
 
 /**
@@ -367,6 +405,36 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
   // Guard 1a: Missing argument.
   const rawArg = opts.callsignOrUrl?.trim() ?? '';
   if (!rawArg) {
+    // Piece 55 §A — flag-driven managed cold-start. A `--callsign` with no positional argument and
+    // no `--clone-to` identifies the squad entirely by flags. When `--state-remote`/`--state-branch`
+    // are present and no warm registry entry resolves for the callsign, stand up a CLI-managed host
+    // clone (§B–D) instead of emitting ERR_ASSIGN_MISSING_ARG.
+    if (opts.callsign !== undefined && opts.cloneTo === undefined) {
+      const callsign = opts.callsign;
+      if (!CALLSIGN_RE.test(callsign)) {
+        throw new AssignError(
+          'ERR_ASSIGN_MANAGED_MISSING_IDENTITY',
+          `Invalid --callsign "${callsign}": must match /${CALLSIGN_RE.source}/ ` +
+          `(lowercase, starts with a letter, hyphens allowed, max 39 chars).`,
+        );
+      }
+      const hasStateIdentity = !!opts.stateRemote && !!opts.stateBranch;
+      const warmEntry = hasStateIdentity ? _findWarmEntry(callsign, opts) : undefined;
+      if (hasStateIdentity && !warmEntry) {
+        return _managedColdStart({ callsign, opts, cwd, writeRegistryFn });
+      }
+      // --callsign present but the managed identity is incomplete (or a warm entry already exists):
+      // teach the one-command managed cold-start form rather than the generic missing-arg error.
+      throw new AssignError(
+        'ERR_ASSIGN_MANAGED_MISSING_IDENTITY',
+        `To onboard a shared-squad consumer with --callsign, also pass --state-remote and --state-branch:\n` +
+        `  squad assign --callsign ${callsign} \\\n` +
+        `    --state-remote <url> --state-branch squad/state/${callsign} \\\n` +
+        `    --config-branch squad/config/${callsign} --inbox-handle <handle> --skills-from host\n` +
+        `Or bind an existing squad by callsign:\n` +
+        `  squad assign ${callsign}`,
+      );
+    }
     throw new AssignError(
       'ERR_ASSIGN_MISSING_ARG',
       'Provide a callsign or URL.\n' +
@@ -964,5 +1032,247 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
     clonePath,
     warnings: coldWarnings,
     coordinatorInstalled,
+  };
+}
+
+/**
+ * Load the registry and return a NON-managed entry for `callsign`, if any. A managed entry is
+ * NOT treated as "warm" so a managed cold-start re-run remains idempotent (re-hydrate + re-wire).
+ */
+function _findWarmEntry(callsign: string, opts: SquadAssignOpts): RegistryEntry | undefined {
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
+  if (!registryFilePath) return undefined;
+  try {
+    const { registry } = loadRegistryFromDisk({ registryPath: registryFilePath });
+    return (registry?.squads ?? []).find(s => s.callsign === callsign && s.managed !== true);
+  } catch {
+    return undefined;
+  }
+}
+
+interface _ManagedColdStartCtx {
+  callsign: string;
+  opts: SquadAssignOpts;
+  cwd: string;
+  writeRegistryFn: (filePath: string, registry: Registry) => void;
+}
+
+/**
+ * Piece 55 §B–D — managed cold-start: stand up a CLI-managed host clone as a consumer of a
+ * published shared squad, hydrate its team root from the orphan branches, and auto-wire it so the
+ * host is usable with no follow-up commands.
+ */
+async function _managedColdStart(ctx: _ManagedColdStartCtx): Promise<SquadAssignResult> {
+  const { callsign, opts, writeRegistryFn } = ctx;
+  const warnings: string[] = [];
+
+  // §A: managed cold-start selects the host's skills; reject any other source.
+  if (opts.skillsFrom !== undefined && opts.skillsFrom !== 'host') {
+    throw new AssignError(
+      'ERR_ASSIGN_INVALID_SKILLS_SOURCE',
+      `Managed cold-start requires --skills-from host (got "${opts.skillsFrom}").`,
+    );
+  }
+
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env as Record<string, string> | undefined });
+  if (!registryFilePath) {
+    throw new AssignError(
+      'ERR_ASSIGN_NO_REGISTRY',
+      'Cannot locate registry. Set SQUAD_REGISTRY_PATH or run squad init first.',
+    );
+  }
+  const { registry } = loadRegistryFromDisk({ registryPath: registryFilePath });
+  const existingSquads: RegistryEntry[] = registry?.squads ?? [];
+
+  const stateRemoteUrl = opts.stateRemote!;
+  const stateBranch = opts.stateBranch!;
+  const configRemoteUrl = opts.configRemote ?? opts.stateRemote!;
+  const effectiveConfigBranch = deriveConfigBranch(opts.configBranch, callsign);
+
+  // §B: the CLI-managed host clone lives under ~/.squad/hosts/<callsign>/; its team root is
+  // <managedProjectDir>/.squad. The user never chooses or maintains this path.
+  const managedProjectDir = managedHostPath(callsign, opts.home);
+  const managedTeamRootPath = path.join(managedProjectDir, '.squad');
+
+  // §B: one clone per callsign — reuse an existing managed clone (idempotent re-run), else create.
+  const managedCloneFn = opts.managedCloneCommand ?? opts.cloneCommand ?? _defaultManagedCloneCommand;
+  const alreadyCloned = fs.existsSync(path.join(managedProjectDir, '.git'));
+  if (!alreadyCloned) {
+    if (fs.existsSync(managedProjectDir)) {
+      let isEmpty = true;
+      try { isEmpty = fs.readdirSync(managedProjectDir).length === 0; } catch { isEmpty = false; }
+      if (!isEmpty) {
+        throw new AssignError(
+          'ERR_ASSIGN_CLONE_DEST_NOT_EMPTY',
+          `The managed host path "${managedProjectDir}" already exists and is not a managed clone.\n` +
+          '  Remove it or choose a different callsign.',
+        );
+      }
+    }
+    fs.mkdirSync(path.dirname(managedProjectDir), { recursive: true });
+    try {
+      await managedCloneFn(stateRemoteUrl, managedProjectDir);
+    } catch (err) {
+      try { fs.rmSync(managedProjectDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      throw new AssignError(
+        'ERR_ASSIGN_CLONE_FAILED',
+        `Failed to clone the managed host for "${callsign}" from "${stateRemoteUrl}".\n` +
+        `  ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  } else {
+    // §B fix (re-run drift): an idempotent re-run with a changed --state-remote must not leave the
+    // clone's origin pointing at the old URL while the registry records the new one. Reconcile
+    // origin so git and the registry agree; hydrate then fetches from the intended remote.
+    try {
+      const currentOrigin = _assignExecFileSync('git', ['-C', managedProjectDir, 'remote', 'get-url', 'origin'], {
+        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (currentOrigin && currentOrigin !== stateRemoteUrl) {
+        _assignExecFileSync('git', ['-C', managedProjectDir, 'remote', 'set-url', 'origin', stateRemoteUrl], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        warnings.push(`Managed clone origin realigned from "${currentOrigin}" to "${stateRemoteUrl}".`);
+      }
+    } catch { /* best-effort — a genuinely broken remote surfaces during hydrate */ }
+  }
+
+  // §C: when the durable config lane rides a distinct remote URL, register it as a named remote so
+  // the config hydrate can fetch it; otherwise the state origin serves both lanes.
+  let configConfigured: string | undefined;
+  if (configRemoteUrl && configRemoteUrl !== stateRemoteUrl) {
+    try {
+      _assignExecFileSync('git', ['-C', managedProjectDir, 'remote', 'remove', 'squad-config'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch { /* remote may not exist yet */ }
+    try {
+      _assignExecFileSync('git', ['-C', managedProjectDir, 'remote', 'add', 'squad-config', configRemoteUrl], { stdio: ['pipe', 'pipe', 'pipe'] });
+      configConfigured = 'squad-config';
+    } catch (err) {
+      warnings.push(`Could not register distinct config remote "${configRemoteUrl}": ${err instanceof Error ? err.message : String(err)}.`);
+    }
+  }
+
+  // §C: resolve remotes/branches through the SAME helpers `sync --pull` uses.
+  const effectiveStateRemote = resolveStateRemote(managedProjectDir, stateRemoteUrl);
+  const effectiveStateBranch = deriveStateBranch(stateBranch, callsign);
+  const effectiveConfigRemote = resolveStateRemote(managedProjectDir, configConfigured ?? stateRemoteUrl);
+
+  const hydrateStateFn = opts._hydrateStateFn ?? hydrateTeamRootFromStateRef;
+  const hydrateConfigFn = opts._hydrateConfigFn ?? hydrateTeamRootFromConfigRef;
+
+  // §C: durable config hydrate first (piece 53 §D ordering), then ephemeral state. A missing config
+  // branch is tolerated — the post-hydrate team.md check is the authoritative gate.
+  let configHydrated = false;
+  if (effectiveConfigBranch) {
+    try {
+      await hydrateConfigFn(managedProjectDir, effectiveConfigRemote, effectiveConfigBranch, true);
+      configHydrated = true;
+    } catch (err) {
+      warnings.push(`Durable config hydrate skipped: ${err instanceof Error ? err.message : String(err)}.`);
+    }
+  }
+
+  let stateHydrated = false;
+  try {
+    await hydrateStateFn(managedProjectDir, effectiveStateRemote, effectiveStateBranch);
+    stateHydrated = true;
+  } catch (err) {
+    if (!alreadyCloned) { try { fs.rmSync(managedProjectDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    throw new AssignError(
+      'ERR_ASSIGN_MANAGED_NO_TEAM_MD',
+      `Failed to hydrate squad state for "${callsign}" from ${effectiveStateRemote}:${effectiveStateBranch}.\n` +
+      `  ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // §C: post-hydrate verification against the hydrated managed team root (NOT `main`).
+  const teamMdPath = path.join(managedTeamRootPath, 'team.md');
+  if (!fs.existsSync(teamMdPath)) {
+    if (!alreadyCloned) { try { fs.rmSync(managedProjectDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    throw new AssignError(
+      'ERR_ASSIGN_MANAGED_NO_TEAM_MD',
+      `The managed host for "${callsign}" hydrated no team.md (checked "${teamMdPath}").\n` +
+      `  Resolved remote: ${effectiveStateRemote}\n` +
+      `    state branch:  ${effectiveStateBranch}\n` +
+      `    config branch: ${effectiveConfigBranch ?? '(none)'}\n` +
+      '  The orphan branches carry no team root — seed the host or verify the remote/branches.',
+    );
+  }
+
+  // §B: write the managed registry entry (managed: true) — written only after a verified hydrate so
+  // a failed onboarding leaves no dangling entry.
+  const managedEntry: RegistryEntry = {
+    callsign,
+    path: managedTeamRootPath,
+    managed: true,
+    // §D/§E fix: a managed host IS its own product clone — `squad sync --pull` (freshness sync,
+    // Scribe pull-before-push) runs from managedProjectDir. Without listing it in `clones`, runSync
+    // falls through to the host-clone guard (dirname(entry.path) === repoRoot) and exits 1.
+    clones: [managedProjectDir],
+    initUri: stateRemoteUrl,
+    stateRemote: stateRemoteUrl,
+    stateBranch: effectiveStateBranch,
+    configRemote: configRemoteUrl,
+    ...(effectiveConfigBranch ? { configBranch: effectiveConfigBranch } : {}),
+    ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
+  };
+  const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
+  const newRegistry: Registry = { version: registry?.version ?? 1, squads: [...otherSquads, managedEntry] };
+  fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
+  writeRegistryFn(registryFilePath, newRegistry);
+
+  // §D: auto-wire so the host is usable with zero follow-up commands.
+  const home = opts.home ?? os.homedir();
+  let coordinatorInstalled = false;
+  let wired = false;
+
+  // Global coordinator agent (~/.copilot/agents/squad.agent.md) — fresh install on a new machine.
+  try {
+    installCoordinatorAgent(home);
+    coordinatorInstalled = fs.existsSync(path.join(home, '.copilot', 'agents', 'squad.agent.md'));
+  } catch (err) {
+    warnings.push(`Could not install global coordinator agent: ${err instanceof Error ? err.message : String(err)}.`);
+  }
+
+  // Repo agent (at git root per §F1), workflows, gitignore/gitattributes, ensure checks, and the
+  // per-repo Copilot payload — installed against the managed project directory.
+  const runUpgradeFn = opts._runUpgradeFn ?? (async (dest: string) => {
+    const { runUpgrade } = await import('../cli/core/upgrade.js');
+    await runUpgrade(dest, {
+      // §D/§F fix: never overwrite a just-hydrated team-root file (durable constitution OR
+      // ephemeral coordinator memory) with bundled defaults.
+      preserveHydratedTeamRoot: true,
+      ...(opts.home !== undefined ? { homeDir: opts.home } : {}),
+    });
+  });
+  try {
+    await runUpgradeFn(managedProjectDir);
+    wired = true;
+  } catch (err) {
+    warnings.push(
+      `Auto-wire (squad upgrade) failed for the managed host: ${err instanceof Error ? err.message : String(err)}. ` +
+      `Run "squad upgrade" in "${managedProjectDir}".`,
+    );
+  }
+
+  // Git sync hooks on the managed clone.
+  const installCrossRepoHookFn = opts._installCrossRepoHookFn ?? installCrossRepoHook;
+  try {
+    installCrossRepoHookFn(managedProjectDir);
+  } catch (err) {
+    warnings.push(`Could not install git sync hooks at "${managedProjectDir}": ${err instanceof Error ? err.message : String(err)}.`);
+  }
+
+  return {
+    kind: 'assigned',
+    callsign,
+    hostPath: managedTeamRootPath,
+    managed: true,
+    managedHostPath: managedProjectDir,
+    stateHydrated,
+    configHydrated,
+    wired,
+    coordinatorInstalled,
+    warnings,
   };
 }

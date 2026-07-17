@@ -1120,16 +1120,31 @@ describe('piece 48 D: accurate orphan callsign attribution', () => {
     expect(orphan!.callsign).toBe('probe');
   });
 
-  it('D2 reports a genuine double-prefix re-namespace artifact as an orphan, not owned', () => {
-    writeUserSkill('squad-teamx-squad-beta-collaboration');
+  it('D2 reports a genuine double-prefix artifact with NO registered leading callsign as an orphan', () => {
+    // Piece 55 §F2: a registered-callsign prefix match wins over the double-prefix heuristic, so the
+    // stale-artifact case is one whose LEADING token is not a registered callsign. Here `ghost` is
+    // unregistered, so the payload is correctly flagged (attributed via the trailing skill base).
+    writeUserSkill('squad-ghost-squad-beta-collaboration');
     const result = diagnoseCopilotPayload({
-      knownCallsigns: ['teamx', 'beta'],
+      knownCallsigns: ['beta'],
       knownSkillBases: ['agent-collaboration', 'squad-conventions'],
       copilotHome,
     });
-    const orphan = result.orphans.find(o => o.pathOnDisk.endsWith('squad-teamx-squad-beta-collaboration'));
+    const orphan = result.orphans.find(o => o.pathOnDisk.endsWith('squad-ghost-squad-beta-collaboration'));
     expect(orphan).toBeDefined();
-    expect(orphan!.callsign).toBe('teamx');
+  });
+
+  it('F2 does NOT flag a custom squad-prefixed skill owned by a registered callsign as an orphan', () => {
+    // Piece 55 §F2: a host authored `squad-state-harvest-union` (base itself begins with `squad-`),
+    // so the namespaced payload is `squad-<cs>-squad-state-harvest-union`. With `<cs>` registered it
+    // is owned — the double-prefix guard must not fire for a registered leading callsign.
+    writeUserSkill('squad-teamx-squad-state-harvest-union');
+    const result = diagnoseCopilotPayload({
+      knownCallsigns: ['teamx'],
+      knownSkillBases: ['agent-collaboration', 'squad-conventions'],
+      copilotHome,
+    });
+    expect(result.orphans).toHaveLength(0);
   });
 
   it('D2b does NOT flag a legitimately-owned squad-conventions skill as an orphan', () => {

@@ -17,6 +17,8 @@ export interface AssignCliArgs {
   inboxHandle: string | undefined;
   stateRemote: string | undefined;
   stateBranch: string | undefined;
+  configRemote: string | undefined;
+  configBranch: string | undefined;
   yes: boolean;
   allowOriginCollision: boolean;
 }
@@ -30,6 +32,8 @@ const NAMED_FLAGS = [
   '--inbox-handle',
   '--state-remote',
   '--state-branch',
+  '--config-remote',
+  '--config-branch',
 ] as const;
 
 /**
@@ -71,6 +75,8 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     inboxHandle: argValue(args, '--inbox-handle'),
     stateRemote: argValue(args, '--state-remote'),
     stateBranch: argValue(args, '--state-branch'),
+    configRemote: argValue(args, '--config-remote'),
+    configBranch: argValue(args, '--config-branch'),
     yes: args.includes('--yes'),
     allowOriginCollision: args.includes('--allow-origin-collision'),
   };

@@ -29,6 +29,13 @@ export interface RegistryEntry {
    */
   configBranch?: string;
   inboxHandle?: string;
+  /**
+   * True when the CLI owns this host clone (piece 55, sub-proposal B) — a managed consumer
+   * clone under `~/.squad/hosts/<callsign>/`. Managed paths are tool-owned: `doctor` never flags
+   * them as a missing/user working tree, and `upgrade`/`sync` treat them as clean-overwrite
+   * hydrate targets rather than hand-edited working trees.
+   */
+  managed?: boolean;
   [key: string]: unknown;
 }
 
@@ -193,8 +200,15 @@ export function validateEntry(value: unknown, entryIndex: number): RegistryEntry
     entry.inboxHandle = rawHandle;
   }
 
+  if (value['managed'] !== undefined) {
+    if (typeof value['managed'] !== 'boolean') {
+      throw validationError(`Registry entry ${entryIndex} managed must be a boolean.`);
+    }
+    entry.managed = value['managed'];
+  }
+
   // Preserve unknown forward-compatible fields for round-trip fidelity.
-  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'configRemote', 'configBranch', 'inboxHandle']);
+  const knownFields = new Set(['callsign', 'path', 'origins', 'clones', 'status', 'initUri', 'stateBackend', 'stateRemote', 'stateBranch', 'configRemote', 'configBranch', 'inboxHandle', 'managed']);
   for (const [key, val] of Object.entries(value)) {
     if (!knownFields.has(key)) {
       entry[key] = val;

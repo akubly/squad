@@ -540,20 +540,21 @@ function _copyDirRecursive(src: string, dest: string): number {
 /**
  * Determine whether a `squad-…` payload name is owned by a registered callsign.
  *
- * A payload `squad-<cs>-<rest>` is owned when `<cs>` is a registered callsign AND
- * `<rest>` is not itself a re-namespaced squad payload. A `<rest>` that begins with
- * `squad-` is a stale double-prefix artifact UNLESS it names a real skill/agent base
- * (e.g. the built-in `squad-conventions`), so `squad-<cs>-squad-conventions` is owned.
+ * A payload `squad-<cs>-<rest>` is owned when `<cs>` is a registered callsign. The registered
+ * callsign prefix match wins over the stale-double-prefix heuristic (piece 55, sub-proposal F2):
+ * a host-authored skill whose base itself begins with `squad-` (e.g. `squad-state-harvest-union`,
+ * so the namespaced payload is `squad-<cs>-squad-state-harvest-union`) is correctly recognized as
+ * owned whenever `<cs>` is registered, regardless of whether `<rest>` begins with `squad-`.
+ *
+ * The double-prefix concern only matters when the leading token is NOT a registered callsign:
+ * such a payload matches no registered prefix here and is left to be flagged as an orphan.
  */
-function _isOwnedPayload(name: string, knownCallsigns: string[], knownSkillBases: string[] = []): boolean {
+function _isOwnedPayload(name: string, knownCallsigns: string[], _knownSkillBases: string[] = []): boolean {
   for (const cs of knownCallsigns) {
     const prefix = `squad-${cs}-`;
     if (name.startsWith(prefix)) {
-      const rest = name.slice(prefix.length);
-      // A `squad-` rest is a stale double-prefix artifact ONLY when it isn't a real
-      // skill/agent base (e.g. the built-in `squad-conventions`): squad-<cs>-squad-conventions
-      // is a legitimately-owned skill, not a re-namespacing orphan.
-      if (rest.startsWith('squad-') && !knownSkillBases.includes(rest)) continue;
+      // A registered-callsign prefix match is authoritative: the payload is owned even when the
+      // remainder itself begins with `squad-` (a host-authored `squad-`-based custom skill).
       return true;
     }
   }

@@ -356,6 +356,13 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
       const originsA = new Set((a.origins ?? []).map(normalizeRemoteUrl));
       for (const origin of b.origins ?? []) {
         if (originsA.has(normalizeRemoteUrl(origin))) {
+          // Piece 55 §I1 — suppress origin overlap between two callsign-distinguished managed
+          // entries of one host: distinct callsigns and distinct state/config branches make
+          // resolution unambiguous by callsign, so the shared state remote is expected, not a fault.
+          if (_isCallsignDistinguishedManagedPair(a, b)) {
+            reportedOriginPairs.add(pairKey);
+            break;
+          }
           reportedOriginPairs.add(pairKey);
           findings.push(
             `Warning: origin overlap between "${labelA}" and "${labelB}". ` +
@@ -392,6 +399,24 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
 // ============================================================
 // Internal helpers
 // ============================================================
+
+/**
+ * Piece 55 §I1 — two managed entries of the same host are "callsign-distinguished" when both are
+ * managed, carry distinct non-empty callsigns, and resolve to distinct state/config branches. Origin
+ * resolution between them is unambiguous by callsign, so a shared state remote is expected — not a
+ * fault worth warning about.
+ */
+function _isCallsignDistinguishedManagedPair(a: RegistryEntry, b: RegistryEntry): boolean {
+  if (a.managed !== true || b.managed !== true) return false;
+  if (!a.callsign || !b.callsign || a.callsign === b.callsign) return false;
+  const stateA = a.stateBranch ?? '';
+  const stateB = b.stateBranch ?? '';
+  const configA = a.configBranch ?? '';
+  const configB = b.configBranch ?? '';
+  const stateDistinct = stateA !== stateB;
+  const configDistinct = configA !== configB || (configA === '' && configB === '');
+  return stateDistinct && configDistinct;
+}
 
 /**
  * Source skill/agent base-name catalog, derived from the bundled template

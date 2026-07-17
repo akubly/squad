@@ -997,6 +997,7 @@ async function hydrateTeamRootFromRef(
   remote: string,
   branch: string,
   sentinelName: string,
+  pruneLane?: (rel: string) => boolean,
 ): Promise<void> {
   // Step 1: Fetch the branch into a remote-tracking ref
   try {
@@ -1061,6 +1062,20 @@ async function hydrateTeamRootFromRef(
     fs.mkdirSync(path.join(teamRoot, '.squad'), { recursive: true });
     fs.writeFileSync(sentinelPath, fetchedSha + '\n', 'utf-8');
   } catch { /* best-effort — do not abort a successful hydration */ }
+
+  // Piece 55 §B/§C fix: managed hosts are CLEAN-OVERWRITE hydrate targets. When a lane predicate is
+  // supplied (managed durable lane only), remove lane-allowlisted files that are absent from the
+  // fetched tree so a durable file deleted upstream does not linger locally. Non-managed consumers
+  // pass no predicate and keep the additive behavior (the ephemeral lane is NEVER pruned — that
+  // would delete un-pushed local coordinator work).
+  if (pruneLane) {
+    const fetchedSet = new Set(fileList.map(f => f.replace(/\\/g, '/')));
+    for (const rel of enumerateSquadFiles(teamRoot)) {
+      if (!pruneLane(rel)) continue;
+      if (fetchedSet.has(rel)) continue;
+      try { fs.unlinkSync(path.join(teamRoot, rel.replace(/\//g, path.sep))); } catch { /* best-effort */ }
+    }
+  }
 }
 
 /**
@@ -1072,6 +1087,7 @@ export async function hydrateTeamRootFromStateRef(
   remote: string,
   stateBranch: string,
 ): Promise<void> {
+  // Ephemeral lane is always additive — never prune (would drop un-pushed local coordinator state).
   await hydrateTeamRootFromRef(teamRoot, remote, stateBranch, '.last-hydrate-sha');
 }
 
@@ -1087,8 +1103,14 @@ export async function hydrateTeamRootFromConfigRef(
   teamRoot: string,
   remote: string,
   configBranch: string,
+  managed?: boolean,
 ): Promise<void> {
-  await hydrateTeamRootFromRef(teamRoot, remote, configBranch, '.last-config-hydrate-sha');
+  // §55 fix: for managed hosts the durable constitution is an exact mirror of the config lane, so
+  // pass the durable predicate to clean-overwrite (prune) files removed upstream.
+  await hydrateTeamRootFromRef(
+    teamRoot, remote, configBranch, '.last-config-hydrate-sha',
+    managed ? isConfigAllowlisted : undefined,
+  );
 }
 
 // ─── End piece 32.5 ──────────────────────────────────────────────────────────
@@ -1340,6 +1362,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
     let configBranch: string | undefined;
     let backend: string | null = null;
     let configJsonPresent = false;
+    // §55 fix: track whether the resolved registry entry is a managed host so the durable-config
+    // pull can clean-overwrite (prune) its mirror.
+    let managedEntry = false;
 
     if (process.env['SQUAD_TEAM_ROOT']) {
       // Explicit env override: the env value wins for the team-root PATH. Sub-proposal D1:
@@ -1362,6 +1387,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
           registryCallsign = entry.callsign;
           configRemote = entry.configRemote;
           configBranch = entry.configBranch;
+          managedEntry = entry.managed === true;
           const entryBackend = entry.stateBackend;
           if (entryBackend && entryBackend !== 'orphan') {
             console.warn(
@@ -1386,6 +1412,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
         registryCallsign = entry.callsign;
         configRemote = entry.configRemote;
         configBranch = entry.configBranch;
+        managedEntry = entry.managed === true;
         // O: Read entry.stateBackend, default to and enforce 'orphan'.
         // Warn (non-fatal) when an explicit non-orphan value is overridden.
         const entryBackend = entry.stateBackend;
@@ -1553,6 +1580,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
               teamRoot!,
               effectiveConfigRemote,
               effectiveConfigBranch,
+              managedEntry,
             );
           } catch (err: unknown) {
             // A missing config branch on the remote (never seeded) must not fail the state pull.

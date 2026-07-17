@@ -14,11 +14,13 @@ import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
 import { TEMPLATE_MANIFEST, getTemplatesDir } from './templates.js';
+import { isConfigAllowlisted, isAllowlisted } from '../commands/sync.js';
 import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from './squad-file-conventions.js';
 import { installCoordinatorAgent } from '../../commands/assign.js';
+import { getGitRoot } from '../../lib/git-root.js';
 
 const storage = new FSStorageProvider();
 
@@ -45,6 +47,31 @@ export interface UpgradeOptions {
   insider?: boolean;
   /** Install or refresh the per-repo Copilot payload (test seam). */
   copilotPayloadInstaller?: typeof installCopilotPayload;
+  /**
+   * Piece 55 §F/D — managed cold-start upgrade: do NOT overwrite any HYDRATED team-root
+   * file with bundled template defaults. On a managed consumer host the team root is owned
+   * by the shared squad and hydrated from its orphan lanes — BOTH the durable constitution
+   * (`squad/config/<callsign>`: team.md, roster.md, charter.md, …) AND the ephemeral
+   * coordinator memory (`squad/state/<callsign>`: history.md, orchestration-log.md,
+   * casting-history.json, casting-registry.json). An upgrade that clobbered either lane would
+   * silently revert the host to generic scaffolds and — because the hydrate sentinel then
+   * matches the upstream SHA — would NOT self-heal until the upstream branch next advanced.
+   * Genuine machine-local scratch scaffolds (raw-agent-output.md, run-output.md — in neither
+   * lane) are still refreshed by the upgrade.
+   */
+  preserveHydratedTeamRoot?: boolean;
+}
+
+/**
+ * Piece 55 §D/§F — is this upgrade manifest destination a HYDRATED team-root file, i.e. one
+ * the shared squad owns and the managed cold-start hydrates from its orphan lanes? Covers both
+ * the durable (CONFIG_ALLOWLIST) and the ephemeral (PUBLISH_ALLOWLIST) lanes. Manifest
+ * destinations are `.squad`-relative (`charter.md`) or repo-relative (`../.github/...`);
+ * normalize against `.squad/` so only team-root files match and repo-relative tooling does not.
+ */
+function _isHydratedTeamRootDestination(destination: string): boolean {
+  const rel = path.posix.normalize(path.posix.join('.squad', destination.replace(/\\/g, '/')));
+  return isConfigAllowlisted(rel) || isAllowlisted(rel);
 }
 
 export interface UpdateInfo {
@@ -581,7 +608,10 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     fatal('No squad found — run init first.');
   }
   
-  const agentDest = path.join(dest, '.github', 'agents', 'squad.agent.md');
+  // §F1 (piece 55): the repo agent lands at the git root of `dest` — the same base `doctor` checks
+  // (getGitRoot(cwd) ?? cwd) and where git hooks install — so a subfolder host is not a false negative.
+  const repoRoot = getGitRoot(dest) ?? dest;
+  const agentDest = path.join(repoRoot, '.github', 'agents', 'squad.agent.md');
   const oldVersion = readInstalledVersion(agentDest) ?? '0.0.0';
   
   // Check if already current
@@ -662,6 +692,8 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   const filesToUpgrade = TEMPLATE_MANIFEST.filter(f => f.overwriteOnUpgrade && f.source !== 'squad.agent.md.template');
   
   for (const file of filesToUpgrade) {
+    // §D/§F: on a managed host, never clobber a hydrated team-root file (durable OR ephemeral).
+    if (options.preserveHydratedTeamRoot && _isHydratedTeamRootDestination(file.destination)) continue;
     const srcPath = path.join(templatesDir, file.source);
     const destPath = path.join(squadDirInfo.path, file.destination);
     

@@ -322,4 +322,22 @@ describe('registerEntry() backward-compatibility alias', () => {
     expect(r1).toEqual(r2);
     expect(warnings1).toEqual(warnings2);
   });
+
+  it('P55.M1 accepts and round-trips a managed:true entry', () => {
+    const entry = { path: squadPath(dir), callsign: 'probe', managed: true };
+    const parsed = parseRegistry(JSON.stringify({ version: 1, squads: [entry] }));
+    expect(parsed.squads[0]!.managed).toBe(true);
+  });
+
+  it('P55.M2 rejects a non-boolean managed field', () => {
+    expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [{ path: squadPath(dir), managed: 'yes' }] }))).toThrow(SquadError);
+    expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [{ path: squadPath(dir), managed: 'yes' }] }))).toThrow(/managed/i);
+  });
+
+  it('P55.M3 managed survives writeRegistry → loadRegistryFromDisk', () => {
+    const registryPath = path.join(dir, 'registry.json');
+    writeRegistry(registryPath, { version: 1, squads: [{ path: squadPath(dir), callsign: 'probe', managed: true }] });
+    const { registry } = loadRegistryFromDisk({ registryPath });
+    expect(registry.squads[0]!.managed).toBe(true);
+  });
 });
