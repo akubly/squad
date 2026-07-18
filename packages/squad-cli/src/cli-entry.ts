@@ -394,6 +394,7 @@ async function main(): Promise<void> {
       console.log(`  --skills-from <sel>          Skill source: host, none, or local path`);
       console.log(`  --callsign <name>            Cold-start: callsign to register the cloned squad under`);
       console.log(`  --allow-origin-collision     Record the assignment despite remotes matching other squads' origins`);
+      console.log(`  --no-bind                    Managed cold-start: stand up the host only; do not bind the current clone`);
       console.log(`  --yes                        Auto-apply git-rm-cached + .gitignore entries\n`);
       return;
     }
@@ -1362,7 +1363,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'assign') {
     const { parseAssignArgs } = await import('./commands/assign-args.js');
-    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, configRemote, configBranch, yes, allowOriginCollision } = parseAssignArgs(args.slice(1));
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, configRemote, configBranch, yes, allowOriginCollision, noBind } = parseAssignArgs(args.slice(1));
     const { runAssign } = await import('./commands/assign.js');
     try {
       const result = await runAssign({
@@ -1379,6 +1380,7 @@ async function main(): Promise<void> {
         configBranch,
         yes,
         allowOriginCollision,
+        noBind,
         cwd: getSquadStartDir(),
       });
       // Emit warnings only on result kinds that carry them.

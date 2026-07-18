@@ -942,7 +942,7 @@ describe('runDoctor: host-repo diagnostics (piece 48 C)', () => {
    */
   function makeHostAndClone(
     tag: string,
-    parts: { squad?: boolean; foldYaml?: 'github' | 'ado' | 'empty' | 'none'; agent?: boolean },
+    parts: { squad?: boolean; foldYaml?: 'github' | 'ado' | 'empty' | 'none'; agent?: boolean; managed?: boolean },
   ): string {
     const hostRepoRoot = makeDir(`host-${tag}`);
     if (parts.squad !== false) {
@@ -972,6 +972,7 @@ describe('runDoctor: host-repo diagnostics (piece 48 C)', () => {
       origins: [],
       clones: [cloneDir],
       status: 'active',
+      ...(parts.managed ? { managed: true } : {}),
     }]);
     return hostRepoRoot;
   }
@@ -1040,8 +1041,130 @@ describe('runDoctor: host-repo diagnostics (piece 48 C)', () => {
 });
 
 // ============================================================
-// Piece 50 §E2 — suppress the local .squad/ advisory for a registered team root
+// Piece 56 D/E: managed (checkout-free) host-repo diagnostics
 // ============================================================
+
+describe('runDoctor: managed host-repo diagnostics (piece 56 D/E)', () => {
+  let registryPath: string;
+  let copilotHome: string;
+  let cloneDir: string;
+
+  /**
+   * A managed host is a CLI-owned `--no-checkout` blobless clone: it has NO working
+   * tree on `main`, so its `.squad/`, coordinator agent, and fold-pipeline files are
+   * legitimately absent on disk. `makeManagedHostAndClone` therefore creates NO local
+   * host files — only the registry entry with `managed: true` and a product clone bound
+   * to it. Fold-pipeline presence is supplied through the `managedHostFoldPipelineFn`
+   * seam (the real probe reads the remote default-branch tree — covered by the
+   * doctor-managed-probe real-git test).
+   */
+  function makeManagedHostAndClone(tag: string): string {
+    const hostRepoRoot = makeDir(`mhost-${tag}`);
+    writeRegistry(registryPath, [{
+      callsign: 'teamx',
+      path: path.join(hostRepoRoot, '.squad'),
+      origins: [],
+      clones: [cloneDir],
+      status: 'active',
+      managed: true,
+      stateRemote: 'https://example.invalid/squad.git',
+      stateBranch: 'squad/state/teamx',
+    }]);
+    return hostRepoRoot;
+  }
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    copilotHome = makeDir('mc-copilot-home');
+    cloneDir = makeDir('managed-product-clone');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  it('D1 managed host with a fold pipeline on the remote yields no missing-fold finding', async () => {
+    makeManagedHostAndClone('foldok');
+    const result = await runDoctor({
+      cwd: cloneDir,
+      registryPath,
+      env: {},
+      copilotHome,
+      managedHostFoldPipelineFn: () => true,
+    });
+    const finding = result.findings.find(f => /fold-pipeline workflow/i.test(f));
+    expect(finding).toBeUndefined();
+  });
+
+  it('D2 managed host with NO fold pipeline on the remote yields the missing-fold warn finding', async () => {
+    makeManagedHostAndClone('nofold');
+    const result = await runDoctor({
+      cwd: cloneDir,
+      registryPath,
+      env: {},
+      copilotHome,
+      managedHostFoldPipelineFn: () => false,
+    });
+    const finding = result.findings.find(f => /fold-pipeline workflow/i.test(f) && /silently disabled/i.test(f));
+    expect(finding).toBeDefined();
+    expect(result.severity).toBe('warn');
+  });
+
+  it('D3 the fold-pipeline check for a managed host is routed through the remote probe, never the local tree', async () => {
+    // The managed host has no local .github/workflows or .azuredevops on disk; a
+    // local-tree check would report the pipeline missing. Routing through the seam
+    // (returning true) proves the local tree is not consulted for managed hosts.
+    const hostRepoRoot = makeManagedHostAndClone('routed');
+    expect(fs.existsSync(path.join(hostRepoRoot, '.github', 'workflows'))).toBe(false);
+    let probedRoot: string | undefined;
+    const result = await runDoctor({
+      cwd: cloneDir,
+      registryPath,
+      env: {},
+      copilotHome,
+      managedHostFoldPipelineFn: (root: string) => { probedRoot = root; return true; },
+    });
+    expect(probedRoot).toBe(hostRepoRoot);
+    expect(result.findings.find(f => /fold-pipeline workflow/i.test(f))).toBeUndefined();
+  });
+
+  it('E1 doctor from a product clone of a managed host emits zero errors and zero false warnings', async () => {
+    // The managed host has no working tree: no local .squad/, no coordinator agent, no
+    // local fold workflow. None of these must surface as a host-repo warning (piece 56 E).
+    makeManagedHostAndClone('clean');
+    const result = await runDoctor({
+      cwd: cloneDir,
+      registryPath,
+      env: {},
+      copilotHome,
+      managedHostFoldPipelineFn: () => true,
+    });
+    const hostFinding = result.findings.find(f => /Host repo issue/i.test(f));
+    expect(hostFinding).toBeUndefined();
+    expect(result.severity).toBe('info');
+  });
+
+  it('E2 managed-host suppression does not silence a genuine missing-fold gap (only local false positives)', async () => {
+    // Suppression is scoped to the working-tree-only checks. A truly absent remote fold
+    // pipeline is still reported so a real onboarding gap is not hidden.
+    makeManagedHostAndClone('gap');
+    const result = await runDoctor({
+      cwd: cloneDir,
+      registryPath,
+      env: {},
+      copilotHome,
+      managedHostFoldPipelineFn: () => false,
+    });
+    // The two working-tree false positives (.squad missing, coordinator agent missing)
+    // are suppressed…
+    expect(result.findings.find(f => /no \.squad\/ directory/i.test(f))).toBeUndefined();
+    expect(result.findings.find(f => /coordinator agent/i.test(f))).toBeUndefined();
+    // …but the genuine fold gap is not.
+    expect(result.findings.find(f => /fold-pipeline workflow/i.test(f))).toBeDefined();
+  });
+});
+
 
 describe('runDoctor: P50.E2 local .squad/ advisory suppression', () => {
   let registryPath: string;

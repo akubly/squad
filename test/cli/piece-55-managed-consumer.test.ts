@@ -146,7 +146,7 @@ describe('piece 55 — B/C/D: managed cold-start hydrate + wire', { timeout: 60_
       inboxHandle: 'dev1',
       home,
       registryPath,
-      cwd: makeTmpDir('c1-cwd'),
+      cwd: makeTmpDir('c1-cwd'), noBind: true,
       _runUpgradeFn: runUpgradeFn,
       _installCrossRepoHookFn: installCrossRepoHookFn,
     });
@@ -192,7 +192,7 @@ describe('piece 55 — B/C/D: managed cold-start hydrate + wire', { timeout: 60_
     const registryPath = path.join(home, '.squad', 'registry.json');
     const common = {
       callsign: 'probe', stateRemote: bare, stateBranch: 'squad/state/probe',
-      skillsFrom: 'host' as const, home, registryPath,
+      skillsFrom: 'host' as const, home, registryPath, noBind: true,
       _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
     };
     await runAssign({ ...common, cwd: makeTmpDir('c2-cwd1') });
@@ -217,7 +217,7 @@ describe('piece 55 — B/C/D: managed cold-start hydrate + wire', { timeout: 60_
       await runAssign({
         callsign: 'probe', stateRemote: bare, stateBranch: 'squad/state/probe',
         skillsFrom: 'host', home, registryPath: path.join(home, '.squad', 'registry.json'),
-        cwd: makeTmpDir('c3-cwd'),
+        cwd: makeTmpDir('c3-cwd'), noBind: true,
         _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
       });
     } catch (e) { err = e; }
@@ -250,7 +250,7 @@ describe('piece 55 — adversarial-review fixes', { timeout: 90_000 }, () => {
     const registryPath = path.join(home, '.squad', 'registry.json');
     await runAssign({
       callsign: 'probe', stateRemote: bare, stateBranch: 'squad/state/probe',
-      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix1-cwd'),
+      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix1-cwd'), noBind: true,
       _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
     });
 
@@ -292,7 +292,7 @@ describe('piece 55 — adversarial-review fixes', { timeout: 90_000 }, () => {
     // with the bundled default. The preserveHydratedTeamRoot fix must keep the hydrated content.
     const result = await runAssign({
       callsign: 'probe', stateRemote: bare, stateBranch: 'squad/state/probe',
-      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix2-cwd'),
+      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix2-cwd'), noBind: true,
       _installCrossRepoHookFn: vi.fn(() => {}),
     });
     expect(result.kind).toBe('assigned');
@@ -324,7 +324,7 @@ describe('piece 55 — adversarial-review fixes', { timeout: 90_000 }, () => {
     const registryPath = path.join(home, '.squad', 'registry.json');
     const result = await runAssign({
       callsign: 'probe', stateRemote: bare, stateBranch: 'squad/state/probe',
-      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix2b-cwd'),
+      skillsFrom: 'host', home, registryPath, cwd: makeTmpDir('fix2b-cwd'), noBind: true,
       _installCrossRepoHookFn: vi.fn(() => {}),
     });
     expect(result.kind).toBe('assigned');
@@ -395,7 +395,7 @@ describe('piece 55 — adversarial-review fixes', { timeout: 90_000 }, () => {
     const registryPath = path.join(home, '.squad', 'registry.json');
     const common = {
       callsign: 'probe', stateBranch: 'squad/state/probe', skillsFrom: 'host' as const,
-      home, registryPath, _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
+      home, registryPath, noBind: true, _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
     };
     await runAssign({ ...common, stateRemote: bare1, cwd: makeTmpDir('fix5-cwd1') });
     const managedProjectDir = path.join(home, '.squad', 'hosts', 'probe');

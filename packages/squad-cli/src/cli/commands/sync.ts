@@ -983,6 +983,19 @@ export async function seedConfigOrphan(
 }
 
 /**
+ * @internal Injectable git-exec seam for the hydrate path (piece 56 §B). Every git
+ * invocation inside hydrateTeamRootFromRef routes through this object so tests can count
+ * network-touching calls (`fetch`) versus local reads (`ls-tree` / `cat-file`) and mechanically
+ * assert that the bulk-fetch design keeps network cost O(1) per lane, independent of file count.
+ * Defaults to a thin execFileSync('git', …) wrapper.
+ */
+export const _hydrateGit = {
+  exec(args: string[], options: Record<string, unknown>): string | Buffer {
+    return execFileSync('git', args, options as Parameters<typeof execFileSync>[2]);
+  },
+};
+
+/**
  * Hydrate TEAM_ROOT working directory from a branch ref on `remote`.
  *
  * Fetches the branch, then writes its tree files into TEAM_ROOT without altering HEAD.
@@ -1001,8 +1014,7 @@ async function hydrateTeamRootFromRef(
 ): Promise<void> {
   // Step 1: Fetch the branch into a remote-tracking ref
   try {
-    execFileSync('git', [
-      'fetch', remote,
+    _hydrateGit.exec(['fetch', remote,
       `refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
     ], { cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (err: unknown) {
@@ -1013,9 +1025,9 @@ async function hydrateTeamRootFromRef(
   }
 
   // Step 2: Resolve fetched SHA
-  const fetchedSha = execFileSync('git', ['rev-parse', `refs/remotes/${remote}/${branch}`], {
+  const fetchedSha = (_hydrateGit.exec(['rev-parse', `refs/remotes/${remote}/${branch}`], {
     cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
+  }) as string).trim();
 
   // Step 3: Idempotency — skip if we already applied this exact snapshot.
   // HEAD cannot be used as a sentinel because teamRoot is a product repo whose HEAD
@@ -1028,6 +1040,34 @@ async function hydrateTeamRootFromRef(
   } catch { /* sentinel absent — proceed */ }
 
   if (lastAppliedSha === fetchedSha) return;
+
+  // §B (piece 56 — bulk managed hydrate). On a managed `--filter=blob:none` clone the write-out
+  // loop below would otherwise lazily promisor-fetch every file individually — O(files) network
+  // round trips, minutes on a real squad. Fetch the resolved tip ONCE without the blob filter so
+  // every reachable blob lands in a single pack; the cat-file loop then reads local objects only.
+  //   - Gated to partial clones (`remote.<remote>.promisor === true`): a full clone already has
+  //     every blob from Step 1, so non-managed `--pull` stays byte-identical (no extra network).
+  //   - Placed AFTER the sentinel fast-path so an unchanged-tip re-pull never re-issues the bulk
+  //     fetch (network cost stays O(1) per lane, independent of file count).
+  let isPartialClone = false;
+  try {
+    const promisor = (_hydrateGit.exec(['config', '--get', `remote.${remote}.promisor`], {
+      cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }) as string).trim();
+    isPartialClone = promisor === 'true';
+  } catch { /* no promisor config → full clone, blobs already present */ }
+  if (isPartialClone) {
+    try {
+      _hydrateGit.exec(['fetch', '--no-filter', remote,
+        `refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+      ], { cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? ((err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? err.message) : String(err);
+      throw new Error(
+        `hydrateTeamRootFromRef: failed to bulk-fetch blobs for "${branch}" from "${remote}": ${msg}`,
+      );
+    }
+  }
 
   // Step 4: Write branch tree files into TEAM_ROOT (does not alter HEAD).
   // Uses ls-tree + cat-file blob to enumerate and write files directly — avoids
@@ -1042,13 +1082,13 @@ async function hydrateTeamRootFromRef(
   delete isolatedEnv['GIT_WORK_TREE'];
   delete isolatedEnv['GIT_INDEX_FILE'];
 
-  const fileList = execFileSync('git', [
+  const fileList = (_hydrateGit.exec([
     '--git-dir', normalizedGitDir,
     'ls-tree', '-r', '--name-only', `refs/remotes/${remote}/${branch}`,
-  ], { encoding: 'utf-8', env: isolatedEnv, stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n').filter(Boolean);
+  ], { encoding: 'utf-8', env: isolatedEnv, stdio: ['pipe', 'pipe', 'pipe'] }) as string).trim().split('\n').filter(Boolean);
 
   for (const filePath of fileList) {
-    const content = execFileSync('git', [
+    const content = _hydrateGit.exec([
       '--git-dir', normalizedGitDir,
       'cat-file', 'blob', `refs/remotes/${remote}/${branch}:${filePath}`,
     ], { encoding: null, env: isolatedEnv, stdio: ['pipe', 'pipe', 'pipe'] }) as Buffer;
@@ -1196,12 +1236,47 @@ export function detectUnpromotedDurableChanges(teamRoot: string): string[] {
  * Write the publish timestamp to .squad/.last-publish in the given root.
  * Called on successful push (cross-repo and single-repo paths). Best-effort.
  */
-function writeLastPublish(root: string): void {
+export function writeLastPublish(root: string): void {
   try {
     const squadDir = path.join(root, '.squad');
     fs.mkdirSync(squadDir, { recursive: true });
     fs.writeFileSync(path.join(squadDir, '.last-publish'), new Date().toISOString() + '\n', 'utf-8');
   } catch { /* best-effort — do not abort a successful sync */ }
+}
+
+/**
+ * §C (piece 56 — honest post-hydrate publish baseline). Narrow a dry-run "pending"
+ * preview to files genuinely modified since the recorded publish baseline.
+ *
+ * When `.squad/.last-publish` is absent (the vast majority of clones, and every fixture
+ * predating this baseline), the input list is returned unchanged so existing pending
+ * semantics are preserved. When present, only files whose mtime is strictly newer than
+ * the recorded timestamp are pending — matching runSyncStatus's counting. The
+ * `.last-publish` marker itself is never pending. Unreadable files are treated as pending
+ * (fail-safe: never hide a possibly-changed file).
+ *
+ * @param root Directory containing `.squad` (the same root writeLastPublish stamps).
+ * @param files `.squad/…`-prefixed paths, as returned by enumerateSquadFiles.
+ */
+function filterPendingByLastPublish(root: string, files: string[]): string[] {
+  let lastPublished: string;
+  try {
+    lastPublished = fs.readFileSync(path.join(root, '.squad', '.last-publish'), 'utf-8').trim();
+  } catch {
+    return files;
+  }
+  if (!lastPublished || lastPublished === 'never') return files;
+  const lastTime = new Date(lastPublished).getTime();
+  if (Number.isNaN(lastTime)) return files;
+  return files.filter(f => {
+    if (f.endsWith('/.last-publish') || f === '.squad/.last-publish') return false;
+    const fullPath = path.join(root, f.replace(/\//g, path.sep));
+    try {
+      return fs.statSync(fullPath).mtimeMs > lastTime;
+    } catch {
+      return true;
+    }
+  });
 }
 
 /**
@@ -1516,6 +1591,9 @@ export async function runSync(options: SyncOptions): Promise<void> {
     // Must run before handle guard so developers can preview without a configured handle.
     if (options.dryRun) {
       const allFiles = teamRoot ? enumerateSquadFiles(teamRoot) : enumerateSquadFiles(repoRoot);
+      // §C (piece 56): honor the recorded publish baseline so a freshly hydrated managed
+      // host previews 0 pending instead of the whole squad. No-op when .last-publish absent.
+      const pendingRoot = teamRoot ?? repoRoot;
       const effectiveAlias = resolvedAlias ?? '(handle required)';
       const callsignPrefix = registryCallsign ? `${registryCallsign}/` : '';
       console.log(`squad sync --dry-run`);
@@ -1526,7 +1604,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
       // ephemeral lane. `--push --dry-run` (below) is unchanged.
       if (wantConfigPush) {
         const laneCfg = resolvePublishLane('config');
-        const configFiles = allFiles.filter(laneCfg.filter);
+        const configFiles = filterPendingByLastPublish(pendingRoot, allFiles.filter(laneCfg.filter));
         console.log(`  Target inbox branch: ${laneCfg.inboxPrefix}/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
         console.log(`  Would publish to remote: ${crossRepo ? effectiveConfigRemote : effectiveStateRemote}`);
         console.log(`  Pending durable files (${configFiles.length} of ${allFiles.length} total, after CONFIG_ALLOWLIST filter):`);
@@ -1539,7 +1617,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
       // made the durable lane the sole action (pushConfigOnly ⇒ isPush/isPull are false).
       if (isPush || isPull) {
         const laneCfg = resolvePublishLane('state');
-        const files = allFiles.filter(laneCfg.filter);
+        const files = filterPendingByLastPublish(pendingRoot, allFiles.filter(laneCfg.filter));
         if (isPush) {
           console.log(`  Target inbox branch: ${laneCfg.inboxPrefix}/${callsignPrefix}${effectiveAlias}/<timestamp>-<sessionId>`);
           console.log(`  Would publish to remote: ${effectiveStateRemote}`);

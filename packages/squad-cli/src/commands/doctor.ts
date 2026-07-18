@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { clonesMatch, isValidCallsign, normalisedPathKey, normalizeRemoteUrl, resolveSquad } from '@bradygaster/squad-sdk';
 import { loadRegistryFromDisk, validateEntry, writeRegistry } from '@bradygaster/squad-sdk/registry';
 import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
@@ -30,6 +31,13 @@ export interface RunDoctorOpts {
   env?: Record<string, string>;
   /** Override user-scoped Copilot home for orphan detection (test seam). */
   copilotHome?: string;
+  /**
+   * Piece 56 D — test seam for the managed-host fold-pipeline check. A managed host is a
+   * `--no-checkout` clone with no working tree, so the pipeline is validated against the
+   * remote default-branch tree (see `_probeManagedHostFoldPipeline`) rather than local
+   * files. Tests inject a deterministic result here instead of driving real git.
+   */
+  managedHostFoldPipelineFn?: (hostRepoRoot: string) => boolean;
 }
 
 export interface RunDoctorResult {
@@ -244,11 +252,18 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     const cloneEntry = cwdCloneMatches[0]!;
     const hostSquadDir = cloneEntry.path;
     const hostRepoRoot = path.dirname(hostSquadDir);
+    // Piece 56 E — a managed host (piece 55) is a CLI-owned `--no-checkout` blobless
+    // clone. It has no working tree on `main`, so its `.squad/`, coordinator agent, and
+    // fold-pipeline files are legitimately absent on disk. Validating those working-tree
+    // artefacts locally would raise false positives when doctor is run from a bound
+    // product clone of such a host. For managed hosts we suppress the two working-tree-
+    // only checks and validate the fold pipeline against the remote instead (piece 56 D).
+    const hostIsManaged = cloneEntry.managed === true;
     if (normalisedPathKey(hostRepoRoot) !== cwdNormalised) {
       try {
         const label = cloneEntry.callsign ?? cloneEntry.path;
 
-        if (!fs.existsSync(hostSquadDir)) {
+        if (!hostIsManaged && !fs.existsSync(hostSquadDir)) {
           findings.push(
             `Host repo issue: the host for "${label}" at ${hostRepoRoot} has no .squad/ directory ` +
             `(expected at ${hostSquadDir}). Run "squad init" in the host repo to recreate it.`,
@@ -256,7 +271,10 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
           escalate('warn');
         }
 
-        if (!_hostHasFoldPipeline(hostRepoRoot)) {
+        const hasFoldPipeline = hostIsManaged
+          ? (opts.managedHostFoldPipelineFn ?? _probeManagedHostFoldPipeline)(hostRepoRoot)
+          : _hostHasFoldPipeline(hostRepoRoot);
+        if (!hasFoldPipeline) {
           findings.push(
             `Host repo issue: the host for "${label}" at ${hostRepoRoot} has no fold-pipeline workflow ` +
             `(no .azuredevops/fold-squad-state*.yml and no .github/workflows/fold-squad-state*.yml). ` +
@@ -265,13 +283,15 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
           escalate('warn');
         }
 
-        const coordinatorAgent = path.join(hostRepoRoot, '.github', 'agents', 'squad.agent.md');
-        if (!fs.existsSync(coordinatorAgent)) {
-          findings.push(
-            `Host repo issue: the host for "${label}" at ${hostRepoRoot} is missing the in-repo ` +
-            `coordinator agent (.github/agents/squad.agent.md). Run "squad upgrade" in the host repo to restore it.`,
-          );
-          escalate('warn');
+        if (!hostIsManaged) {
+          const coordinatorAgent = path.join(hostRepoRoot, '.github', 'agents', 'squad.agent.md');
+          if (!fs.existsSync(coordinatorAgent)) {
+            findings.push(
+              `Host repo issue: the host for "${label}" at ${hostRepoRoot} is missing the in-repo ` +
+              `coordinator agent (.github/agents/squad.agent.md). Run "squad upgrade" in the host repo to restore it.`,
+            );
+            escalate('warn');
+          }
         }
       } catch {
         // Host inspection is best-effort; never let it make the doctor throw.
@@ -279,8 +299,12 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     }
   }
 
-  // Stale path check across all entries
+  // Stale path check across all entries. Managed hosts are CLI-owned `--no-checkout`
+  // clones whose team-root path is tool-owned and may legitimately have no on-disk
+  // working tree — doctor never flags a managed path as a missing working tree (piece
+  // 56 E; see RegistryEntry.managed).
   for (const entry of entries) {
+    if (entry.managed === true) continue;
     if (!fs.existsSync(entry.path)) {
       findings.push(
         `Stale entry: "${entry.callsign ?? entry.path}" — registered path does not exist on disk.`,
@@ -457,6 +481,51 @@ function _hostHasFoldPipeline(hostRepoRoot: string): boolean {
       } catch {
         // ignore unreadable entries
       }
+    }
+  }
+  return false;
+}
+
+/**
+ * Piece 56 D — whether a MANAGED host carries a non-empty fold-pipeline workflow.
+ *
+ * A managed host is a `--filter=blob:none --no-checkout` clone with no working tree, so
+ * the local filesystem cannot be inspected. Instead the remote default-branch tree is
+ * read directly (`git ls-tree -r origin/HEAD`) and a `fold-squad-state*.yml` blob under
+ * `.github/workflows/` or `.azuredevops/` is looked for. Trees are present in a blobless
+ * clone, so a presence check needs no blob fetch and works offline. (We deliberately do
+ * NOT pass `-l`: reading a blob's size on a blobless clone would trigger a promisor blob
+ * fetch — network cost per workflow file, and an outright failure offline — so emptiness
+ * is not checked; a workflow file's presence in the tree is a sufficient signal.)
+ *
+ * Fail-open: any inconclusive probe (unresolvable remote, git error) returns `true` so a
+ * genuinely-configured host is never falsely flagged as missing its pipeline. A definitive
+ * empty result returns `false` so a real onboarding gap is still surfaced.
+ */
+export function _probeManagedHostFoldPipeline(hostRepoRoot: string): boolean {
+  const gitDir = path.join(hostRepoRoot, '.git');
+  let out: string;
+  try {
+    out = execFileSync(
+      'git',
+      [
+        '--git-dir', gitDir,
+        'ls-tree', '-r', 'origin/HEAD',
+        '--', '.github/workflows', '.azuredevops',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+  } catch {
+    // Inconclusive — do not manufacture a false "pipeline missing" warning.
+    return true;
+  }
+  for (const line of out.split('\n')) {
+    // "<mode> blob <sha>\t<path>" — no `-l`, so no size field (and no blob fetch).
+    const m = /^\S+\s+blob\s+\S+\t(.+)$/.exec(line);
+    if (!m) continue;
+    const filePath = m[1]!;
+    if (/(^|\/)fold-squad-state[^/]*\.yml$/.test(filePath)) {
+      return true;
     }
   }
   return false;

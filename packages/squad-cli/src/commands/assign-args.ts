@@ -21,6 +21,7 @@ export interface AssignCliArgs {
   configBranch: string | undefined;
   yes: boolean;
   allowOriginCollision: boolean;
+  noBind: boolean;
 }
 
 const NAMED_FLAGS = [
@@ -79,6 +80,7 @@ export function parseAssignArgs(args: string[]): AssignCliArgs {
     configBranch: argValue(args, '--config-branch'),
     yes: args.includes('--yes'),
     allowOriginCollision: args.includes('--allow-origin-collision'),
+    noBind: args.includes('--no-bind'),
   };
 }
 

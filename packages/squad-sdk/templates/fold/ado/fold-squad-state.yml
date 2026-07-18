@@ -105,16 +105,36 @@ stages:
 
                       INBOX_REFS=`git ls-remote --heads origin "refs/heads/squad/inbox/${CALLSIGN}/*" | awk '{print $2}' | tr -d '\r'`
                       SORT_LIST=()
+                      STALE_FOLDED_REFS=()
                       while IFS= read -r REF; do
                         [ -z "$REF" ] && continue
                         if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
                           echo "  Skipping $REF (already recorded in publish-history.json)"
+                          # Recorded as folded yet still present on the remote: a delete that did not
+                          # complete on a prior run. Collect it for idempotent garbage collection below.
+                          STALE_FOLDED_REFS+=("$REF")
                           continue
                         fi
                         TS=`echo "$REF" | grep -oP '\d{8}-\d{6}' || echo "00000000-000000"`
                         SESSION=`echo "$REF" | sed 's|.*/||'`
                         SORT_LIST+=("${TS}"$'\t'"${SESSION}"$'\t'"${REF}")
                       done <<< "$INBOX_REFS"
+
+                      # Garbage-collect inbox refs that publish-history.json records as folded but that
+                      # are still present on the remote — the residue of a prior delete that did not
+                      # complete. Re-delete them best-effort; because eligibility is driven entirely by
+                      # publish-history.json, only already-folded refs are ever deleted (an unfolded ref
+                      # is never in this set) and the retry is idempotent across runs. This runs before
+                      # the no-unfolded-refs early-out so orphans are collected even when there is
+                      # nothing new to fold. Gated by the same opt-in as the post-fold cleanup.
+                      if [ "$(DELETE_FOLDED_REFS)" = "true" ] && [ ${#STALE_FOLDED_REFS[@]} -gt 0 ]; then
+                        for REF in "${STALE_FOLDED_REFS[@]}"; do
+                          REF="${REF%$'\r'}"
+                          [ -z "$REF" ] && continue
+                          echo "  GC: deleting recorded-but-present Squad inbox ref: $REF"
+                          git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to GC-delete $REF — continuing."
+                        done
+                      fi
 
                       if [ ${#SORT_LIST[@]} -eq 0 ]; then
                         echo "No unfolded refs for $CALLSIGN — nothing to do."

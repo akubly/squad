@@ -125,7 +125,93 @@ describe('--dry-run', () => {
   });
 });
 
-// ─── squad sync status ────────────────────────────────────────────────────────
+// ─── piece 56 §C: dry-run honors the .last-publish baseline ─────────────────────
+
+describe('piece 56 §C — dry-run honors .last-publish baseline', () => {
+  it('P56.C1: 0 pending immediately after baseline, exactly 1 after a single edit', async () => {
+    const docsRepoDir = makeTmpDir('docs-c56');
+    const cloneDir = makeTmpDir('clone-c56');
+    const cloneRoot = initWorkingRepo(cloneDir);
+    setupSquadDir(docsRepoDir);
+    const squadDir = path.join(docsRepoDir, '.squad');
+
+    // Baseline stamped AFTER the scaffolded files → nothing pending.
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    fs.writeFileSync(path.join(squadDir, '.last-publish'), future + '\n', 'utf-8');
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign: 'alpha',
+        path: squadDir,
+        clones: [cloneRoot],
+        inboxHandle: 'dev1',
+        stateRemote: 'squad-docs',
+        stateBranch: 'squad-state',
+      }]),
+      warnings: [],
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      process.env['COPILOT_SESSION_ID'] = 'test-session-id';
+
+      // Immediately after the baseline: zero pending.
+      await runSync({ direction: 'push', dryRun: true, cwd: cloneDir });
+      let out = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(out).toMatch(/Pending files \(0 of \d+ total/);
+
+      consoleSpy.mockClear();
+
+      // One real edit whose mtime is strictly after the baseline.
+      const edited = path.join(squadDir, 'decisions.md');
+      fs.writeFileSync(edited, '# Decisions\nchanged\n');
+      const afterBaseline = new Date(Date.now() + 7_200_000);
+      fs.utimesSync(edited, afterBaseline, afterBaseline);
+
+      await runSync({ direction: 'push', dryRun: true, cwd: cloneDir });
+      out = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      expect(out).toMatch(/Pending files \(1 of \d+ total/);
+      expect(out).toContain('.squad/decisions.md');
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it('P56.C2: absent .last-publish preserves full pending list (no filtering)', async () => {
+    const docsRepoDir = makeTmpDir('docs-c56b');
+    const cloneDir = makeTmpDir('clone-c56b');
+    const cloneRoot = initWorkingRepo(cloneDir);
+    setupSquadDir(docsRepoDir);
+    const squadDir = path.join(docsRepoDir, '.squad');
+    // Deliberately do NOT write .last-publish.
+
+    vi.mocked(loadRegistryFromDisk).mockReturnValue({
+      registry: makeRegistry([{
+        callsign: 'alpha',
+        path: squadDir,
+        clones: [cloneRoot],
+        inboxHandle: 'dev1',
+        stateRemote: 'squad-docs',
+        stateBranch: 'squad-state',
+      }]),
+      warnings: [],
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      process.env['COPILOT_SESSION_ID'] = 'test-session-id';
+      await runSync({ direction: 'push', dryRun: true, cwd: cloneDir });
+      const out = consoleSpy.mock.calls.map(args => args.join(' ')).join('\n');
+      // Without a baseline, pending count equals the total allowlisted count (N of N).
+      const m = out.match(/Pending files \((\d+) of (\d+) total/);
+      expect(m).not.toBeNull();
+      expect(m![1]).toBe(m![2]);
+      expect(Number(m![1])).toBeGreaterThan(0);
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+});
 
 describe('squad sync status', () => {
   it('C2: prints all six fields', async () => {

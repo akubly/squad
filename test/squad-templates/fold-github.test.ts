@@ -205,4 +205,50 @@ describe('fold-squad-state.yml (GitHub Actions)', () => {
     expect(on).toHaveProperty('push');
     expect(on).toHaveProperty('schedule');
   });
+
+  // Piece 56 F — idempotent fold inbox-ref garbage collection.
+  // A ref that publish-history.json records as folded but that is still present on the
+  // remote is the residue of a delete that failed on a prior run. The pipeline must
+  // re-delete it (retried across runs) so orphan inbox branches never leak, while an
+  // unfolded ref must never be deleted.
+  it('collects recorded-but-present refs ONLY inside the already-recorded branch (piece 56 F)', () => {
+    // STALE_FOLDED_REFS is appended exactly once, and only inside the grep -qxF
+    // recorded-match branch — so a ref that is NOT recorded in publish-history.json
+    // can never enter the garbage-collection set.
+    expect(raw.split('STALE_FOLDED_REFS+=("$REF")').length - 1).toBe(1);
+    const grepGuardIdx = raw.indexOf("printf '%s\\n' \"$FOLDED_REFS\" | grep -qxF \"$REF\"");
+    const appendIdx = raw.indexOf('STALE_FOLDED_REFS+=("$REF")');
+    const sortListAppendIdx = raw.indexOf('SORT_LIST+=(');
+    expect(grepGuardIdx).toBeGreaterThan(-1);
+    expect(appendIdx).toBeGreaterThan(grepGuardIdx);
+    // The stale append precedes the SORT_LIST append: it lives in the skip branch that
+    // `continue`s before a ref could ever be queued for folding.
+    expect(appendIdx).toBeLessThan(sortListAppendIdx);
+  });
+
+  it('re-deletes recorded-but-present refs, gated by DELETE_FOLDED_REFS, before the no-op early-out (piece 56 F)', () => {
+    expect(raw).toContain('for REF in "${STALE_FOLDED_REFS[@]}"; do');
+    expect(raw).toContain('git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to GC-delete');
+    // GC is gated behind the same opt-in as the post-fold cleanup.
+    expect(raw).toContain('if [ "${DELETE_FOLDED_REFS:-false}" = "true" ] && [ ${#STALE_FOLDED_REFS[@]} -gt 0 ]; then');
+    const gcGuardIdx = raw.indexOf('[ ${#STALE_FOLDED_REFS[@]} -gt 0 ]');
+    const earlyOutIdx = raw.indexOf('if [ ${#SORT_LIST[@]} -eq 0 ]; then');
+    expect(gcGuardIdx).toBeGreaterThan(-1);
+    expect(earlyOutIdx).toBeGreaterThan(-1);
+    // GC runs BEFORE the "no unfolded refs" early-continue, so orphans are collected
+    // even when there is nothing new to fold.
+    expect(gcGuardIdx).toBeLessThan(earlyOutIdx);
+  });
+
+  it('never deletes an unfolded ref: the GC loop is fed only by STALE_FOLDED_REFS (piece 56 F)', () => {
+    const gcStart = raw.indexOf('for REF in "${STALE_FOLDED_REFS[@]}"; do');
+    const gcEnd = raw.indexOf('done', gcStart);
+    expect(gcStart).toBeGreaterThan(-1);
+    expect(gcEnd).toBeGreaterThan(gcStart);
+    const gcBody = raw.slice(gcStart, gcEnd);
+    expect(gcBody).toContain('git push origin --delete');
+    // The GC delete loop must never iterate the discovered or fold-queued sets.
+    expect(gcBody).not.toContain('SORTED_REFS');
+    expect(gcBody).not.toContain('INBOX_REFS');
+  });
 });

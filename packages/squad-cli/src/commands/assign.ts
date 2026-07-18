@@ -27,7 +27,7 @@ import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
-import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX, resolveStateRemote, deriveStateBranch, deriveConfigBranch, hydrateTeamRootFromStateRef, hydrateTeamRootFromConfigRef } from '../cli/commands/sync.js';
+import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX, resolveStateRemote, deriveStateBranch, deriveConfigBranch, hydrateTeamRootFromStateRef, hydrateTeamRootFromConfigRef, writeLastPublish } from '../cli/commands/sync.js';
 import { managedHostPath } from '@bradygaster/squad-sdk';
 
 export interface RunAssignOpts {
@@ -314,6 +314,9 @@ export interface SquadAssignOpts {
   /** --allow-origin-collision: warm-path opt-in to record the assignment despite the current
    *  fetch remotes also matching two or more other squads' recorded origins. */
   allowOriginCollision?: boolean;
+  /** --no-bind (piece 56 §A / decision H1): opt out of the managed cold-start auto-binding the
+   *  invoking product clone. When set, cold-start stands up the managed host only. */
+  noBind?: boolean;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -421,7 +424,7 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
       const hasStateIdentity = !!opts.stateRemote && !!opts.stateBranch;
       const warmEntry = hasStateIdentity ? _findWarmEntry(callsign, opts) : undefined;
       if (hasStateIdentity && !warmEntry) {
-        return _managedColdStart({ callsign, opts, cwd, writeRegistryFn });
+        return _managedColdStart({ callsign, opts, cwd, writeRegistryFn, gitRootFn, remotesFn });
       }
       // --callsign present but the managed identity is incomplete (or a warm entry already exists):
       // teach the one-command managed cold-start form rather than the generic missing-arg error.
@@ -1055,6 +1058,8 @@ interface _ManagedColdStartCtx {
   opts: SquadAssignOpts;
   cwd: string;
   writeRegistryFn: (filePath: string, registry: Registry) => void;
+  gitRootFn: (dir: string) => string | null;
+  remotesFn: (dir: string) => string[];
 }
 
 /**
@@ -1063,7 +1068,7 @@ interface _ManagedColdStartCtx {
  * host is usable with no follow-up commands.
  */
 async function _managedColdStart(ctx: _ManagedColdStartCtx): Promise<SquadAssignResult> {
-  const { callsign, opts, writeRegistryFn } = ctx;
+  const { callsign, opts, cwd, writeRegistryFn, gitRootFn, remotesFn } = ctx;
   const warnings: string[] = [];
 
   // §A: managed cold-start selects the host's skills; reject any other source.
@@ -1261,6 +1266,50 @@ async function _managedColdStart(ctx: _ManagedColdStartCtx): Promise<SquadAssign
     installCrossRepoHookFn(managedProjectDir);
   } catch (err) {
     warnings.push(`Could not install git sync hooks at "${managedProjectDir}": ${err instanceof Error ? err.message : String(err)}.`);
+  }
+
+  // §A (piece 56 — cold-start binds the invoking product clone). The pilot found the one-command
+  // cold-start ignored the repo the user was standing in: it stood up the managed host but bound
+  // nothing, so the product clone still needed a manual `squad assign`. Resolve cwd's git root and,
+  // when it is a work tree distinct from the managed host, reuse the warm-bind path VERBATIM
+  // against the just-written managed entry — appending the product clone to clones[], running
+  // origin-collision detection (respecting --allow-origin-collision), and installing the cross-repo
+  // + product-squad-forbid hooks. Guarded by --no-bind (decision H1). A non-repo cwd, or a cwd that
+  // IS the managed host, leaves the flow host-only. A product clone on a shared monorepo origin
+  // legitimately collides with sibling squads, so the whole bind is best-effort — a benign
+  // collision must NOT hard-fail the one-command onboarding.
+  if (!opts.noBind) {
+    const productGitRoot = gitRootFn(cwd);
+    if (productGitRoot && normalisedPathKey(productGitRoot) !== normalisedPathKey(managedProjectDir)) {
+      try {
+        const bindResult = await _warmPath({
+          callsign,
+          opts,
+          resolvedTargetDir: cwd,
+          gitRootFn,
+          remotesFn,
+          writeRegistryFn,
+          installCrossRepoHookFn,
+        });
+        warnings.push(...('warnings' in bindResult && bindResult.warnings ? bindResult.warnings : []));
+      } catch (err) {
+        warnings.push(
+          `Managed host is ready, but binding the current product clone "${productGitRoot}" failed: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          `Run "squad assign ${callsign}" from that clone` +
+          ` (add --allow-origin-collision if it shares an origin with sibling squads).`,
+        );
+      }
+    }
+  }
+
+  // §C (piece 56 — honest post-hydrate publish baseline). Stamp the publish baseline so a
+  // `sync --dry-run` from the freshly hydrated managed host reports 0 pending instead of
+  // re-publishing the whole squad as a no-op. Written last, so every file materialised by
+  // hydrate and auto-wire predates the baseline. Only when state actually hydrated; the
+  // helper is best-effort and never fails onboarding.
+  if (stateHydrated) {
+    writeLastPublish(managedProjectDir);
   }
 
   return {
