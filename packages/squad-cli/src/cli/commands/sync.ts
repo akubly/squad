@@ -1045,17 +1045,26 @@ async function hydrateTeamRootFromRef(
   // loop below would otherwise lazily promisor-fetch every file individually — O(files) network
   // round trips, minutes on a real squad. Fetch the resolved tip ONCE without the blob filter so
   // every reachable blob lands in a single pack; the cat-file loop then reads local objects only.
-  //   - Gated to partial clones (`remote.<remote>.promisor === true`): a full clone already has
-  //     every blob from Step 1, so non-managed `--pull` stays byte-identical (no extra network).
+  //   - Gated to partial clones by scanning for ANY promisor remote, NOT `remote.<remote>.promisor`:
+  //     `git clone --filter=blob:none` records the flag under the clone's own remote NAME (`origin`),
+  //     but callers (e.g. `assign`) thread `remote` as a resolved remote token that is NOT that name —
+  //     the config lane drives the hydrate with its own `squad-config` remote — so a name-keyed lookup
+  //     on that token misses and the bulk fetch is silently skipped, restoring the O(files) fallback.
+  //     Detection is deliberately decoupled from WHICH remote is fetched: a managed clone has exactly
+  //     one promisor remote; a full clone has none, so non-managed `--pull` still issues no extra
+  //     network and stays byte-identical.
   //   - Placed AFTER the sentinel fast-path so an unchanged-tip re-pull never re-issues the bulk
   //     fetch (network cost stays O(1) per lane, independent of file count).
   let isPartialClone = false;
   try {
-    const promisor = (_hydrateGit.exec(['config', '--get', `remote.${remote}.promisor`], {
-      cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-    }) as string).trim();
-    isPartialClone = promisor === 'true';
-  } catch { /* no promisor config → full clone, blobs already present */ }
+    const promisorRemotes = (_hydrateGit.exec(
+      ['config', '--get-regexp', '^remote\\..*\\.promisor$'],
+      { cwd: teamRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ) as string).trim();
+    isPartialClone = promisorRemotes
+      .split('\n')
+      .some(line => line.trim().split(/\s+/).pop() === 'true');
+  } catch { /* no promisor remote → full clone, blobs already present */ }
   if (isPartialClone) {
     try {
       _hydrateGit.exec(['fetch', '--no-filter', remote,
