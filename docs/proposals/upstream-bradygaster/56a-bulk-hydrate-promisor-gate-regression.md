@@ -20,6 +20,60 @@ Stack position: a bugfix stacked on the piece-56 tip
 (`squad/piece-56-managed-cold-start-hardening-and-fold-ref-garbage-collection`). Not a new stack piece —
 it corrects §B / decision G within piece 56 before Phase C PRs.
 
+---
+
+## Amendment (2026-07-23): §B has a SECOND defect — the promisor gate fix is necessary but insufficient
+
+The first build of 56a landed the remote-agnostic promisor gate (below) and was ingested into a
+preview.20 dogfood pack. **Result: the gate now fires correctly, but the live managed cold-start is
+STILL ~41 minutes.** §B has two independent bugs; 56a-v1 fixed only the first.
+
+**Second defect — the bulk `fetch --no-filter` is a silent no-op on an already-present ref.**
+`hydrateTeamRootFromRef` fetches the lane's ref in an earlier step with a *filtered* fetch
+(`git fetch origin <refspec>` under the blob:none partial-clone config — pulls the commit + trees, **no
+blobs**). §B then runs `git fetch --no-filter <remote> <same-refspec>`. Because the ref's commit object
+is **already present** from the earlier fetch, git's negotiation reports "up-to-date" and downloads
+**nothing** — the `--no-filter` flag has no effect when there is no new *commit* to fetch; it does not
+retroactively backfill blobs git already decided to skip. The blobs are never materialized, so Step 4's
+`cat-file blob` write-out loop falls back to per-blob promisor fetches (issued *inside* the `cat-file`
+subprocess) = O(files). O(N) restored, exactly as with the gate bug — just one layer deeper.
+
+**Empirical confirmation (real `akubly_microsoft/squads`, isolated blobless clone):**
+
+| Step | local blob count | wall |
+| --- | --- | --- |
+| `git clone --filter=blob:none` | 0 | — |
+| filtered `git fetch origin <refspec>` (Step 1) | **0** | ~1 s |
+| `git fetch --no-filter origin <same-refspec>` (§B today) | **0** ← no-op | ~1 s |
+| `git fetch --refetch --no-filter origin <same-refspec>` (fix) | **1055** ← backfilled | ~2 s |
+
+**The fix: add `--refetch` to the §B bulk fetch.** `git fetch --refetch` tells git to ignore what it
+already has and re-fetch all reachable objects under the *current* (now `--no-filter`) filter, which
+backfills exactly the blobs the earlier filtered fetch skipped — in one O(1)-per-lane transfer:
+
+```ts
+// §B bulk hydrate — was: ['fetch', '--no-filter', remote, refspec]
+gitExec(['fetch', '--refetch', '--no-filter', remote, refspec]);
+```
+
+**End-to-end proof (live isolated managed cold-start, preview.20 dist patched with `--refetch`):**
+`ELAPSED: 305 s` vs `2482 s` unpatched — and **zero cycling `git-remote-https` child processes** (the
+O(N) signature is gone; all blobs arrive in one bulk transfer). The residual ~5 min is fixed upgrade
+overhead (skill migration + Copilot payload refresh + npm), not hydrate — independent of file count.
+
+**Why the §B unit test passed through BOTH bugs.** The test counts explicit `exec(['fetch', …])`
+invocations via a spy and asserts that count is file-count-independent. But the O(N) cost is the
+per-blob lazy promisor fetch that git performs *internally, inside the `cat-file` subprocess* — invisible
+to the exec spy. So the test passes whether blobs arrive via the bulk fetch OR via hidden per-blob
+fetches; with a tiny local `file://` fixture the lazy path is instant, so the test is fast AND green
+while measuring the wrong thing. **The test must assert the actual local blob population after the bulk
+fetch** (see strengthened Test requirement below), not just the exec call count.
+
+The remote-agnostic gate fix (original 56a body, below) is still required — without it the bulk fetch
+never fires at all. Land **both** fixes together on the same 56a branch.
+
+---
+
 ## Root cause
 
 The managed host clone is created blobless
@@ -109,16 +163,33 @@ The §B regression test must reproduce the **production calling convention**, no
 A test written to (1)+(2) fails on today's code (the gate misses) and passes once the fix lands —
 proving the fix, and permanently closing the fidelity gap.
 
+4. **Assert actual blob materialization, not just fetch-call count** (closes the second-defect gap). An
+   exec-invocation counter cannot see the per-blob promisor fetches git performs *inside* the `cat-file`
+   subprocess, so it is blind to the no-op re-fetch. The test must therefore assert the **local object
+   store is fully populated after §B's bulk fetch and before the `cat-file` write-out loop** — e.g. count
+   blob objects via `git cat-file --batch-all-objects --batch-check` (expect all lane blobs present), or
+   assert the `cat-file` write-out performs **zero** network fetches (no promisor child processes / no
+   growth in fetched-pack count). On today's code the bulk fetch is a no-op so the blob count stays 0
+   (or the write-out triggers N lazy fetches); after adding `--refetch` the blobs are all present and the
+   write-out is purely local. Prefer a real `--filter=blob:none` clone with a distinct remote **name** vs
+   the URL/token passed to the hydrate, so BOTH defects (gate miss + no-op re-fetch) are exercised by one
+   test.
+
 ## Changeset requirement
 
-`packages/squad-cli/src/` is touched (`sync.ts` hydrate gate). Include a `patch` changeset for
-`@bradygaster/squad-cli`. No fold-template changes; §F stays byte-identical. Record the decision-G
-refinement (name-keyed → remote-agnostic promisor detection) in triage.
+`packages/squad-cli/src/` is touched (`sync.ts` hydrate gate **and** the §B bulk-fetch line). Include a
+`patch` changeset for `@bradygaster/squad-cli`. No fold-template changes; §F stays byte-identical. Record
+in triage BOTH decision-G refinements: (1) name-keyed → remote-agnostic promisor detection, and (2)
+adding `--refetch` so the bulk fetch backfills blobs on an already-present ref instead of no-oping.
 
 ## Acceptance
 
-- The §B regression test exercises the URL-remote calling convention and asserts O(1) fetches per lane.
-- A live (or seam-driven equivalent) managed cold-start issues one bulk fetch per lane; wall-clock is
-  independent of file count (seconds, not tens of minutes).
+- The §B regression test exercises the URL-remote calling convention AND asserts the local object store
+  is fully blob-populated after §B's bulk fetch (the `cat-file` write-out issues zero network fetches).
+  The test fails on today's code (gate miss and/or no-op re-fetch) and passes with both fixes.
+- A live (or seam-driven equivalent) managed cold-start issues one blob-materializing fetch per lane;
+  wall-clock for the hydrate is independent of file count (seconds, not tens of minutes) with no
+  per-blob `git-remote-https` child processes. Verified: `--refetch` drops a real ~1,600-file cold-start
+  from 2482 s to 305 s with zero cycling git children.
 - No regression to the warm-assign path, the monorepo-host hydrate, or the `.last-hydrate-sha` /
   `.last-config-hydrate-sha` fast-path idempotency.
