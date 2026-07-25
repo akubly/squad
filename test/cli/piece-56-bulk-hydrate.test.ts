@@ -220,6 +220,67 @@ describe('piece 56 §B — bulk managed hydrate', { timeout: 120_000 }, () => {
     }
   });
 
+  it('P56.B1b (56a second-defect regression): §B bulk fetch must --refetch so the cat-file write-out issues ZERO lazy promisor fetches (O(1) per lane, not O(files))', async () => {
+    // The SECOND §B defect (spec amendment 2026-07-23). Once the gate fires, §B runs a bulk fetch of
+    // the lane ref — but on the real managed path that ref's COMMIT is already present from the
+    // Step-1 filtered fetch. Git negotiates on commits, not blobs, so a plain
+    // `git fetch --no-filter <remote> <refspec>` reports "up-to-date" and backfills ZERO blobs; the
+    // `--no-filter` flag does NOT retroactively hydrate blobs an earlier filtered fetch skipped. The
+    // blobs therefore stay absent and the `cat-file blob` write-out lazily promisor-fetches each one
+    // individually — O(files) network round-trips issued INSIDE the cat-file subprocess, invisible to
+    // an exec-call-count spy (which is exactly why the original §B unit test stayed green through the
+    // ~41-min regression). `--refetch` tells git to ignore what is already local and re-fetch all
+    // reachable objects under the now-unfiltered filter, backfilling every lane blob in one transfer.
+    //
+    // A real `--filter=blob:none` clone cannot reproduce the absent-blob state deterministically in
+    // this environment: the host git is a VFS/Scalar fork (`git version *.vfs.*`) that prefetches
+    // blobs over the `file://` transport, so a local fixture never leaves them missing and the two
+    // fetch variants are indistinguishable on disk. We therefore drive the injectable `_hydrateGit`
+    // seam and MODEL git's documented object semantics — the same seam this suite (see P56.B1s) uses
+    // to observe costs a real fixture hides — making the per-blob lazy fetch a countable event:
+    //   * the ref's commit + trees are present after Step 1; its blobs are NOT,
+    //   * a plain `fetch --no-filter <remote> <refspec>` of the already-present ref is a NO-OP,
+    //   * only `fetch --refetch --no-filter` backfills the blobs,
+    //   * `cat-file blob` on an absent blob triggers one hidden promisor fetch (the O(files) cost).
+    const branch = 'squad-state';
+    const DRIVE_REMOTE = 'squad-config';        // production token — NOT the clone's promisor remote name
+    const FILE_COUNT = 40;
+
+    const teamRoot = makeTmpDir('nooprefetch');
+    execFileSync('git', ['init', '-b', 'main', teamRoot], { stdio: 'pipe' });
+    const treeList = Array.from({ length: FILE_COUNT }, (_, i) => `.squad/file${i + 1}.md`).join('\n');
+
+    let blobsPresent = false;
+    let lazyBlobFetches = 0;
+
+    const spy = vi.spyOn(_hydrateGit, 'exec').mockImplementation((args: string[], opts: Record<string, unknown>) => {
+      // Partial-clone signal lives under `origin`, never under the driving token (`squad-config`).
+      if (args.includes('--get-regexp')) return 'remote.origin.promisor true\n';
+      if (args[0] === 'rev-parse') return 'a'.repeat(40) + '\n';
+      if (args.includes('ls-tree')) return treeList;
+      if (args[0] === 'fetch') {
+        // Only an unfiltered fetch that ignores negotiation (`--refetch`) backfills blobs on the
+        // already-present ref. Step-1's filtered fetch and a plain `--no-filter` re-fetch add none.
+        if (args.includes('--no-filter') && args.includes('--refetch')) blobsPresent = true;
+        return '';
+      }
+      if (args.includes('cat-file')) {
+        if (!blobsPresent) lazyBlobFetches++;   // hidden per-blob promisor fetch inside the cat-file subprocess
+        return Buffer.from('blob-body\n');
+      }
+      return (opts && opts['encoding'] === null) ? Buffer.alloc(0) : '';
+    });
+
+    await hydrateTeamRootFromStateRef(teamRoot, DRIVE_REMOTE, branch);
+    spy.mockRestore();
+
+    // THE second-defect trap. After §B's bulk fetch the blobs must already be local, so the write-out
+    // performs ZERO lazy promisor fetches and its network cost is independent of FILE_COUNT. On
+    // pre-`--refetch` code the bulk fetch no-ops, blobs stay absent, and this equals FILE_COUNT (40) —
+    // the O(files) regression an exec-call counter is blind to. This fails on today's code, passes after the fix.
+    expect(lazyBlobFetches).toBe(0);
+  });
+
   it('P56.B1s (56a regression): network-touching git invocation count is O(1) per lane — identical for 5 files and for 1,500 — on the non-promisor-named remote token', async () => {
     // The `_hydrateGit` seam exists (see its docstring in sync.ts) to MECHANICALLY assert the
     // network cost of §B is independent of file count without paying for N real `cat-file` spawns.

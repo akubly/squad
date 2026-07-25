@@ -110,3 +110,79 @@ The strengthened test now exercises the **production calling convention**:
 
 Any future §B change that re-couples the gate to the caller's token will now trip
 P56.B1u / P56.B1s in CI.
+
+---
+
+## Amendment (2026-07-23) — §B had a SECOND, independent defect: the bulk fetch no-ops on the already-present ref
+
+56a-v1 (above) landed the remote-agnostic gate and was ingested into a preview.20 pack.
+**The gate now fires correctly — but the live managed cold-start was still ~41 min.**
+The gate was necessary but not sufficient; §B's bulk fetch itself was a silent no-op.
+
+### The second defect
+
+`hydrateTeamRootFromRef` fetches the lane ref in Step 1 with a *filtered* fetch (under the
+blob:none partial-clone config — commit + trees, **no blobs**). §B then ran:
+
+```ts
+git(['fetch', '--no-filter', remote, refspec]);   // backfilled ZERO blobs
+```
+
+Because the ref's **commit** is already present from Step 1, git's negotiation is commit-based
+and reports "up-to-date" — `--no-filter` does **not** retroactively backfill blobs an earlier
+filtered fetch decided to skip. The blobs were never materialized, so Step 4's `cat-file blob`
+write-out fell back to per-blob promisor fetches (issued *inside* the `cat-file` subprocess) =
+O(files). O(N) restored — one layer deeper than the gate bug.
+
+Empirical confirmation (real `akubly_microsoft/squads`, isolated blobless clone):
+
+| Step | local blob count |
+| --- | --- |
+| `git clone --filter=blob:none` | 0 |
+| filtered `git fetch origin <refspec>` (Step 1) | 0 |
+| `git fetch --no-filter origin <same-refspec>` (§B v1) | **0** ← no-op |
+| `git fetch --refetch --no-filter origin <same-refspec>` (fix) | **1055** ← backfilled |
+
+### Decision G refinement (2) — bulk fetch must `--refetch` to backfill blobs on an already-present ref
+
+```ts
+// §B bulk hydrate — was: ['fetch', '--no-filter', remote, refspec]
+git(['fetch', '--refetch', '--no-filter', remote, refspec]);
+```
+
+`--refetch` tells git to ignore what it already has and re-fetch all reachable objects under the
+current (now unfiltered) filter, backfilling exactly the blobs Step 1 skipped — in one
+O(1)-per-lane transfer. Decision G1's O(1)-per-lane guarantee and the `.last-hydrate-sha` /
+`.last-config-hydrate-sha` fast-path skip ordering are unchanged (an unchanged-tip re-pull still
+short-circuits at the sentinel before §B). **End-to-end proof** (live isolated managed cold-start,
+preview.20 dist patched with `--refetch`): `ELAPSED: 305 s` vs `2482 s` unpatched, with **zero**
+cycling `git-remote-https` child processes — the O(N) signature is gone. The residual ~5 min is
+fixed upgrade overhead (skill migration + Copilot payload refresh + npm), independent of file count.
+
+### The deeper CI fidelity gap — exec-call count is blind to per-blob lazy fetches
+
+The v1 test (P56.B1u / P56.B1s) counts explicit `exec(['fetch', …])` invocations and asserts that
+count is file-count-independent. But the O(N) cost is the per-blob lazy promisor fetch git performs
+*internally, inside the `cat-file` subprocess* — **invisible to the exec spy**. So the test passed
+whether blobs arrived via the bulk fetch OR via hidden per-blob fetches; with a tiny local fixture
+the lazy path is instant, so the test was fast AND green while measuring the wrong thing. An
+exec-call counter can prove the gate fires but can **never** prove the bulk fetch actually
+materialized blobs.
+
+### Closing the deeper gap
+
+- **P56.B1b** — the second-defect trap. It drives the hydrate on the production convention
+  (promisor flag under `origin`, driven by the distinct `squad-config` token) and models git's
+  fetch/`cat-file` object semantics through the `_hydrateGit` seam: Step 1 leaves blobs absent, a
+  plain `--no-filter` re-fetch of the already-present ref is a no-op, only `--refetch --no-filter`
+  backfills, and a `cat-file blob` on an absent blob is a counted hidden promisor fetch. It asserts
+  the write-out issues **zero** lazy fetches. This fails on pre-`--refetch` code (40 hidden fetches
+  = O(files)) and passes after the fix — making the previously-invisible cost a hard CI gate.
+  (A real `--filter=blob:none` fixture cannot reproduce the absent-blob state deterministically
+  here: the host git is a VFS/Scalar fork that prefetches blobs over the `file://` transport, so a
+  local clone never leaves them missing and the two fetch variants are indistinguishable on disk.
+  The seam models the documented git contract instead — and, crucially, is proven non-vacuous by
+  failing red on the unfixed code.)
+
+Any future §B change that reverts to a non-`--refetch` bulk fetch — or otherwise lets the
+write-out fall back to per-blob promisor fetches — will now trip P56.B1b in CI.

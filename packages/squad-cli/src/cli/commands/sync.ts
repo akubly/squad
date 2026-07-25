@@ -1055,6 +1055,14 @@ async function hydrateTeamRootFromRef(
   //     network and stays byte-identical.
   //   - Placed AFTER the sentinel fast-path so an unchanged-tip re-pull never re-issues the bulk
   //     fetch (network cost stays O(1) per lane, independent of file count).
+  //   - `--refetch` is REQUIRED, not optional. An earlier step already fetched this ref under the
+  //     blob:none filter, so its commit+trees are present but its blobs are not. A plain
+  //     `fetch --no-filter <remote> <same-refspec>` then no-ops: git's negotiation sees the commit
+  //     already present, reports "up-to-date", and backfills ZERO blobs — `--no-filter` does not
+  //     retroactively hydrate blobs an earlier filtered fetch skipped. `--refetch` ignores what is
+  //     already local and re-fetches all reachable objects under the current (unfiltered) filter,
+  //     landing every lane blob in one transfer. Without it the cat-file write-out below silently
+  //     falls back to O(files) per-blob promisor fetches inside the cat-file subprocess.
   let isPartialClone = false;
   try {
     const promisorRemotes = (_hydrateGit.exec(
@@ -1067,7 +1075,7 @@ async function hydrateTeamRootFromRef(
   } catch { /* no promisor remote → full clone, blobs already present */ }
   if (isPartialClone) {
     try {
-      _hydrateGit.exec(['fetch', '--no-filter', remote,
+      _hydrateGit.exec(['fetch', '--refetch', '--no-filter', remote,
         `refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
       ], { cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err: unknown) {
