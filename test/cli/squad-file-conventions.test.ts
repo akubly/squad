@@ -8,7 +8,7 @@ import {
   hasCodingAgent,
 } from '../../packages/squad-cli/src/cli/core/squad-file-conventions.ts';
 import { resolveSquadDir } from '../../packages/squad-cli/src/cli/core/squad-resolver.ts';
-import { resolveSquad as resolveSquadV2 } from '@bradygaster/squad-sdk';
+import { resolveSquad as resolveSquadV2 } from '@wifi-aware/squad-sdk';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

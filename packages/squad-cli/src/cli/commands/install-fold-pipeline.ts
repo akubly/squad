@@ -18,10 +18,10 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
-import { CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import type { RegistryEntry } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
+import { CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
 import { migratePoleBToA } from './pole-a-migrate.js';
 import { removeLegacySubfolderManagedBlock } from './allowlist-gitignore.js';
 

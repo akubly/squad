@@ -27,7 +27,7 @@
  */
 
 import path from 'node:path';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 import type { SquadStateMcpSpec } from './mcp-spec.js';
 
 const storage = new FSStorageProvider();

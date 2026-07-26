@@ -13,22 +13,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync as _assignExecFileSync } from 'node:child_process';
-import { resolveSquad, upsertEntry, collectCwdRemoteUrls, normalizeRemoteUrl, clonesMatch, normalisedPathKey } from '@bradygaster/squad-sdk';
-import { installCopilotPayload, CopilotPayloadError } from '@bradygaster/squad-sdk/copilot-payload';
+import { resolveSquad, upsertEntry, collectCwdRemoteUrls, normalizeRemoteUrl, clonesMatch, normalisedPathKey } from '@wifi-aware/squad-sdk';
+import { installCopilotPayload, CopilotPayloadError } from '@wifi-aware/squad-sdk/copilot-payload';
 import { findCloseMatch as _findCloseMatch } from '../lib/close-match.js';
-import type { ResolvedSquad } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk, writeRegistry } from '@bradygaster/squad-sdk/registry';
-import type { Registry, RegistryEntry } from '@bradygaster/squad-sdk/registry';
-import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
+import type { ResolvedSquad } from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk, writeRegistry } from '@wifi-aware/squad-sdk/registry';
+import type { Registry, RegistryEntry } from '@wifi-aware/squad-sdk/registry';
+import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { getTemplatesDir } from '../cli/core/templates.js';
 import { applyVersionStamp, getPackageVersion } from '../cli/core/version.js';
 import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
-import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@bradygaster/squad-sdk/validation';
+import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX, resolveStateRemote, deriveStateBranch, deriveConfigBranch, hydrateTeamRootFromStateRef, hydrateTeamRootFromConfigRef, writeLastPublish } from '../cli/commands/sync.js';
-import { managedHostPath } from '@bradygaster/squad-sdk';
+import { managedHostPath } from '@wifi-aware/squad-sdk';
 
 export interface RunAssignOpts {
   /** Project directory — the consumer repo being assigned. */

@@ -6,7 +6,7 @@
  */
 
 // ─── Registry mock (used by runSync integration tests only) ──────────────────
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
 }));
 
@@ -21,8 +21,8 @@ import {
   resolveStateRemote,
   _transport,
 } from '../../packages/squad-cli/src/cli/commands/sync.js';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import type { Registry } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import type { Registry } from '@wifi-aware/squad-sdk/registry';
 import { SquadError } from '../../packages/squad-cli/src/cli/core/errors.js';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────

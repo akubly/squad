@@ -8,9 +8,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@bradygaster/squad-sdk';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { installCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
+import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@wifi-aware/squad-sdk';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { installCopilotPayload } from '@wifi-aware/squad-sdk/copilot-payload';
 import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
@@ -55,7 +55,7 @@ export function isLocalOrUnpublishedVersion(version: string): boolean {
 
 function buildMcpServerSpecs(isGitHub: boolean, cliVersion?: string): McpServerSpec[] {
   // Pin the squad-cli package to the currently-installed CLI version so that
-  // `npx -y @bradygaster/squad-cli state-mcp` does NOT silently resolve to the
+  // `npx -y @wifi-aware/squad-cli state-mcp` does NOT silently resolve to the
   // npm `latest` dist-tag (which may predate the `state-mcp` command and thus
   // expose zero tools to Copilot — see MCP-BRIDGE-BROKEN root cause).
   //
@@ -64,9 +64,9 @@ function buildMcpServerSpecs(isGitHub: boolean, cliVersion?: string): McpServerS
   // string that breaks npx resolution at session start.
   let pkgSpec: string;
   if (!cliVersion || isLocalOrUnpublishedVersion(cliVersion)) {
-    pkgSpec = '@bradygaster/squad-cli@insider';
+    pkgSpec = '@wifi-aware/squad-cli@insider';
   } else {
-    pkgSpec = `@bradygaster/squad-cli@${cliVersion}`;
+    pkgSpec = `@wifi-aware/squad-cli@${cliVersion}`;
   }
   const servers: McpServerSpec[] = [
     {
@@ -1325,7 +1325,7 @@ function detectPackageManager(): 'npm' | 'pnpm' | 'yarn' {
 export async function selfUpgradeCli(options: SelfUpgradeOptions = {}): Promise<void> {
   const { execSync } = await import('node:child_process');
   const tag = options.insider ? 'insider' : 'latest';
-  const pkg = `@bradygaster/squad-cli@${tag}`;
+  const pkg = `@wifi-aware/squad-cli@${tag}`;
   const pm = detectPackageManager();
 
   let cmd: string;

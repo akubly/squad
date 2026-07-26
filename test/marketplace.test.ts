@@ -18,8 +18,8 @@ import {
   validatePackageContents,
   type MarketplaceManifest,
   type ExtensionEvent,
-} from '@bradygaster/squad-sdk/marketplace';
-import type { SquadConfig } from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/marketplace';
+import type { SquadConfig } from '@wifi-aware/squad-sdk/config';
 
 // --- Helpers ---
 

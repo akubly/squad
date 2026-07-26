@@ -52,3 +52,39 @@ artifacts/
 
 # NOTE: .squad/casting/* is AUTHORITATIVE IDENTITY and MUST be committed to main.
 # Do not add .squad/casting/ to this ignore list.
+
+# --- squad (managed) ---
+# Pole A: no squad content or state is tracked on this branch. The durable constitution
+# rides squad/config/<callsign>; ephemeral state rides squad/state/<callsign> (fold pipeline).
+.test-dispatch-3af9de6f/.squad/
+.test-dispatch-99bfa306/.squad/
+.test-init-7de09e7d/existing-scaffold/.squad/
+.test-init-9faa7bbd/existing-scaffold/.squad/
+.test-init-b6408b84/alpha-project/.squad/
+.test-init-b6408b84/beta-project/.squad/
+.test-init-b6408b84/existing-scaffold/.squad/
+.test-init-b6408b84/idempotent/.squad/
+.test-init-b6408b84/my-named-project/.squad/
+.test-init-b6408b84/newproject/.squad/
+.test-init-b6408b84/no-reactivate/.squad/
+.test-init-b6408b84/project/.squad/
+.test-init-b6408b84/scaffold-only/.squad/
+.test-init-scope-4e9fe119/.squad/
+.test-init-scope-ade08a4a/.squad/
+.test-init-scope-ade08a4a/clones/repo-tools/.squad/
+.test-init-scope-ade08a4a/derived-name/.squad/
+.test-init-scope-ade08a4a/project/.squad/
+.test-init-v2-76fec6e5/.squad/
+.test-init-v2-76fec6e5/alpha/.squad/
+.test-init-v2-76fec6e5/my-team/.squad/
+.test-init-v2-76fec6e5/nested/project/.squad/
+.test-init-v2-76fec6e5/some-dir/.squad/
+.test-init-v2-9777a05e/alpha/.squad/
+.test-init-v2-9777a05e/nested/project/.squad/
+.test-init-v2-9777a05e/some-dir/.squad/
+.test-legacy-resolver-38a3e871/one/two/three/four/five/six/seven/eight/nine/ten/eleven/global-config/squad/.squad/
+.test-legacy-resolver-b61ae5fe/one/two/three/four/five/six/seven/eight/nine/ten/eleven/global-config/squad/.squad/
+test-fixtures/_speed-test-init-1785107027945/.squad/
+test/.piece-40-tmp/b1-init-callsign-1785105462484-982d23707c419/.squad/
+test/.piece-40-tmp/b4-no-callsign-1785105514985-31d5b5607fe73/proj/.squad/
+# --- end squad (managed) ---

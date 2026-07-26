@@ -21,7 +21,7 @@ import {
   ErrorCategory,
   TelemetryCollector,
   type ErrorContext,
-} from '@bradygaster/squad-sdk/adapter/errors';
+} from '@wifi-aware/squad-sdk/adapter/errors';
 
 describe('SquadError — Base Error', () => {
   it('should construct with all required fields', () => {

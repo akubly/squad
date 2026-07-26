@@ -8,10 +8,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { initSquad, MANIFEST_SKILL_NAMES } from '@bradygaster/squad-sdk/config';
-import { onboardAgent, addAgentToConfig } from '@bradygaster/squad-sdk/agents';
-import type { InitOptions, InitAgentSpec } from '@bradygaster/squad-sdk/config';
-import type { OnboardOptions } from '@bradygaster/squad-sdk/agents';
+import { initSquad, MANIFEST_SKILL_NAMES } from '@wifi-aware/squad-sdk/config';
+import { onboardAgent, addAgentToConfig } from '@wifi-aware/squad-sdk/agents';
+import type { InitOptions, InitAgentSpec } from '@wifi-aware/squad-sdk/config';
+import type { OnboardOptions } from '@wifi-aware/squad-sdk/agents';
 
 const TEST_ROOT = join(process.cwd(), 'test-fixtures', 'init-test');
 
@@ -625,7 +625,7 @@ describe('Squad Initialization', () => {
   describe('addAgentToConfig', () => {
     it('should add agent routing rule to TypeScript config', async () => {
       // Create a basic TypeScript config
-      const configContent = `import type { SquadConfig } from '@bradygaster/squad';
+      const configContent = `import type { SquadConfig } from '@wifi-aware/squad';
 
 const config: SquadConfig = {
   version: '1.0.0',
@@ -666,7 +666,7 @@ export default config;
     });
 
     it('should return false if work type already has a rule', async () => {
-      const configContent = `import type { SquadConfig } from '@bradygaster/squad';
+      const configContent = `import type { SquadConfig } from '@wifi-aware/squad';
 
 const config: SquadConfig = {
   version: '1.0.0',
@@ -694,7 +694,7 @@ export default config;
     });
 
     it('should return false for role without obvious work type mapping', async () => {
-      const configContent = `import type { SquadConfig } from '@bradygaster/squad';
+      const configContent = `import type { SquadConfig } from '@wifi-aware/squad';
 const config: SquadConfig = {
   version: '1.0.0',
   models: { defaultModel: 'claude-sonnet-4.5', defaultTier: 'standard', fallbackChains: { premium: [], standard: [], fast: [] } },

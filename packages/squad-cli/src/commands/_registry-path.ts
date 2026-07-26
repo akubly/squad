@@ -8,7 +8,7 @@
  */
 
 import path from 'node:path';
-import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
+import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk/path-utils';
 
 export interface ResolveRegistryPathOpts {
   explicit?: string;

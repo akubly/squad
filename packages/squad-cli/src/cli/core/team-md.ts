@@ -3,7 +3,7 @@
  */
 
 import path from 'node:path';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider } from '@wifi-aware/squad-sdk';
 import { hasCodingAgent } from './squad-file-conventions.js';
 
 const storage = new FSStorageProvider();

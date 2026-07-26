@@ -6,19 +6,19 @@
  * N (dual-role registration).
  *
  * NOTE: Tests that need runAssign are in piece-38-assign.test.ts (collection-failing env debt
- * from the @bradygaster/squad-sdk root import). Tests here cover sync.ts, install-hooks.ts,
+ * from the @wifi-aware/squad-sdk root import). Tests here cover sync.ts, install-hooks.ts,
  * validation.ts, and registry.ts — all resolvable via mocking.
  */
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
   writeRegistry: vi.fn(),
 }));
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
-vi.mock('@bradygaster/squad-sdk/validation', () => ({
+vi.mock('@wifi-aware/squad-sdk/validation', () => ({
   INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
 
@@ -31,8 +31,8 @@ import { resolve } from 'node:path';
 
 import { INBOX_HANDLE_RE } from '../../packages/squad-sdk/src/validation.js';
 import { validateEntry, parseRegistry, writeRegistry as realWriteRegistry } from '../../packages/squad-sdk/src/registry.js';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
 import type { Registry } from '../../packages/squad-sdk/src/registry.js';
 import {
   runSync,

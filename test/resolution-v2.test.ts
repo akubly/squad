@@ -16,10 +16,10 @@ import { join, resolve as pathResolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
 
-import { isValidCallsign, uninstallCopilotPayload } from '@bradygaster/squad-sdk';
-import { resolveSquad, normalizeRemoteUrl, collectCwdRemoteUrls } from '@bradygaster/squad-sdk/resolution-v2';
-import { defaultRegistryFilePath } from '@bradygaster/squad-sdk/path-utils';
-import { SquadError } from '@bradygaster/squad-sdk/adapter/errors';
+import { isValidCallsign, uninstallCopilotPayload } from '@wifi-aware/squad-sdk';
+import { resolveSquad, normalizeRemoteUrl, collectCwdRemoteUrls } from '@wifi-aware/squad-sdk/resolution-v2';
+import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk/path-utils';
+import { SquadError } from '@wifi-aware/squad-sdk/adapter/errors';
 import { runDoctorPurge } from '../packages/squad-cli/src/commands/doctor.js';
 
 const TMP = join(process.cwd(), `.test-resolution-v2-${randomBytes(4).toString('hex')}`);

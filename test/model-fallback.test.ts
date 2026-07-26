@@ -12,7 +12,7 @@ import {
   ModelRegistry,
   MODEL_CATALOG,
   DEFAULT_FALLBACK_CHAINS,
-} from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/config';
 
 // ============================================================================
 // Cross-tier fallback: standard chain tries all models in order

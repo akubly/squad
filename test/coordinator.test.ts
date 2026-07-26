@@ -6,16 +6,16 @@ import {
   SquadCoordinator,
   type SquadCoordinatorOptions,
   type CoordinatorResult,
-} from '@bradygaster/squad-sdk/coordinator';
-import type { CoordinatorContext } from '@bradygaster/squad-sdk/coordinator';
-import { DirectResponseHandler } from '@bradygaster/squad-sdk/coordinator';
-import { EventBus } from '@bradygaster/squad-sdk/runtime/event-bus';
-import { DEFAULT_CONFIG, type SquadConfig } from '@bradygaster/squad-sdk/runtime';
+} from '@wifi-aware/squad-sdk/coordinator';
+import type { CoordinatorContext } from '@wifi-aware/squad-sdk/coordinator';
+import { DirectResponseHandler } from '@wifi-aware/squad-sdk/coordinator';
+import { EventBus } from '@wifi-aware/squad-sdk/runtime/event-bus';
+import { DEFAULT_CONFIG, type SquadConfig } from '@wifi-aware/squad-sdk/runtime';
 import {
   compileRoutingRules,
   type CompiledRouter,
-} from '@bradygaster/squad-sdk/config';
-import type { FanOutDependencies, SpawnResult } from '@bradygaster/squad-sdk/coordinator';
+} from '@wifi-aware/squad-sdk/config';
+import type { FanOutDependencies, SpawnResult } from '@wifi-aware/squad-sdk/coordinator';
 import {
   resolveModel,
   ModelFallbackExecutor,
@@ -23,7 +23,7 @@ import {
   isTierFallbackAllowed,
   type ResolvedModel,
   type ModelTier,
-} from '@bradygaster/squad-sdk/agents';
+} from '@wifi-aware/squad-sdk/agents';
 
 // --- Helpers ---
 

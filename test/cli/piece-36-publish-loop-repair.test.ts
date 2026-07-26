@@ -15,11 +15,11 @@
  */
 
 // ─── Registry mock (required by runSync / installFoldPipeline integration tests) ──
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
   writeRegistry: vi.fn(),
 }));
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
 
@@ -39,9 +39,9 @@ import {
 import {
   installFoldPipeline,
 } from '../../packages/squad-cli/src/cli/commands/install-fold-pipeline.js';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
-import type { Registry } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
+import type { Registry } from '@wifi-aware/squad-sdk/registry';
 import { writeRegistry } from '../../packages/squad-sdk/src/registry.js';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────

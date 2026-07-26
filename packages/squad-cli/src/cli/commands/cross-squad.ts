@@ -26,7 +26,7 @@ import {
   addRegistryEntry,
   removeRegistryEntry,
   type DiscoveredSquad,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 import { resolveSquadDir } from '../core/squad-resolver.js';
 import { detectSquadDir } from '../core/detect-squad-dir.js';
 

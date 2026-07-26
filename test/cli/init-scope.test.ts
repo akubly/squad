@@ -17,11 +17,11 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import fs from 'fs';
-import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
+import { ConfigurationError } from '@wifi-aware/squad-sdk/adapter/errors';
 import { randomBytes } from 'crypto';
 import { spawn } from 'child_process';
 import { resolve } from 'path';
-import { runInit } from '@bradygaster/squad-cli/commands/init';
+import { runInit } from '@wifi-aware/squad-cli/commands/init';
 
 const CLI_ENTRY = resolve(process.cwd(), 'packages/squad-cli/dist/cli-entry.js');
 const TEST_ROOT = join(process.cwd(), `.test-init-scope-${randomBytes(4).toString('hex')}`);

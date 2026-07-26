@@ -2,8 +2,8 @@ import { stdout, stderr } from 'node:process';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { resolveSquadState } from '@bradygaster/squad-sdk';
-import { ToolRegistry } from '@bradygaster/squad-sdk/tools';
+import { resolveSquadState } from '@wifi-aware/squad-sdk';
+import { ToolRegistry } from '@wifi-aware/squad-sdk/tools';
 
 export type JsonRpcRequest = {
   jsonrpc?: string;

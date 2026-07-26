@@ -8,10 +8,10 @@
  */
 
 // ─── Registry mock ───────────────────────────────────────────────────────────
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
 }));
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
 
@@ -19,9 +19,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { Registry } from '@bradygaster/squad-sdk/registry';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
+import type { Registry } from '@wifi-aware/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import { normalisedPathKey } from '@wifi-aware/squad-sdk/path-utils';
 import {
   installFoldPipeline,
   type InstallFoldPipelineOptions,

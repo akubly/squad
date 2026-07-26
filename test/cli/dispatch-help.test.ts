@@ -13,8 +13,8 @@ import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { spawn } from 'child_process';
 import { resolve } from 'path';
-import { runDoctor } from '@bradygaster/squad-cli/commands/doctor';
-import type { RunDoctorResult } from '@bradygaster/squad-cli/commands/doctor';
+import { runDoctor } from '@wifi-aware/squad-cli/commands/doctor';
+import type { RunDoctorResult } from '@wifi-aware/squad-cli/commands/doctor';
 
 const CLI_ENTRY = resolve(process.cwd(), 'packages/squad-cli/dist/cli-entry.js');
 const TEST_ROOT = join(process.cwd(), `.test-dispatch-${randomBytes(4).toString('hex')}`);
@@ -337,7 +337,7 @@ describe('runInit: clone/path collision', () => {
   });
 
   it('throws when target matches an existing clone entry', async () => {
-    const { runInit } = await import('@bradygaster/squad-cli/commands/init');
+    const { runInit } = await import('@wifi-aware/squad-cli/commands/init');
 
     const alphaDir = join(TEST_ROOT, 'alpha');
     await mkdir(alphaDir, { recursive: true });

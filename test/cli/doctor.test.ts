@@ -25,10 +25,10 @@ import {
   checkGlobalAgent,
   renderFinding,
   deriveExitCode,
-} from '@bradygaster/squad-cli/commands/doctor';
-import type { DoctorCheck, DoctorFinding } from '@bradygaster/squad-cli/commands/doctor';
-import { OrphanBranchBackend } from '@bradygaster/squad-sdk';
-import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '@bradygaster/squad-cli/core/squad-file-conventions';
+} from '@wifi-aware/squad-cli/commands/doctor';
+import type { DoctorCheck, DoctorFinding } from '@wifi-aware/squad-cli/commands/doctor';
+import { OrphanBranchBackend } from '@wifi-aware/squad-sdk';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES } from '@wifi-aware/squad-cli/core/squad-file-conventions';
 
 const TEST_ROOT = join(process.cwd(), `.test-doctor-${randomBytes(4).toString('hex')}`);
 

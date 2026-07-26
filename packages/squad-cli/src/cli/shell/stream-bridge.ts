@@ -12,7 +12,7 @@ import type {
   StreamDelta,
   UsageEvent,
   ReasoningDelta,
-} from '@bradygaster/squad-sdk/runtime/streaming';
+} from '@wifi-aware/squad-sdk/runtime/streaming';
 import type { SessionRegistry } from './sessions.js';
 import type { ShellMessage } from './types.js';
 

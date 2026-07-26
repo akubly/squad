@@ -27,7 +27,7 @@ import {
   writeAgentContextTierOverrides,
   VALID_CONTEXT_TIERS,
   MODEL_CATALOG,
-} from '@bradygaster/squad-sdk';
+} from '@wifi-aware/squad-sdk';
 import { fatal } from '../core/errors.js';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 import { resolveSquadDir } from '../core/squad-resolver.js';

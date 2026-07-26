@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-vi.mock('@bradygaster/squad-sdk', async () => import('../packages/squad-sdk/src/index.js'));
-vi.mock('@bradygaster/squad-sdk/registry', async () => import('../packages/squad-sdk/src/registry.js'));
+vi.mock('@wifi-aware/squad-sdk', async () => import('../packages/squad-sdk/src/index.js'));
+vi.mock('@wifi-aware/squad-sdk/registry', async () => import('../packages/squad-sdk/src/registry.js'));
 
 const { runMigrations } = await import('../packages/squad-cli/src/cli/core/migrations.js');
 

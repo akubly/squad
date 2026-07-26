@@ -22,7 +22,7 @@ import { describe, it, expect, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { initSquad } from '@bradygaster/squad-sdk';
+import { initSquad } from '@wifi-aware/squad-sdk';
 import {
   publishTeamRootToInbox,
   hydrateTeamRootFromConfigRef,

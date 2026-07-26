@@ -1,6 +1,6 @@
 /**
  * M4-3: Distribution configuration
- * Supports npm distribution (npm install -g @bradygaster/squad-cli).
+ * Supports npm distribution (npm install -g @wifi-aware/squad-cli).
  */
 
 export interface GitHubDistConfig {
@@ -14,7 +14,7 @@ const DEFAULT_CONFIG: GitHubDistConfig = {
   owner: 'bradygaster',
   repo: 'squad',
   binaryName: 'squad',
-  installCommandTemplate: 'npx @bradygaster/squad-cli',
+  installCommandTemplate: 'npx @wifi-aware/squad-cli',
 };
 
 /**

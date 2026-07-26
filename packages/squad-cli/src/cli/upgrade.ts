@@ -8,7 +8,7 @@
  * @module cli/upgrade
  */
 
-import { MigrationRegistry } from '@bradygaster/squad-sdk/config';
+import { MigrationRegistry } from '@wifi-aware/squad-sdk/config';
 
 // ============================================================================
 // Types
@@ -262,10 +262,10 @@ export async function performUpgrade(
 // SDK upgrade (--sdk flag, M4-5)
 // ============================================================================
 
-const SDK_PACKAGE_NAME = '@bradygaster/squad';
+const SDK_PACKAGE_NAME = '@wifi-aware/squad';
 
 /**
- * Upgrade the @bradygaster/squad SDK dependency in a project.
+ * Upgrade the @wifi-aware/squad SDK dependency in a project.
  *
  * Reads the project's package.json, compares the installed SDK version
  * to the latest available, and optionally runs config migrations.

@@ -29,7 +29,7 @@ export interface SquadStateMcpSpec {
   source: 'pinned' | 'insider';
 }
 
-const PACKAGE_NAME = '@bradygaster/squad-cli';
+const PACKAGE_NAME = '@wifi-aware/squad-cli';
 
 export interface ResolveSquadStateMcpSpecOptions {
   /**

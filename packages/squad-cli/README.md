@@ -1,4 +1,4 @@
-# @bradygaster/squad-cli
+# @wifi-aware/squad-cli
 
 The programmable multi-agent CLI for GitHub Copilot. Build an AI team, assign roles, and let them work your repo—automating issue triage, code review, documentation, and more through orchestrated AI agents.
 
@@ -16,16 +16,16 @@ The programmable multi-agent CLI for GitHub Copilot. Build an AI team, assign ro
 
 ```bash
 # Global (recommended)
-npm install -g @bradygaster/squad-cli@latest
+npm install -g @wifi-aware/squad-cli@latest
 
 # Project-local
-npm install --save-dev @bradygaster/squad-cli
+npm install --save-dev @wifi-aware/squad-cli
 
 # One-shot (no install)
-npx @bradygaster/squad-cli
+npx @wifi-aware/squad-cli
 
 # Insider channel (pre-release builds)
-npm install -g @bradygaster/squad-cli@insider
+npm install -g @wifi-aware/squad-cli@insider
 ```
 
 ### Verify Installation
@@ -353,7 +353,7 @@ Squad is an ESM-only module. If you see import errors, ensure your Node.js versi
 
 - **Documentation:** [docs.squad.ai](https://docs.squad.ai)
 - **CLI Reference:** [docs.squad.ai/reference/cli](https://docs.squad.ai/reference/cli) — detailed command docs
-- **SDK:** [@bradygaster/squad-sdk](https://www.npmjs.com/package/@bradygaster/squad-sdk) — programmatic API
+- **SDK:** [@wifi-aware/squad-sdk](https://www.npmjs.com/package/@wifi-aware/squad-sdk) — programmatic API
 - **GitHub:** [github.com/bradygaster/squad](https://github.com/bradygaster/squad)
 - **Issues:** [github.com/bradygaster/squad/issues](https://github.com/bradygaster/squad/issues)
 

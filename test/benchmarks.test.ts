@@ -10,7 +10,7 @@ import {
   type BenchmarkResult,
   type BenchmarkReport,
   type TimingResult,
-} from '@bradygaster/squad-sdk/runtime/benchmarks';
+} from '@wifi-aware/squad-sdk/runtime/benchmarks';
 
 // ============================================================================
 // percentile helper

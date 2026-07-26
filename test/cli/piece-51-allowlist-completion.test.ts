@@ -10,14 +10,14 @@
  */
 
 // ─── Registry mock (required by installFoldPipeline resolution) ───────────────
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
   writeRegistry: vi.fn(),
 }));
-vi.mock('@bradygaster/squad-sdk/path-utils', () => ({
+vi.mock('@wifi-aware/squad-sdk/path-utils', () => ({
   normalisedPathKey: vi.fn((p: string) => p.toLowerCase().replace(/\\/g, '/')),
 }));
-vi.mock('@bradygaster/squad-sdk/validation', () => ({
+vi.mock('@wifi-aware/squad-sdk/validation', () => ({
   INBOX_HANDLE_RE: /^[a-z][a-z0-9-]{1,38}$/,
   CALLSIGN_RE: /^[a-z][a-z0-9-]{1,38}$/,
 }));
@@ -39,7 +39,7 @@ import {
   PUBLISH_MACHINE_LOCAL,
 } from '../../packages/squad-cli/src/cli/commands/allowlist-gitignore.js';
 import { installFoldPipeline } from '../../packages/squad-cli/src/cli/commands/install-fold-pipeline.js';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
 
 // The convergence / fold cases drive real git-integration (init, publish, hydrate across
 // clones) and can exceed 30s under load; use a generous per-test timeout to avoid false

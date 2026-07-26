@@ -17,10 +17,10 @@ import {
   writeEconomyMode,
   applyEconomyMode,
   ECONOMY_MODEL_MAP,
-} from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/config';
 import {
   resolveModel as sdkResolveModel,
-} from '@bradygaster/squad-sdk/agents';
+} from '@wifi-aware/squad-sdk/agents';
 
 let squadDir: string;
 

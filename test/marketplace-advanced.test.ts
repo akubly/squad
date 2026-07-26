@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { SquadConfig } from '@bradygaster/squad-sdk/config';
-import type { MarketplaceManifest } from '@bradygaster/squad-sdk/marketplace';
-import { ManifestCategory } from '@bradygaster/squad-sdk/marketplace';
+import type { SquadConfig } from '@wifi-aware/squad-sdk/config';
+import type { MarketplaceManifest } from '@wifi-aware/squad-sdk/marketplace';
+import { ManifestCategory } from '@wifi-aware/squad-sdk/marketplace';
 import {
   searchMarketplace,
   validateEntry,
@@ -14,21 +14,21 @@ import {
   type MarketplaceEntry,
   type MarketplaceIndex,
   type MarketplaceSearchQuery,
-} from '@bradygaster/squad-sdk/marketplace';
+} from '@wifi-aware/squad-sdk/marketplace';
 import {
   MarketplaceBrowser,
   formatEntryList,
   formatEntryDetails,
   type MarketplaceFetcher,
-} from '@bradygaster/squad-sdk/marketplace';
-import { MarketplaceBackend } from '@bradygaster/squad-sdk/marketplace';
+} from '@wifi-aware/squad-sdk/marketplace';
+import { MarketplaceBackend } from '@wifi-aware/squad-sdk/marketplace';
 import {
   validateRemoteAgent,
   quarantineAgent,
   generateSecurityReport,
   SECURITY_RULES,
   type RemoteAgentDefinition,
-} from '@bradygaster/squad-sdk/marketplace';
+} from '@wifi-aware/squad-sdk/marketplace';
 
 // --- Helpers ---
 

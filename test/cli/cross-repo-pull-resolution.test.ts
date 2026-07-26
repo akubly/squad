@@ -15,13 +15,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { Registry } from '@bradygaster/squad-sdk/registry';
+import type { Registry } from '@wifi-aware/squad-sdk/registry';
 
-vi.mock('@bradygaster/squad-sdk/registry', () => ({
+vi.mock('@wifi-aware/squad-sdk/registry', () => ({
   loadRegistryFromDisk: vi.fn(),
 }));
 
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
 import { runSync, _transport } from '../../packages/squad-cli/src/cli/commands/sync.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

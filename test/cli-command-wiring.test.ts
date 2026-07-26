@@ -15,8 +15,10 @@ import { join, basename } from 'node:path';
 const COMMANDS_DIR = join(process.cwd(), 'packages', 'squad-cli', 'src', 'cli', 'commands');
 const CLI_ENTRY = join(process.cwd(), 'packages', 'squad-cli', 'src', 'cli-entry.ts');
 
-// sync.ts is now wired as `squad sync` — removed from KNOWN_UNWIRED.
-const KNOWN_UNWIRED = new Set<string>();
+// Internal helper modules that live under cli/commands/ but are NOT user-facing
+// commands (no runX entry point): allowlist-gitignore (managedGitignorePaths),
+// pole-a-migrate (migration helper), team-root-classifier (isMachineLocal).
+const KNOWN_UNWIRED = new Set<string>(['allowlist-gitignore', 'pole-a-migrate', 'team-root-classifier']);
 
 describe('CLI command wiring regression (issues #224, #236, #237)', () => {
   const commandFiles = readdirSync(COMMANDS_DIR)

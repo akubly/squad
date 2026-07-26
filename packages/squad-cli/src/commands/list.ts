@@ -9,8 +9,8 @@
  */
 
 import fs from 'node:fs';
-import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
-import type { RegistryEntry } from '@bradygaster/squad-sdk/registry';
+import { loadRegistryFromDisk } from '@wifi-aware/squad-sdk/registry';
+import type { RegistryEntry } from '@wifi-aware/squad-sdk/registry';
 import { resolveRegistryFilePath } from './_registry-path.js';
 
 export interface RunListOpts {

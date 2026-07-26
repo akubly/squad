@@ -6,8 +6,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runInit } from '@bradygaster/squad-cli/core/init';
-import { runUpgrade } from '@bradygaster/squad-cli/core/upgrade';
+import { runInit } from '@wifi-aware/squad-cli/core/init';
+import { runUpgrade } from '@wifi-aware/squad-cli/core/upgrade';
 import { runDoctor } from '../../packages/squad-cli/src/commands/doctor.js';
 
 const TMP_ROOT = path.join(process.cwd(), 'test', '.piece-55-f1-tmp');

@@ -4,8 +4,8 @@
  */
 
 import path from 'node:path';
-import { FSStorageProvider, exportToRepo, parseRepoString } from '@bradygaster/squad-sdk';
-import type { RepoSpec } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, exportToRepo, parseRepoString } from '@wifi-aware/squad-sdk';
+import type { RepoSpec } from '@wifi-aware/squad-sdk';
 import { effectiveSquadDir } from '../core/effective-squad-dir.js';
 import { success, warn, info } from '../core/output.js';
 import { fatal } from '../core/errors.js';

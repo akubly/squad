@@ -1,6 +1,6 @@
 {
-  "name": "@bradygaster/squad",
-  "version": "0.11.0",
+  "name": "@wifi-aware/squad",
+  "version": "0.11.0-mc.preview.1",
   "private": true,
   "description": "Squad — Programmable multi-agent runtime for GitHub Copilot, built on @github/copilot-sdk",
   "type": "module",
@@ -8,11 +8,11 @@
     "packages/*"
   ],
   "dependencies": {
-    "@bradygaster/squad-sdk": "file:packages/squad-sdk"
+    "@wifi-aware/squad-sdk": "file:packages/squad-sdk"
   },
   "overrides": {
-    "@bradygaster/squad-cli": {
-      "@bradygaster/squad-sdk": "$@bradygaster/squad-sdk"
+    "@wifi-aware/squad-cli": {
+      "@wifi-aware/squad-sdk": "$@wifi-aware/squad-sdk"
     }
   },
   "scripts": {

@@ -9,9 +9,9 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { tmpdir } from 'os';
-import { runInit } from '@bradygaster/squad-cli/core/init';
-import { runExport } from '@bradygaster/squad-cli/commands/export';
-import { runImport } from '@bradygaster/squad-cli/commands/import';
+import { runInit } from '@wifi-aware/squad-cli/core/init';
+import { runExport } from '@wifi-aware/squad-cli/commands/export';
+import { runImport } from '@wifi-aware/squad-cli/commands/import';
 
 const EXT_ROOT = join(tmpdir(), `.test-cli-export-ext-${randomBytes(4).toString('hex')}`);
 const EXT_GLOBAL = join(tmpdir(), `.test-cli-export-ext-global-${randomBytes(4).toString('hex')}`);

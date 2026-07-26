@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import os from 'node:os';
-import { FSStorageProvider, resolveStateBackend, type StateBackendType } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, resolveStateBackend, type StateBackendType } from '@wifi-aware/squad-sdk';
 import { resolveStateDir } from '../core/effective-squad-dir.js';
 import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from '../core/squad-file-conventions.js';
 import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';

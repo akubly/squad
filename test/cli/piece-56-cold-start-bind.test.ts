@@ -11,7 +11,7 @@ import { describe, it, expect, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { initSquad } from '@bradygaster/squad-sdk';
+import { initSquad } from '@wifi-aware/squad-sdk';
 import { seedConfigOrphan } from '../../packages/squad-cli/src/cli/commands/sync.js';
 import { runAssign } from '../../packages/squad-cli/src/commands/assign.js';
 

@@ -30,7 +30,7 @@ import {
   writeAgentContextTierOverrides,
   resolveContextTier,
   clampContextTier,
-} from '@bradygaster/squad-sdk/config';
+} from '@wifi-aware/squad-sdk/config';
 
 // Temp directory for each test
 let squadDir: string;
