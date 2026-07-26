@@ -15,8 +15,8 @@ import { execFileSync } from 'child_process';
 import { initSquad } from '@bradygaster/squad-sdk';
 import type { InitOptions } from '@bradygaster/squad-sdk';
 import { runInit } from '@bradygaster/squad-cli/core/init';
-import { runDoctor } from '@bradygaster/squad-cli/commands/doctor';
-import type { DoctorCheck } from '@bradygaster/squad-cli/commands/doctor';
+import { runDoctor } from '@bradygaster/squad-cli/cli/commands/doctor';
+import type { DoctorCheck } from '@bradygaster/squad-cli/cli/commands/doctor';
 
 const TEST_ROOT = join(process.cwd(), `.test-init-scaffold-${randomBytes(4).toString('hex')}`);
 

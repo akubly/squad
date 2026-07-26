@@ -4,7 +4,7 @@
  * @module platform/ralph-commands
  */
 
-import type { PlatformType } from './types.js';
+import type { PlatformType, WorkItemSource } from './types.js';
 
 export interface RalphCommands {
   listUntriaged: string;
@@ -18,11 +18,12 @@ export interface RalphCommands {
 }
 
 /**
- * Get Ralph scan/triage commands for a given platform.
+ * Get Ralph scan/triage commands for a given platform or work-item source.
  * GitHub → gh CLI commands
  * Azure DevOps → az CLI commands
+ * Planner → Graph API commands via az token
  */
-export function getRalphScanCommands(platform: PlatformType): RalphCommands {
+export function getRalphScanCommands(platform: PlatformType | WorkItemSource): RalphCommands {
   switch (platform) {
     case 'github':
       return getGitHubRalphCommands();

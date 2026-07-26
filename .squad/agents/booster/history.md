@@ -156,3 +156,27 @@ Updated both release-process skill files (`.squad/skills/release-process/SKILL.m
 - `.github/workflows/ci-rerun.yml` (deleted)
 - `.github/actions/setup-squad-node/action.yml` (comment update)
 - `.github/workflows/squad-ci.yml` (streamlined)
+
+### Template parity gates — 2026-05-15T23:20:52.565-07:00
+**Regression pattern:** A self-healing `beforeAll()` hook can defeat mirror-parity coverage by rewriting tracked files before byte-for-byte assertions run. That makes stale committed mirrors look healthy even when the tracked checkout was wrong at test start.
+
+**Fix shape used:** Added a pre-sync parity gate in `test/template-sync.test.ts` that snapshots SHA-256 hashes for every tracked mirror target, runs `node scripts/sync-templates.mjs`, and fails if any tracked mirror file changed during the sync. The existing byte-for-byte parity assertions stay in place after the gate.
+
+**Key paths:**
+- `test/template-sync.test.ts`
+- `scripts/sync-templates.mjs`
+- `templates/squad.agent.md.template`
+- `packages/squad-cli/templates/squad.agent.md.template`
+- `packages/squad-sdk/templates/squad.agent.md.template`
+- `.github/agents/squad.agent.md`
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+📌 **2026-06-05: Specs 32-35 staged on akubly/upstream-specs (commit 211102b4). New cross-repo arc kickoff is piece 32 (off piece 25.5). Replaces archived pieces 26-31. See upstream specs for design + prompts at _planning/prompts/.**

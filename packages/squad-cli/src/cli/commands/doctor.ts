@@ -12,12 +12,22 @@
 
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { FSStorageProvider, resolveStateBackend, type StateBackendType } from '@bradygaster/squad-sdk';
 import { resolveStateDir } from '../core/effective-squad-dir.js';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from '../core/squad-file-conventions.js';
+import { runDoctor as runRegistryDoctor } from '../../commands/doctor.js';
+import { getGitRoot } from '../../lib/git-root.js';
+import { RED, YELLOW, DIM, RESET } from '../core/output.js';
+import type { DoctorFinding, DoctorSeverity } from './doctor-types.js';
+export type { DoctorFinding, DoctorSeverity, DoctorSource, DoctorRepair } from './doctor-types.js';
 
 const storage = new FSStorageProvider();
 
-/** Result of a single diagnostic check. */
+/**
+ * Result of a single diagnostic check.
+ * @deprecated Use `DoctorFinding` from the unified doctor (`runUnifiedDoctor`).
+ */
 export interface DoctorCheck {
   name: string;
   status: 'pass' | 'fail' | 'warn';
@@ -304,6 +314,155 @@ function checkRateLimitStatus(squadDir: string): DoctorCheck | undefined {
   };
 }
 
+function conventionPath(value: string): string {
+  return value.trim().split(/\s+/)[0] ?? '';
+}
+
+function isConventionCoveredByParent(entry: string, lines: string[]): boolean {
+  const entryPath = conventionPath(entry);
+  if (!entryPath) return false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) continue;
+
+    const linePath = conventionPath(trimmed);
+    if (!linePath) continue;
+
+    const parent = linePath.endsWith('/') ? linePath : `${linePath}/`;
+    if (entryPath.startsWith(parent) && entryPath !== linePath) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function findMissingConventions(required: readonly string[], content: string): string[] {
+  const lines = content.split('\n');
+  return required.filter((entry) => {
+    const normalized = entry.trim();
+    const hasExactLine = lines.some((line) => line.trim() === normalized);
+    return !hasExactLine && !isConventionCoveredByParent(normalized, lines);
+  });
+}
+
+export function checkGitattributes(cwd: string): DoctorCheck {
+  const filePath = path.join(cwd, '.gitattributes');
+  if (!fileExists(filePath)) {
+    return {
+      name: '.gitattributes upgrade rules',
+      status: 'fail',
+      message: "file not found — Run 'squad upgrade'",
+    };
+  }
+
+  const content = storage.readSync(filePath) ?? '';
+  const missing = findMissingConventions(GITATTRIBUTES_RULES, content);
+  if (missing.length > 0) {
+    return {
+      name: '.gitattributes upgrade rules',
+      status: 'warn',
+      message: `missing ${missing.length} rule${missing.length === 1 ? '' : 's'}: ${missing.join(', ')} — Run 'squad upgrade'`,
+    };
+  }
+
+  return {
+    name: '.gitattributes upgrade rules',
+    status: 'pass',
+    message: `${GITATTRIBUTES_RULES.length} required rule${GITATTRIBUTES_RULES.length === 1 ? '' : 's'} present or covered`,
+  };
+}
+
+export function checkGitignore(cwd: string): DoctorCheck {
+  const filePath = path.join(cwd, '.gitignore');
+  if (!fileExists(filePath)) {
+    return {
+      name: '.gitignore upgrade entries',
+      status: 'fail',
+      message: "file not found — Run 'squad upgrade'",
+    };
+  }
+
+  const content = storage.readSync(filePath) ?? '';
+  const missing = findMissingConventions(GITIGNORE_ENTRIES, content);
+  if (missing.length > 0) {
+    return {
+      name: '.gitignore upgrade entries',
+      status: 'warn',
+      message: `missing ${missing.length} entr${missing.length === 1 ? 'y' : 'ies'}: ${missing.join(', ')} — Run 'squad upgrade'`,
+    };
+  }
+
+  return {
+    name: '.gitignore upgrade entries',
+    status: 'pass',
+    message: `${GITIGNORE_ENTRIES.length} required entr${GITIGNORE_ENTRIES.length === 1 ? 'y' : 'ies'} present or covered`,
+  };
+}
+
+export function checkCopilotSkillsSync(cwd: string, squadDir: string): DoctorCheck | undefined {
+  if (!isDirectory(squadDir)) return undefined;
+
+  const skillsDir = path.join(cwd, '.copilot', 'skills');
+  if (!isDirectory(skillsDir)) {
+    return {
+      name: '.copilot/skills sync',
+      status: 'warn',
+      message: "directory not found — Run 'squad upgrade'",
+    };
+  }
+
+  let count = 0;
+  try {
+    for (const entry of storage.listSync(skillsDir)) {
+      if (storage.isDirectorySync(path.join(skillsDir, entry))) count++;
+    }
+  } catch {
+    count = 0;
+  }
+
+  if (count === 0) {
+    return {
+      name: '.copilot/skills sync',
+      status: 'warn',
+      message: "directory is empty — Run 'squad upgrade'",
+    };
+  }
+
+  return {
+    name: '.copilot/skills sync',
+    status: 'pass',
+    message: `${count} skill${count === 1 ? '' : 's'} synced`,
+  };
+}
+
+export function checkCopilotInstructions(cwd: string, squadDir: string): DoctorCheck | undefined {
+  const teamPath = path.join(squadDir, 'team.md');
+  if (!fileExists(teamPath)) return undefined;
+
+  const teamContent = storage.readSync(teamPath) ?? '';
+  if (!hasCodingAgent(teamContent)) return undefined;
+
+  const instructionsPath = path.join(cwd, '.github', 'copilot-instructions.md');
+  const exists = fileExists(instructionsPath);
+  return {
+    name: '.github/copilot-instructions.md',
+    status: exists ? 'pass' : 'fail',
+    message: exists ? 'file present for Coding Agent workflow' : "file not found — Run 'squad upgrade'",
+  };
+}
+
+export function checkGlobalAgent(homeDir?: string): DoctorCheck {
+  const agentPath = path.join(homeDir ?? os.homedir(), '.copilot', 'agents', 'squad.agent.md');
+  const exists = fileExists(agentPath);
+  return {
+    name: '~/.copilot/agents/squad.agent.md',
+    status: exists ? 'pass' : 'warn',
+    message: exists ? 'global Squad agent present' : "file not found — Run 'squad upgrade'",
+  };
+}
+
 function formatAge(seconds: number): string {
   if (seconds >= 3600) {
     const h = Math.floor(seconds / 3600);
@@ -455,7 +614,11 @@ function checkCopilotSdkSessionPatch(cwd: string): DoctorCheck {
 }
 
 function checkSquadAgentMd(cwd: string): DoctorCheck {
-  const agentMdPath = path.join(cwd, '.github', 'agents', 'squad.agent.md');
+  // E1 (piece 50): resolve the agent discovery file against the git repository root so a
+  // subfolder host whose coordinator file lives at the git root passes from any working
+  // directory. Fall back to cwd-relative behavior when not inside a git work tree.
+  const base = getGitRoot(cwd) ?? cwd;
+  const agentMdPath = path.join(base, '.github', 'agents', 'squad.agent.md');
   if (!fileExists(agentMdPath)) {
     return {
       name: '.github/agents/squad.agent.md',
@@ -619,7 +782,11 @@ export async function runDoctor(cwd?: string): Promise<DoctorCheck[]> {
     checks.push(checkTeamRootResolves(squadDir, teamRoot));
   }
 
-  // 5–9 standard files (only if .squad/ exists)
+  // 5. Upgrade-managed repository conventions
+  checks.push(checkGitattributes(resolvedCwd));
+  checks.push(checkGitignore(resolvedCwd));
+
+  // 6–10 standard files (only if .squad/ exists)
   if (isDirectory(squadDir)) {
     // Resolve effective state dir for externalized files
     const stateDir = resolveStateDir(squadDir);
@@ -630,19 +797,22 @@ export async function runDoctor(cwd?: string): Promise<DoctorCheck[]> {
     checks.push(checkDecisionsMd(resolvedCwd, squadDir, stateDir));
     const rateLimitCheck = checkRateLimitStatus(squadDir);
     if (rateLimitCheck) checks.push(rateLimitCheck);
-
-    // Hook presence check (only for two-layer / orphan backends)
     const hookCheck = checkGitSyncHooks(resolvedCwd, squadDir);
     if (hookCheck) checks.push(hookCheck);
+    const skillsCheck = checkCopilotSkillsSync(resolvedCwd, squadDir);
+    if (skillsCheck) checks.push(skillsCheck);
+    const instructionsCheck = checkCopilotInstructions(resolvedCwd, squadDir);
+    if (instructionsCheck) checks.push(instructionsCheck);
   }
 
-  // 10. Copilot agent discovery file (relative to cwd, not squadDir)
+  // 11. Copilot agent discovery files
   checks.push(checkSquadAgentMd(resolvedCwd));
+  checks.push(checkGlobalAgent());
 
-  // 11. Node.js version (node:sqlite availability)
+  // 12. Node.js version (node:sqlite availability)
   checks.push(checkNodeVersion());
 
-  // 11-12. ESM compatibility (Node 22/24+)
+  // 13-14. ESM compatibility (Node 22/24+)
   checks.push(checkVscodeJsonrpcExports(resolvedCwd));
   checks.push(checkCopilotSdkSessionPatch(resolvedCwd));
 
@@ -697,4 +867,138 @@ export async function doctorCommand(cwd?: string): Promise<void> {
   const mode = getDoctorMode(resolvedCwd);
   const checks = await runDoctor(resolvedCwd);
   printDoctorReport(checks, mode);
+}
+
+// ── Unified doctor ───────────────────────────────────────────────────
+
+export interface UnifiedDoctorOpts {
+  cwd: string;
+  registryPath?: string;
+  /** Override user-scoped Copilot home for orphan detection (test seam). */
+  copilotHome?: string;
+}
+
+/**
+ * Run both the system doctor and the registry doctor, returning a unified
+ * `DoctorFinding[]` sorted by source. `passCount` tracks system checks that
+ * passed (passes are not included in `findings`).
+ */
+export async function runUnifiedDoctor(opts: UnifiedDoctorOpts): Promise<{
+  findings: DoctorFinding[];
+  passCount: number;
+}> {
+  const { cwd, registryPath, copilotHome } = opts;
+
+  // ── System checks ──────────────────────────────────────────────────
+  const checks = await runDoctor(cwd);
+  let passCount = 0;
+  const systemFindings: DoctorFinding[] = [];
+
+  for (const check of checks) {
+    if (check.status === 'pass') {
+      passCount++;
+      continue;
+    }
+    let severity: DoctorSeverity;
+    if (check.status === 'fail') {
+      severity = 'error';
+    } else {
+      // status === 'warn'
+      severity = check.severity === 'info' ? 'info' : 'warn';
+    }
+    systemFindings.push({
+      severity,
+      label: check.name,
+      message: check.message,
+      source: 'system',
+    });
+  }
+
+  // ── Registry checks ────────────────────────────────────────────────
+  const registryResult = await runRegistryDoctor({ cwd, registryPath, copilotHome });
+  const registryFindings: DoctorFinding[] = registryResult.findings.map(f => ({
+    severity: registryResult.severity,
+    label: _findingLabel(f),
+    message: f,
+    source: 'registry',
+  }));
+
+  return { findings: [...systemFindings, ...registryFindings], passCount };
+}
+
+/** Derive a short kebab-case label from a registry finding string. */
+function _findingLabel(finding: string): string {
+  const clean = finding.replace(/^Warning:\s+/i, '');
+  const first = clean.split(/[:.]/)[0] ?? clean;
+  return first
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 40);
+}
+
+// ── Rendering & exit-code helpers ─────────────────────────────────────────────
+
+/**
+ * Render a single doctor finding to the appropriate output stream.
+ * `error` and `warn` → stderr; `info` → stdout.
+ */
+export function renderFinding(f: DoctorFinding, noColor: boolean): void {
+  let prefix: string;
+  switch (f.severity) {
+    case 'error':
+      prefix = noColor ? '[error]' : `${RED}[error]${RESET}`;
+      break;
+    case 'warn':
+      prefix = noColor ? '[warn]' : `${YELLOW}[warn]${RESET}`;
+      break;
+    case 'info':
+      prefix = noColor ? '[info]' : `${DIM}[info]${RESET}`;
+      break;
+    default: {
+      const _exhaustive: never = f.severity;
+      throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
+    }
+  }
+  let line: string;
+  switch (f.source) {
+    case 'system':
+      line = `${prefix} ${f.label} — ${f.message}`;
+      break;
+    case 'registry':
+      line = `${prefix} ${f.message}`;
+      break;
+    default: {
+      const _exhaustive: never = f.source;
+      throw new Error(`Unhandled DoctorSource: ${_exhaustive}`);
+    }
+  }
+  if (f.severity === 'info') {
+    console.log(line);
+  } else {
+    console.error(line);
+  }
+}
+
+/**
+ * Derive the process exit code from a set of findings.
+ * Returns `2` if any finding has `severity === 'error'`, else `0`.
+ * The exhaustive switch ensures new `DoctorSeverity` variants are caught at compile time.
+ */
+export function deriveExitCode(findings: readonly DoctorFinding[]): 0 | 2 {
+  for (const f of findings) {
+    switch (f.severity) {
+      case 'error':
+        return 2;
+      case 'warn':
+      case 'info':
+        break;
+      default: {
+        const _exhaustive: never = f.severity;
+        throw new Error(`Unexpected doctor severity: ${_exhaustive}`);
+      }
+    }
+  }
+  return 0;
 }

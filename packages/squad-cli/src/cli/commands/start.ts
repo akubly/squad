@@ -39,6 +39,7 @@ export interface StartOptions {
   port: number;
   copilotArgs?: string[];
   command?: string;
+  squadDir?: string;
 }
 
 async function checkNodePty(): Promise<any> {
@@ -72,11 +73,13 @@ export async function runStart(cwd: string, options: StartOptions): Promise<void
 
   const { repo, branch } = getGitInfo(cwd);
   const machine = getMachineId();
-  const squadDir = storage.existsSync(path.join(cwd, '.squad'))
-    ? path.join(cwd, '.squad')
-    : storage.existsSync(path.join(cwd, '.ai-team'))
-      ? path.join(cwd, '.ai-team')
-      : '';
+  const squadDir = options.squadDir !== undefined
+    ? options.squadDir
+    : storage.existsSync(path.join(cwd, '.squad'))
+      ? path.join(cwd, '.squad')
+      : storage.existsSync(path.join(cwd, '.ai-team'))
+        ? path.join(cwd, '.ai-team')
+        : '';
 
   // ─── Setup remote bridge (after verifying PTY is available) ───
   let bridge: RemoteBridge | null = null;
@@ -136,8 +139,7 @@ export async function runStart(cwd: string, options: StartOptions): Promise<void
       tunnelUrl = tunnelUrlWithToken;
       console.log(`${GREEN}✓${RESET} Remote: ${BOLD}${tunnelUrlWithToken}${RESET}`);
       try {
-        // @ts-expect-error — qrcode-terminal is an optional dependency
-        const qrcode = (await import('qrcode-terminal')) as any;
+        const qrcode = await import('qrcode-terminal');
         qrcode.default.generate(tunnelUrlWithToken, { small: true }, (code: string) => { console.log(code); });
       } catch {}
       console.log(`${DIM}Scan QR or open URL on phone. Starting copilot...${RESET}\n`);

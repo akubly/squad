@@ -33,6 +33,7 @@ export interface RCOptions {
   tunnel: boolean;
   port: number;
   path?: string;
+  squadDir?: string;
 }
 
 /**
@@ -59,11 +60,13 @@ export async function runRC(cwd: string, options: RCOptions): Promise<void> {
   const machine = getMachineId();
 
   // Resolve squad directory
-  const squadDir = storage.existsSync(path.join(cwd, '.squad'))
-    ? path.join(cwd, '.squad')
-    : storage.existsSync(path.join(cwd, '.ai-team'))
-      ? path.join(cwd, '.ai-team')
-      : '';
+  const squadDir = options.squadDir !== undefined
+    ? options.squadDir
+    : storage.existsSync(path.join(cwd, '.squad'))
+      ? path.join(cwd, '.squad')
+      : storage.existsSync(path.join(cwd, '.ai-team'))
+        ? path.join(cwd, '.ai-team')
+        : '';
 
   console.log(`\n${BOLD}🎮 Squad Remote Control${RESET}\n`);
   console.log(`  ${DIM}Repo:${RESET}    ${repo}`);
@@ -271,8 +274,7 @@ export async function runRC(cwd: string, options: RCOptions): Promise<void> {
 
         // Show QR code
         try {
-          // @ts-ignore - no type declarations for qrcode-terminal
-          const qrcode = (await import('qrcode-terminal')) as any;
+          const qrcode = await import('qrcode-terminal');
           qrcode.default.generate(tunnel.url, { small: true }, (code: string) => {
             console.log(code);
           });

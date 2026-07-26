@@ -7,11 +7,14 @@ import {
   detectPlatformFromUrl,
   parseGitHubRemote,
   parseAzureDevOpsRemote,
+  normalizeRemoteUrl,
 } from '../packages/squad-sdk/src/platform/detect.js';
 import { detectWorkItemSource } from '../packages/squad-sdk/src/platform/detect.js';
-import { getRalphScanCommands } from '../packages/squad-sdk/src/platform/ralph-commands.js';
+import { getRalphScanCommands, getPlannerRalphCommands } from '../packages/squad-sdk/src/platform/ralph-commands.js';
 import { mapPlannerTaskToWorkItem } from '../packages/squad-sdk/src/platform/planner.js';
+import { PlatformConfigError } from '../packages/squad-sdk/src/platform/types.js';
 import type { PlatformType, WorkItem, PullRequest, WorkItemSource, HybridPlatformConfig, PlatformAdapter } from '../packages/squad-sdk/src/platform/types.js';
+import { GitHubAdapter } from '../packages/squad-sdk/src/platform/github.js';
 
 // ─── Platform Detection from URL ───────────────────────────────────────
 
@@ -44,15 +47,15 @@ describe('detectPlatformFromUrl', () => {
     expect(detectPlatformFromUrl('https://myorg.visualstudio.com/myproject/_git/myrepo')).toBe('azure-devops');
   });
 
-  it('defaults to github for unknown remotes', () => {
+  it('returns github for unrecognized remotes', () => {
     expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('github');
   });
 
-  it('defaults to github for empty string', () => {
+  it('returns github for empty string', () => {
     expect(detectPlatformFromUrl('')).toBe('github');
   });
 
-  it('defaults to github for random string', () => {
+  it('returns github for random string', () => {
     expect(detectPlatformFromUrl('not-a-url')).toBe('github');
   });
 });
@@ -186,6 +189,76 @@ describe('parseAzureDevOpsRemote', () => {
   it('parses visualstudio.com repo name containing dots', () => {
     const result = parseAzureDevOpsRemote('https://contoso.visualstudio.com/WebApp/_git/api.service.git');
     expect(result).toEqual({ org: 'contoso', project: 'WebApp', repo: 'api.service' });
+  });
+});
+
+// ─── normalizeRemoteUrl ────────────────────────────────────────────────
+
+describe('normalizeRemoteUrl', () => {
+  // GitHub HTTPS
+  it('normalises GitHub HTTPS .git URL — lowercases host, strips .git', () => {
+    expect(normalizeRemoteUrl('https://github.com/Owner/Repo.git')).toBe('github.com/Owner/Repo');
+  });
+
+  it('normalises GitHub HTTPS URL without .git', () => {
+    expect(normalizeRemoteUrl('https://github.com/Owner/Repo')).toBe('github.com/Owner/Repo');
+  });
+
+  it('strips trailing slash from GitHub HTTPS URL', () => {
+    expect(normalizeRemoteUrl('https://github.com/Owner/Repo/')).toBe('github.com/Owner/Repo');
+  });
+
+  it('lowercases only the host — preserves owner and repo casing', () => {
+    expect(normalizeRemoteUrl('https://GITHUB.COM/MyOrg/MyRepo.git')).toBe('github.com/MyOrg/MyRepo');
+  });
+
+  // GitHub SSH
+  it('normalises GitHub SSH URL', () => {
+    expect(normalizeRemoteUrl('git@github.com:Owner/Repo.git')).toBe('github.com/Owner/Repo');
+  });
+
+  it('normalises GitHub SSH URL without .git', () => {
+    expect(normalizeRemoteUrl('git@github.com:Owner/Repo')).toBe('github.com/Owner/Repo');
+  });
+
+  // ADO canonical dev.azure.com HTTPS
+  it('normalises dev.azure.com HTTPS to canonical form', () => {
+    expect(normalizeRemoteUrl('https://dev.azure.com/myorg/myproj/_git/myrepo'))
+      .toBe('dev.azure.com/myorg/myproj/_git/myrepo');
+  });
+
+  it('strips user-info prefix from dev.azure.com HTTPS URL', () => {
+    expect(normalizeRemoteUrl('https://myorg@dev.azure.com/myorg/myproj/_git/myrepo'))
+      .toBe('dev.azure.com/myorg/myproj/_git/myrepo');
+  });
+
+  // ADO SSH to canonical
+  it('collapses ssh.dev.azure.com SSH URL to canonical dev.azure.com form', () => {
+    expect(normalizeRemoteUrl('git@ssh.dev.azure.com:v3/myorg/myproj/myrepo'))
+      .toBe('dev.azure.com/myorg/myproj/_git/myrepo');
+  });
+
+  // ADO legacy visualstudio.com to canonical
+  it('collapses legacy visualstudio.com URL to canonical dev.azure.com form', () => {
+    expect(normalizeRemoteUrl('https://contoso.visualstudio.com/WebApp/_git/frontend'))
+      .toBe('dev.azure.com/contoso/WebApp/_git/frontend');
+  });
+
+  // ADO legacy SSH visualstudio.com to canonical
+  it('collapses legacy vs-ssh.visualstudio.com SSH URL to canonical dev.azure.com form', () => {
+    expect(normalizeRemoteUrl('contoso@vs-ssh.visualstudio.com:v3/contoso/MyProject/MyRepo'))
+      .toBe('dev.azure.com/contoso/MyProject/_git/MyRepo');
+  });
+
+  // GitHub Enterprise (non-ADO generic host)
+  it('normalises GitHub Enterprise HTTPS URL — only host is lowercased', () => {
+    expect(normalizeRemoteUrl('https://github.mycompany.com/Owner/Repo.git'))
+      .toBe('github.mycompany.com/Owner/Repo');
+  });
+
+  it('normalises GitHub Enterprise SSH URL', () => {
+    expect(normalizeRemoteUrl('git@github.mycompany.com:Owner/Repo.git'))
+      .toBe('github.mycompany.com/Owner/Repo');
   });
 });
 
@@ -482,8 +555,7 @@ describe('getRalphScanCommands', () => {
   });
 
   it('defaults to github commands for unknown platform', () => {
-    // Cast to bypass type checking for edge case test
-    const cmds = getRalphScanCommands('unknown' as PlatformType);
+    const cmds = getRalphScanCommands('unknown');
     expect(cmds.listUntriaged).toContain('gh issue list');
   });
 });
@@ -499,6 +571,11 @@ describe('PlatformType', () => {
   it('azure-devops is a valid PlatformType', () => {
     const t: PlatformType = 'azure-devops';
     expect(t).toBe('azure-devops');
+  });
+
+  it('unknown is a valid PlatformType', () => {
+    const t: PlatformType = 'unknown';
+    expect(t).toBe('unknown');
   });
 });
 
@@ -550,9 +627,11 @@ describe('edge cases', () => {
 // ─── Planner Adapter ──────────────────────────────────────────────────
 
 describe('PlannerAdapter', () => {
-  it('planner is a valid PlatformType', () => {
-    const t: PlatformType = 'planner';
-    expect(t).toBe('planner');
+  it('planner is a WorkItemSource (not a git PlatformType)', () => {
+    // PlatformType covers git platforms: 'github' | 'azure-devops' | 'unknown'.
+    // 'planner' lives in WorkItemSource only — used via HybridPlatformConfig.workItems.
+    const s: import('../packages/squad-sdk/src/platform/types.js').WorkItemSource = 'planner';
+    expect(s).toBe('planner');
   });
 
   it('PlannerAdapter can be constructed with a plan ID', async () => {
@@ -702,8 +781,14 @@ describe('WorkItemSource', () => {
 
 // ─── Ralph Planner Commands ───────────────────────────────────────────
 
-describe('getRalphScanCommands planner', () => {
-  const cmds = getRalphScanCommands('planner');
+// ─── getRalphScanCommands planner ─────────────────────────────────────
+// NOTE: 'planner' is a WorkItemSource, not a PlatformType.
+// Planner-specific Ralph commands are available via getPlannerRalphCommands()
+// directly from the ralph-commands module. getRalphScanCommands() only
+// accepts valid PlatformType values ('github' | 'azure-devops' | 'unknown').
+
+describe('getPlannerRalphCommands', () => {
+  const cmds = getPlannerRalphCommands();
 
   it('returns Graph API curl for untriaged', () => {
     expect(cmds.listUntriaged).toContain('graph.microsoft.com');
@@ -749,10 +834,9 @@ describe('AzureDevOpsAdapter work item config', () => {
   // We can't call the adapter directly (needs az CLI), but we test the
   // exported interface and constructor shape via the type system + factory.
 
-  it('AdoWorkItemConfig type is exported from platform index', async () => {
+  it('createAdapterForOrigin is exported from platform index', async () => {
     const mod = await import('../packages/squad-sdk/src/platform/index.js');
-    // The type is export-only (interface), but AzureDevOpsAdapter is exported as a class
-    expect(mod.AzureDevOpsAdapter).toBeDefined();
+    expect(mod.createAdapterForOrigin).toBeDefined();
   });
 
   it('AzureDevOpsAdapter constructor accepts 4th workItemConfig param', async () => {
@@ -1082,21 +1166,198 @@ describe('ADO config.json read/write round-trip', () => {
 });
 
 describe('ADO exports from platform index', () => {
-  it('exports getAvailableWorkItemTypes function', async () => {
+  it('does not export getAvailableWorkItemTypes from the barrel (internal helper)', async () => {
     const mod = await import('../packages/squad-sdk/src/platform/index.js');
-    expect(typeof mod.getAvailableWorkItemTypes).toBe('function');
+    // getAvailableWorkItemTypes is an implementation detail — not in the spec API surface
+    expect((mod as Record<string, unknown>)['getAvailableWorkItemTypes']).toBeUndefined();
   });
 
-  it('exports validateWorkItemType function', async () => {
+  it('exports normalizeRemoteUrl from the platform barrel', async () => {
     const mod = await import('../packages/squad-sdk/src/platform/index.js');
-    expect(typeof mod.validateWorkItemType).toBe('function');
+    expect(typeof mod.normalizeRemoteUrl).toBe('function');
   });
 
-  it('getAvailableWorkItemTypes returns array from index re-export', async () => {
+  it('normalizeRemoteUrl returns a string from the barrel re-export', async () => {
     const mod = await import('../packages/squad-sdk/src/platform/index.js');
-    const types = mod.getAvailableWorkItemTypes('test-org', 'test-proj');
-    expect(Array.isArray(types)).toBe(true);
-    expect(types.length).toBeGreaterThan(0);
+    const result = mod.normalizeRemoteUrl('https://github.com/owner/repo.git');
+    expect(typeof result).toBe('string');
+    expect(result).toBe('github.com/owner/repo');
+  });
+});
+
+// ─── createAdapterForOrigin factory ───────────────────────────────────
+
+describe('createAdapterForOrigin', () => {
+  it('is exported from the platform index', async () => {
+    const mod = await import('../packages/squad-sdk/src/platform/index.js');
+    expect(typeof mod.createAdapterForOrigin).toBe('function');
+  });
+
+  it('returns a GitHubAdapter for a github.com HTTPS URL', async () => {
+    const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    // GitHubAdapter constructor runs fine without network; az CLI only needed for ADO
+    const adapter = createAdapterForOrigin('https://github.com/org/repo');
+    expect(adapter.type).toBe('github');
+    expect(adapter).toBeInstanceOf(GitHubAdapter);
+  });
+
+  it('returns a GitHubAdapter for a github.com SSH URL', async () => {
+    const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    const adapter = createAdapterForOrigin('git@github.com:owner/myrepo.git');
+    expect(adapter.type).toBe('github');
+    expect(adapter).toBeInstanceOf(GitHubAdapter);
+  });
+
+  it('throws for an unknown host', async () => {
+    const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    expect(() => createAdapterForOrigin('https://gitlab.com/owner/repo.git')).toThrow(PlatformConfigError);
+  });
+
+  it('throws with actionable message for unknown host', async () => {
+    const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    expect(() => createAdapterForOrigin('https://bitbucket.org/owner/repo')).toThrow(PlatformConfigError);
+  });
+
+  it('does not silently fall back to GitHub for unknown hosts', async () => {
+    const { createAdapterForOrigin } = await import('../packages/squad-sdk/src/platform/adapter-factory.js');
+    expect(() => createAdapterForOrigin('https://unknown-host.example.com/repo')).toThrow(PlatformConfigError);
+  });
+});
+
+// ─── detectPlatformFromUrl github fallback ─────────────────────────────
+
+describe('detectPlatformFromUrl unknown host behavior', () => {
+  it('returns github for gitlab.com', () => {
+    expect(detectPlatformFromUrl('https://gitlab.com/owner/repo.git')).toBe('github');
+  });
+
+  it('returns github for bitbucket.org', () => {
+    expect(detectPlatformFromUrl('https://bitbucket.org/owner/repo.git')).toBe('github');
+  });
+
+  it('returns github for arbitrary host', () => {
+    expect(detectPlatformFromUrl('https://self-hosted.example.com/repo')).toBe('github');
+  });
+});
+
+// ─── PlatformAdapter optional methods ─────────────────────────────────
+
+describe('PlatformAdapter optional methods (assignWorkItem, getCurrentUser)', () => {
+  it('assignWorkItem is optional on the interface', () => {
+    const adapter: PlatformAdapter = {
+      type: 'github',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+    // assignWorkItem is not implemented — optional call must not throw
+    expect(adapter.assignWorkItem).toBeUndefined();
+  });
+
+  it('getCurrentUser is optional on the interface', () => {
+    const adapter: PlatformAdapter = {
+      type: 'github',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+    expect(adapter.getCurrentUser).toBeUndefined();
+  });
+
+  it('assignment routes through adapter.assignWorkItem?.() and handles absent method', async () => {
+    let assigned: { id: number; assignee: string } | undefined;
+    const adapterWith: PlatformAdapter = {
+      type: 'github',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      assignWorkItem: async (id, assignee) => { assigned = { id, assignee }; },
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+
+    const adapterWithout: PlatformAdapter = {
+      type: 'azure-devops',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+
+    // Route through adapter — optional call pattern
+    await adapterWith.assignWorkItem?.(42, 'alice');
+    expect(assigned).toEqual({ id: 42, assignee: 'alice' });
+
+    // Adapter without the method — must not throw
+    const noOp = adapterWithout.assignWorkItem;
+    expect(noOp).toBeUndefined();
+    // Optional call pattern produces undefined — safe
+    const result = await Promise.resolve(adapterWithout.assignWorkItem?.(42, 'alice'));
+    expect(result).toBeUndefined();
+  });
+
+  it('auth preflight calls adapter.ensureAuth?.() without requiring every adapter to implement it', async () => {
+    let authCalled = false;
+    const adapter: PlatformAdapter = {
+      type: 'github',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      ensureAuth: async () => { authCalled = true; },
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+
+    const adapterNoAuth: PlatformAdapter = {
+      type: 'azure-devops',
+      listWorkItems: async () => [],
+      getWorkItem: async (id) => ({ id, title: '', state: '', tags: [], url: '' }),
+      createWorkItem: async (o) => ({ id: 1, title: o.title, state: 'open', tags: [], url: '' }),
+      addTag: async () => {},
+      removeTag: async () => {},
+      addComment: async () => {},
+      listPullRequests: async () => [],
+      createPullRequest: async () => ({ id: 1, title: '', sourceBranch: '', targetBranch: '', status: 'active' as const, author: '', url: '' }),
+      mergePullRequest: async () => {},
+      createBranch: async () => {},
+    };
+
+    await adapter.ensureAuth?.();
+    expect(authCalled).toBe(true);
+
+    // Adapter without ensureAuth — must not throw
+    const result2 = await Promise.resolve(adapterNoAuth.ensureAuth?.());
+    expect(result2).toBeUndefined();
   });
 });
 

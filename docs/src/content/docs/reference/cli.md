@@ -38,6 +38,7 @@ squad init
 | `squad start [--tunnel] [--port N] [--command cmd]` | Start Copilot with remote phone access via PTY and WebSocket | No |
 | `squad status` | Show which squad is active and why | Yes |
 | `squad doctor` | Validate squad setup integrity and diagnose issues (alias: `heartbeat`) | Yes |
+| `squad install-fold-pipeline <github\|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>]` | Install the fold pipeline definition at the host repository root | Yes |
 | `squad upgrade` | Upgrade Squad-owned files to latest version | Yes |
 | `squad upgrade --state-backend <type>` | Migrate state backend (`orphan`, `two-layer`); installs git hooks automatically | Yes |
 | `squad upgrade --migrate-directory` | Rename legacy `.ai-team/` directory to `.squad/` | Yes |
@@ -72,6 +73,258 @@ squad init
 | `squad nap --dry-run` | Preview cleanup actions without changes | Yes |
 | `squad scrub-emails [directory]` | Remove email addresses from Squad state files (default: `.squad/`) | No |
 | `squad --version` | Print installed version | No |
+
+## Lifecycle command reference
+
+Use these commands to initialize a squad host, bind and unbind product repositories, list registered hosts, and maintain registry health.
+
+---
+
+### squad init
+
+Initialize a squad host in the current directory.
+
+**Synopsis:**
+
+```text
+squad init [--callsign <name>] [--target-dir <path>] [--registry-path <file>] [--no-register]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--callsign <name>` | Register the host under this name |
+| `--target-dir <path>` | Initialize in a specific directory |
+| `--registry-path <file>` | Use an alternate registry file |
+| `--no-register` | Scaffold the `.squad/` directory without registering |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Initialized or reactivated |
+| Non-zero | Usage error, callsign conflict, or file system error |
+
+**Examples:**
+
+```bash
+# Initialize and register under a callsign
+squad init --callsign my-team
+
+# Scaffold only — no registry entry
+squad init --no-register
+
+# Initialize in a specific directory
+squad init --target-dir ../team-repo --callsign shared
+```
+
+---
+
+### squad assign
+
+Bind the current product repository to a registered squad host. Also installs the host's `.copilot/` payload into your user-scoped Copilot home under callsign-prefixed names.
+
+**Synopsis:**
+
+```text
+squad assign <callsign> [--target-dir <path>] [--registry-path <file>]
+squad assign <url> --clone-to <path> [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--clone-to <path>` | Clone the host from `<url>` to this path before assigning |
+| `--callsign <name>` | Override the callsign when assigning by URL |
+| `--skills-from <callsign>` | Install skills, agents, and MCP entries from the named host's `.copilot/` directory |
+| `--target-dir <path>` | Resolve the product repo from a specific path |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Assigned or reactivated |
+| Non-zero | Usage error (URL without `--clone-to`), missing entry (unknown callsign), or file system error |
+
+**Examples:**
+
+```bash
+# Assign by callsign (warm path — host already registered)
+squad assign my-team
+
+# Assign by URL and clone (cold path — first-time setup on a new machine)
+squad assign https://github.com/org/team-repo --clone-to ../team-repo
+
+# Assign by URL with a custom callsign
+squad assign https://github.com/org/team-repo --clone-to ../team-repo --callsign ops
+```
+
+**Recovery paths:**
+
+- **URL without `--clone-to`** — `squad assign` exits with a usage error when you pass a URL without `--clone-to`. Add `--clone-to <local-path>` to specify where to clone the host.
+- **Unknown callsign** — run `squad list` to see available entries. Use `squad assign <url> --clone-to <path>` to set up from scratch.
+
+---
+
+### squad unassign
+
+Remove the current product repository's binding from its squad host. Also removes the callsign-namespaced Copilot payload installed by `squad assign`.
+
+**Synopsis:**
+
+```text
+squad unassign [--callsign <name>] [--target-dir <path>] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--callsign <name>` | Remove the binding for a specific registered callsign |
+| `--target-dir <path>` | Resolve the product repo from a specific path |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Unassigned, or already unassigned (no-op with informational message) |
+| Non-zero | File system error |
+
+**Examples:**
+
+```bash
+# Unassign the current directory
+squad unassign
+
+# Unassign a specific callsign binding
+squad unassign --callsign my-team
+```
+
+`squad unassign` never deletes the host repository or the product repository.
+
+---
+
+### squad list
+
+List registered squad hosts from the local registry.
+
+**Synopsis:**
+
+```text
+squad list [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Listed registered hosts successfully |
+| Non-zero | File system error |
+
+**Examples:**
+
+```bash
+# List registered squad hosts
+squad list
+
+# Read from a custom registry file
+squad list --registry-path ./tmp/squad-registry.json
+```
+
+---
+
+### squad install-fold-pipeline
+
+Install the CI definition that folds Squad inbox branches into state branches.
+
+**Synopsis:**
+
+```text
+squad install-fold-pipeline <github|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>]
+```
+
+**Behavior:**
+
+- Writes the definition at the host repository root: `.github/workflows/fold-squad-state.yml` for GitHub or `.azuredevops/fold-squad-state.yml` for ADO.
+- Without `--callsign`, installs one callsign-generic pipeline that discovers inbox callsigns at run time and folds each into `squad/state/<callsign>`.
+- With `--callsign <name>`, installs a scoped pipeline for that callsign only.
+- `--force` overwrites an existing pipeline file whose contents differ, saving the prior version to a `.bak` sibling first.
+- `--delete-folded-refs` renders the pipeline with inbox-branch cleanup enabled, so a successfully-folded `squad/inbox/<callsign>/<handle>` ref is deleted after its commits are folded. The default leaves cleanup **off** (`DELETE_FOLDED_REFS=false`); only refs that actually folded are ever deleted.
+- `--fold-service-connection <name>` (ADO only) renders the state-branch write-back to push under the named Azure DevOps service connection instead of the implicit build-service identity (see compliance note below). Omitting the flag renders a pipeline byte-identical to the default.
+
+**Prerequisite (default `System.AccessToken` path):** with no `--fold-service-connection`, the ADO fold job pushes `squad/state/<callsign>` under the project's build-service identity (`System.AccessToken`). The **minimum** permission that path requires on the host repository (for example, `dev.azure.com/contoso/MyProject`) is **Contribute**, **Create branch**, and **Force push** on the `squad/state/*` branches, because the job creates and force-updates those branches. Granting the shared Project Build Service account **Contribute** at the repository level is flagged as over-privileged by the **Securing Azure DevOps Build Service Accounts** control and should be remediated.
+
+**Compliant least-privilege alternative (recommended):** pass `--fold-service-connection <name>` to push under a per-resource Azure DevOps service connection backed by a managed identity or service principal (`aka.ms/azdosc`), scoped to only the state branches. This avoids granting the shared build service account repository-wide Contribute. Create the service connection in your project (for example, `dev.azure.com/contoso/MyProject`), grant it the minimum branch permission above on `squad/state/*`, then run `squad install-fold-pipeline ado --fold-service-connection <name>`. The rendered pipeline authenticates the checkout and push with that identity instead of `System.AccessToken`. The GitHub workflow is unaffected by this mechanism and continues to use its workflow `GITHUB_TOKEN`.
+
+**Azure DevOps run serialization:** the ADO fold pipeline runs as a stage with `lockBehavior: sequential` that references a protected Environment named `squad-fold`, so queued runs serialize through an exclusive lock and the fetch→fold→push critical section for a `squad/state/<callsign>` branch never overlaps across runs (`trigger.batch: true` still coalesces bursts and `--force-with-lease` remains the integrity backstop). As a one-time onboarding step, create the `squad-fold` Environment in your project (for example, under `dev.azure.com/contoso/MyProject`), add an **Exclusive lock** check to it, and grant the pipeline permission to use it. The GitHub workflow serializes runs through its `concurrency` group and needs no additional setup.
+
+---
+
+### squad doctor (lifecycle flags)
+
+In addition to general health checks, `squad doctor` provides cleanup operations for the registry.
+
+**Synopsis:**
+
+```text
+squad doctor [--registry-path <file>]
+squad doctor --purge <callsign> [--yes] [--registry-path <file>]
+squad doctor --normalize-callsigns [--apply] [--yes] [--registry-path <file>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--purge <callsign>` | Remove a registry entry entirely |
+| `--normalize-callsigns` | Detect callsign pairs that differ only by case |
+| `--apply` | Merge case collisions (requires `--normalize-callsigns`) |
+| `--yes` | Skip confirmation prompts |
+| `--registry-path <file>` | Use an alternate registry file |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Check passed or operation succeeded |
+| 1 | Diagnostics found error-severity issues |
+| Non-zero | Usage error (conflicting flags), refused purge (active consumers), or file system error |
+
+**Examples:**
+
+```bash
+# Run health diagnostics
+squad doctor
+
+# Remove an inactive registry entry
+squad doctor --purge my-old-team
+
+# Remove without confirmation
+squad doctor --purge my-old-team --yes
+
+# Detect callsign case collisions
+squad doctor --normalize-callsigns
+
+# Detect and merge callsign case collisions
+squad doctor --normalize-callsigns --apply
+```
+
+**Recovery paths:**
+
+- **Refused purge** — `squad doctor --purge` refuses to remove an entry that still has active consumers. Run `squad unassign` in each consumer repo first, then retry the purge.
+- **Conflicting flags** — `--normalize-callsigns` and `--purge` are mutually exclusive. Run them as separate commands.
+
+---
 
 ### Remote Init Mode
 
@@ -396,7 +649,7 @@ git clone my-project && cd my-project && squad doctor
 ✓ .gitattributes rules applied
 ```
 
-The doctor always exits cleanly (no error code) because it's a diagnostic tool, not a gate. Use it to troubleshoot setup issues, validate team state, or run before opening an issue on GitHub.
+The doctor exits with code 1 when it finds error-severity issues; otherwise it exits 0. Use it to troubleshoot setup issues, validate team state, or run before opening an issue on GitHub.
 
 ---
 

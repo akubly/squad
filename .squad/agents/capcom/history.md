@@ -2,17 +2,25 @@
 
 > Knowledge base for the SDK Expert. Append-only, union-merged across branches.
 
-## Learnings
+## Recent Work — Piece 34
 
-### 2026-03-14: WSL Transient API Error Investigation (Issue #363)
+**2026-06-06: Piece 34 SDK Contract Review — APPROVE**
 
-**Context:** User reported "Request failed due to a transient API error" on Ubuntu WSL with Copilot CLI v1.0.4, eventually hitting rate limits.
+Performed adversarial SDK contract review of commit `b0045b27` (client-side publish triggers). All four contract checks passed:
 
-**Investigation findings:**
-- Squad SDK already implements robust retry logic with exponential backoff (1s → 2s → 4s)
-- Retry logic in `adapter/client.ts:820-880` handles transient connection errors (ECONNREFUSED, ECONNRESET, EPIPE)
-- Rate limit detection in `adapter/errors.ts:229-245` with retry-after awareness
-- Error originates **upstream** from Copilot CLI/API platform, not Squad
+1. **Registry-first resolution (PASS)** — Both `runSync` and `runSyncStatus` use `loadRegistryFromDisk()` → registry-resolved `teamRoot`. config.json in fallback only.
+
+2. **`installCrossRepoHook` signature (PASS)** — Explicit `docsRepoPath` parameter. Warm-path call-site registry-resolved. Injectable seam `_installCrossRepoHookFn` follows piece-32 pattern.
+
+3. **HookPipeline non-conflation (PASS)** — SDK HookPipeline not referenced. Sub-proposal B cleanly deferred with TODO stub and decision record.
+
+4. **`.last-publish` write points (PASS)** — Written after cross-repo and single-repo syncs complete. Best-effort wrapper cannot abort successful sync. Added to `PUBLISH_ALLOWLIST_EXACT`.
+
+**Verdict:** APPROVE — no changes requested. Registry topology intact; all contract checks pass.
+
+## Previous Work (Pieces 04–33)
+
+See history-archive.md for detailed SDK contract reviews and pattern learnings.
 - Copilot CLI v1.0.4 internal retry behavior triggers the rate limiting before Squad is invoked
 - Squad only interacts with CLI via `@github/copilot-sdk` adapter after CLI is already running
 
@@ -30,6 +38,24 @@
 3. **Copilot API platform** (upstream) — source of transient errors and rate limits
 
 Squad operates at layer #1, so issues at layers #2-3 are outside our control.
+
+### 2026-06-05: Piece 32.5 — State Transport Helpers Adversarial Review
+
+**Context:** EECOM implemented `publishTeamRootToInbox` and `hydrateTeamRootFromStateRef` in `packages/squad-cli/src/cli/commands/sync.ts` (uncommitted working-tree changes on `squad/piece-32.5-state-transport-helpers`).
+
+**Findings (all checks against CONTRACT FACTS for piece 33):**
+
+1. **Signatures** — Exact byte-for-byte match. Parameter names, types, order, `export async function` keyword all correct.
+2. **DEVELOPER_ALIAS_RE import** — `import { DEVELOPER_ALIAS_RE } from '@bradygaster/squad-sdk/validation'`. Identical source to `assign.ts`. The `./validation` subpath export is present in `packages/squad-sdk/package.json`. Regex value `/^[a-z][a-z0-9-]{1,38}$/` matches canonical. ✅
+3. **No forbidden internal resolution** — Neither helper body calls `detectBackend`, reads `config.json`, queries the registry, or resolves env-vars for input. All parameters received from caller. ✅
+4. **teamRoot semantics** — `enumerateSquadFiles` builds `path.join(teamRoot, '.squad')` as the base dir. Index file at `path.join(teamRoot, '.git', ...)`. Hydrate git-dir at `path.join(teamRoot, '.git')`. All file writes via `path.join(teamRoot, filePath)`. Correct parent-dir treatment throughout. ✅
+5. **Build** — Build fails, but baseline (committed state) already had identical TypeScript errors in `assign.ts`, `doctor.ts`, `init.ts`, `unassign.ts`. No new errors introduced by `sync.ts`. ✅ (pre-existing debt)
+6. **Export vs invoke** — Both helpers are `export async function`. Neither is called from `runSync`. ✅
+
+**Advisory (non-blocking):** `publishTeamRootToInbox` throws (rather than silently skips) on any `.squad/` file outside the allowlist. On a live squad repo with `team.md`, `agents/`, `plans/` under `.squad/`, the first call will throw. Strict-guard design — confirm or switch to filter semantics before piece 33 integration.
+
+**Verdict: APPROVE**
+
 ## Core Context
 
 - **Project:** Squad — AI agent orchestration framework
@@ -67,3 +93,67 @@ Written full technical analysis to `.squad/identity/sdk-init-technical-analysis.
 
 📌 **Team update (2026-03-25T18:11Z):** CLI platform research complete — identified Copilot CLI 1.0.5–1.0.11 (8 releases in 10 days) contain three high-impact changes affecting Squad routing: monorepo instruction discovery (1.0.11), idle subagent hiding (1.0.8), subagentStart hook context injection (1.0.7). SDK version pinning doesn't prevent CLI runtime auto-updates. Recommendations: clean up template naming, upgrade to SDK 0.2.0 customize mode, file CLI issue. Report in decisions inbox.
 
+📌 **Team update (2026-05-13T18:28:28Z — Piece 04 Adversarial Review Complete):** Piece 04 (path-utils-upsert-rename) approved after revision cycle. Deferred architectural findings for piece 05+: spurious @bradygaster/squad-cli changeset bump, normalisedPathKey re-export scope creep on resolution-v2.ts (registry primitive on resolver surface), wrapper-style registerEntry alias drift risk, @deprecated tag missing removal timeline. See `.squad/decisions.md` "### 2026-05-13: CAPCOM Review" for full action items. Future pieces that re-export SDK primitives should apply same scope discipline.
+
+### 2026-05-14T14:38:40.349-07:00: Piece 08a revision — SDK boundary and resolver parity
+
+Revised the read-only resolver migration under reviewer rejection lockout as CAPCOM. The revision kept SDK access through the root barrel by adding an overload-compatible registry-aware `resolveSquad` wrapper in `packages/squad-sdk/src/index.ts`, then rerouted `packages/squad-cli/src/cli-entry.ts`, `packages/squad-cli/src/cli/commands/config.ts`, and `packages/squad-cli/src/cli/commands/cross-squad.ts` away from SDK subpaths.
+
+The revision unified `discover` and `delegate` on v2 resolution, threaded `--team-root` / `SQUAD_TEAM_ROOT` into cross-squad discovery, and strengthened `test/cli/legacy-resolver-migration.test.ts` to cover SDK barrel import, override parity, delegate resolution, and the action-command boundary. `.changeset/migrate-readonly-commands.md` now records both CLI and SDK patch impact.
+
+**Revision complete:** Commit 0e4f301e. Logged to `.squad/orchestration-log/2026-05-14T21-38-40Z-capcom.md`. Full suite 6,308/6,432 PASS; build clean; scrub gates 2/4/5/6 PASS. CONTROL locked out for further 08a revisions unless re-rejection cycle restarts.
+
+### 2026-05-21: Canonical callsign validation convergence
+
+When the same validation rule spans SDK reader paths, payload namespace code, and CLI maintenance commands, extract a shared helper in the SDK and make downstream packages import it through the barrel instead of copying regexes inline.
+
+The specific smell to watch for is writer/reader/doctor triple-divergence: once those three paths disagree, users get inconsistent acceptance rules and tests stop guarding the real contract.
+
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.
+
+### 2026-06-05: Piece 32 adversarial contract review — registry state fields
+
+Performed peer-adversarial SDK contract review of piece 32 (stateRemote/stateBranch/developerAlias on RegistryEntry; `--state-remote`/`--state-branch`/`--developer-alias` on `squad assign`; `DEVELOPER_ALIAS_RE` extracted to `packages/squad-sdk/src/validation.ts` with `./validation` subpath export).
+
+**Key findings:**
+
+- **Re-assign preservation (H1): CORRECT.** Both `_warmPath` and `_coldStart` spread the existing entry first (`...entry` / `...baseEntry`) before applying conditional state-field overrides. Preservation test P32.A5 is a genuine disk round-trip, not a mock-only test.
+
+- **package.json export map (H2): VALID, COSMETICALLY BROKEN.** JSON is structurally valid (node-confirmed). `./validation` is correctly placed as a sibling export. `dist/validation.js` and `.d.ts` exist. However, brace indentation around lines 240–245 is shifted relative to every other export entry — visually implies nesting that does not exist.
+
+- **Error code convention (H4): SPEC MANDATES INCONSISTENCY.** `INVALID_ALIAS` breaks the `ERR_ASSIGN_*` prefix pattern shared by all other assign error codes. Spec errata should rename to `ERR_ASSIGN_INVALID_ALIAS` before any piece-33/34/35 consumer hard-codes the bare name.
+
+- **Coverage gap:** Cold-start re-assign preservation has no test. Code is correct; scenario is missing (reactivating cold-start with existing stateRemote → re-assign without flag → assert preservation).
+
+- **Doc concern:** `validation.ts` JSDoc mentions `'origin'`/`'squad-state'` defaults that belong to piece-33 consumer semantics, not the SDK validation module.
+
+**Verdict:** ⚠️ APPROVE-WITH-NITS. Decision drop at `.squad/decisions/inbox/capcom-piece-32-adversarial.md`.
+
+**SDK contract patterns reinforced:**
+- Subpath export contract = `package.json` export map entry + tsconfig coverage + dist file existence. All three must be verified independently.
+- Additive merge on registry entries requires `...existingEntry` spread as the FIRST element of the new-entry object literal. Order matters — later spreads silently override earlier ones.
+- Error code naming in a typed union (`AssignErrorCode`) creates a forward-compat surface. Convention breaks in the union propagate to every downstream switch statement. Name before first consumer.
+
+## Recent Work — Piece 35
+
+**2026-06-07: Piece 35 SDK Contract Review — APPROVE**
+
+Performed read-only adversarial SDK contract review of commit `64eecd475605a8f9cc1d6f9707d6ae72f055d59a` (fold pipeline installer) against the committed SHA. All four contract checkpoints passed without exception:
+
+1. **Import paths exact match (PASS)** — `install-fold-pipeline.ts` lines 21–22 import `loadRegistryFromDisk` from `@bradygaster/squad-sdk/registry` and `normalisedPathKey` from `@bradygaster/squad-sdk/path-utils`. Byte-for-byte identical to sync.ts lines 20–21. No variations, no path aliases.
+
+2. **RegistryEntry field validity (PASS)** — Code accesses `entry.path` and `e.clones` (lines 63, 68). Both are valid RegistryEntry fields defined in `packages/squad-sdk/src/registry.ts` (lines 11 and 13 respectively). No invented fields; no references to non-existent `docsRepoPath` field that kickoff correctly identified as absent from schema.
+
+3. **path.dirname(entry.path) derivation matches runSyncStatus (PASS)** — Line 68 `docsRepoPath = path.dirname(entry.path)` exactly mirrors sync.ts line 529 `teamRoot = path.dirname(entry.path)`. Identical lookup pattern at lines 57–64 vs sync.ts lines 523–529: `loadRegistryFromDisk()` → `normalisedPathKey()` → `registry?.squads.find()` → `e.clones?.some()` match. Comment at line 58 confirms "Exact pattern from runSyncStatus."
+
+4. **Registry-first topology preserved (PASS)** — Lines 66–82 implement registry-first fallback correctly. Registry entry resolution attempted first (lines 62–69). Only when `!entry` does code attempt config.json fallback (lines 72–82). Comment at line 71 correctly labels this "Fallback for unregistered/single-repo contexts." No regression to config.json-primary when registry entry exists. Kickoff kill-list constraint honored: registry-first is binding and non-negotiable; this code does not violate it.
+
+**Verdict:** APPROVE — no changes requested. SDK import contract clean; RegistryEntry field access valid; path derivation pattern verbatim match; registry-first topology intact. All four critical gates pass. Commit is safe to proceed to next reviewer stage.

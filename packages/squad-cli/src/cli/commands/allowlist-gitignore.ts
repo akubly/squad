@@ -1,0 +1,268 @@
+/**
+ * Shared allowlist-aware managed `.gitignore` installer (piece 51, sub-proposals C/D).
+ *
+ * Both `init` (orphan backend) and `install-fold-pipeline` need to keep the ephemeral
+ * `.squad/` state that the fold pipeline transports — and the machine-local scratch that is
+ * never transported — off the product branch. This module owns the single managed-block
+ * writer so the two commands stay in lockstep instead of drifting between copies.
+ *
+ * It NEVER writes a blanket `.squad/` ignore: only the explicit publish allowlist paths
+ * (which fold to the state branch) plus the machine-local scratch declared here. A blanket
+ * `.squad/` ignore is the Pole-A change (piece 52), gated on the durable lane existing.
+ *
+ * @module cli/commands/allowlist-gitignore
+ */
+
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX } from './sync.js';
+
+/**
+ * Machine-local / pipeline-owned scratch paths (piece 51, sub-proposal C).
+ *
+ * None of these are on the publish allowlist, so they already never transport — declaring
+ * them here makes the exclusion explicit and keeps them out of any product commit:
+ *   - `raw-agent-output.md`, `run-output.md`, `publish-metadata.json` — per-run scratch.
+ *   - `publish-history.json` — written solely by the fold pipeline on the state branch;
+ *     folding a locally-mutated copy would race, so the team-root copy is machine-local.
+ *   - `.last-hydrate-sha`, `.first-run` — pipeline sentinels (per the managed-block reference).
+ */
+export const PUBLISH_MACHINE_LOCAL = [
+  '.squad/raw-agent-output.md',
+  '.squad/run-output.md',
+  '.squad/publish-metadata.json',
+  '.squad/publish-history.json',
+  '.squad/.last-hydrate-sha',
+  '.squad/.first-run',
+];
+
+const BLOCK_START = '# --- squad (managed) ---';
+const BLOCK_END = '# --- end squad (managed) ---';
+
+/**
+ * All paths the managed block governs, in a stable order, prefixed for the host layout.
+ * `pathPrefix` is `''` for a root-hosted squad and `'<callsign>/'` for a subfolder host,
+ * so a git-root `.gitignore` can scope the block to `<callsign>/.squad/**`.
+ */
+export function managedGitignorePaths(pathPrefix = ''): string[] {
+  return [
+    ...PUBLISH_ALLOWLIST_EXACT,
+    ...PUBLISH_ALLOWLIST_PREFIX,
+    ...PUBLISH_MACHINE_LOCAL,
+  ].map(p => `${pathPrefix}${p}`);
+}
+
+function buildManagedBlock(pathPrefix: string): string {
+  const pre = (p: string): string => `${pathPrefix}${p}`;
+  return [
+    BLOCK_START,
+    '# Ephemeral state is transported to the state branch by the fold pipeline, not committed here.',
+    ...PUBLISH_ALLOWLIST_EXACT.map(pre),
+    ...PUBLISH_ALLOWLIST_PREFIX.map(pre),
+    '# Machine-local scratch / pipeline-owned -- never transported, never committed.',
+    ...PUBLISH_MACHINE_LOCAL.map(pre),
+    BLOCK_END,
+  ].join('\n');
+}
+
+/**
+ * Insert or replace the marker-delimited managed block within an existing `.gitignore`
+ * body. Idempotent: a re-run fully replaces the previous block rather than appending.
+ */
+function upsertManagedBlock(existing: string, block: string): string {
+  const startIdx = existing.indexOf(BLOCK_START);
+  if (startIdx !== -1) {
+    const endMarkerIdx = existing.indexOf(BLOCK_END, startIdx);
+    const before = existing.slice(0, startIdx);
+    // If the end marker is missing (a hand-truncated block), replace from the start
+    // marker to end-of-file rather than appending a second block — otherwise a later
+    // re-run would splice out any user lines sitting between the orphan marker and the
+    // appended block. This keeps the "fully replace, idempotent" guarantee intact.
+    const after = endMarkerIdx !== -1 ? existing.slice(endMarkerIdx + BLOCK_END.length) : '';
+    return `${before}${block}${after}`;
+  }
+  if (existing.length === 0) return `${block}\n`;
+  const sep = existing.endsWith('\n') ? '\n' : '\n\n';
+  return `${existing}${sep}${block}\n`;
+}
+
+export interface ApplyManagedGitignoreResult {
+  /** Number of already-tracked managed paths that were `git rm --cached`-ed. */
+  untracked: number;
+  /** Whether the `.gitignore` file content changed. */
+  changed: boolean;
+}
+
+/**
+ * Install (or refresh) the allowlist-aware managed `.gitignore` block at `repoRoot` and
+ * `git rm --cached` any already-tracked managed paths, so folded/hydrated ephemeral state
+ * is structurally invisible to the product branch (`git add -A` cannot sweep it in).
+ *
+ * The block is delimited by markers and fully replaced on re-run (idempotent, safe on a
+ * host `init` already configured). NEVER writes a blanket `.squad/` ignore.
+ *
+ * @param repoRoot   Directory that receives the `.gitignore` (the git root for a subfolder host).
+ * @param pathPrefix `''` for a root-hosted squad; `'<callsign>/'` for a subfolder host.
+ */
+export function applyManagedGitignore(repoRoot: string, pathPrefix = ''): ApplyManagedGitignoreResult {
+  const managedPaths = managedGitignorePaths(pathPrefix);
+
+  // Best-effort: untrack any already-tracked managed paths. A never-committed host has none.
+  let untracked = 0;
+  try {
+    const lsOutput = execFileSync('git', ['ls-files', '--', ...managedPaths], {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const tracked = lsOutput.trim().split('\n').filter(Boolean);
+    if (tracked.length > 0) {
+      execFileSync('git', ['rm', '-r', '--cached', '--', ...tracked], {
+        cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      untracked = tracked.length;
+    }
+  } catch {
+    /* not a git repo, or nothing tracked — still install the ignore block below */
+  }
+
+  const gitignorePath = path.join(repoRoot, '.gitignore');
+  let existing = '';
+  try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* absent — create it */ }
+  const next = upsertManagedBlock(existing, buildManagedBlock(pathPrefix));
+  const changed = next !== existing;
+  if (changed) fs.writeFileSync(gitignorePath, next, 'utf-8');
+  return { untracked, changed };
+}
+
+// ─── Piece 52 (A): the BLANKET Pole-A variant ────────────────────────────────
+//
+// Under Pole A, NO squad content or state is tracked on `main`: the durable constitution
+// rides `squad/config/<callsign>` and ephemeral state rides `squad/state/<callsign>`. So the
+// managed block becomes a single blanket `<prefix>.squad/` ignore instead of the allowlist-scoped
+// set above. This deliberately reverses piece 51 / init Sub-proposal J ("never a blanket `.squad/`");
+// it is gated on the durable lane existing (piece 52 §B), not a regression.
+//
+// The blanket block reuses the same markers as the allowlist block, so switching a host from
+// Pole B to Pole A REPLACES the previous block in place (idempotent).
+
+/** The blanket ignore path(s) the Pole-A managed block governs. */
+export function blanketGitignorePaths(pathPrefix = ''): string[] {
+  return [`${pathPrefix}.squad/`];
+}
+
+// Piece 54 §F1: a blanket managed line is exactly `<prefix>.squad/` — bare `.squad/` (root host)
+// or `<callsign>/.squad/` (subfolder host). Anchored so an allowlist entry such as
+// `.squad/history.md` or `.squad/casting/` is never mistaken for a blanket line.
+const BLANKET_LINE_RE = /(^|\/)\.squad\/$/;
+
+/**
+ * §F1: extract the set of blanket ignore PREFIXES already carried by the managed block of an
+ * existing `.gitignore` body (`''` for the bare `.squad/` line, `'<callsign>/'` for a subfolder
+ * line). Non-blanket managed lines (e.g. a legacy allowlist block's entries) are ignored, so
+ * switching a host from the allowlist block to the blanket block still replaces those entries.
+ */
+function existingBlanketPrefixes(existing: string): string[] {
+  const startIdx = existing.indexOf(BLOCK_START);
+  if (startIdx === -1) return [];
+  const endIdx = existing.indexOf(BLOCK_END, startIdx);
+  const body = existing.slice(startIdx, endIdx === -1 ? existing.length : endIdx);
+  const prefixes: string[] = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('#')) continue;
+    if (BLANKET_LINE_RE.test(line)) {
+      prefixes.push(line.slice(0, line.length - '.squad/'.length));
+    }
+  }
+  return prefixes;
+}
+
+function buildBlanketBlock(prefixes: string[]): string {
+  // One `<prefix>.squad/` line per callsign, de-duplicated and sorted for a stable, idempotent
+  // block on a multi-callsign subfolder host.
+  const lines = Array.from(new Set(prefixes)).sort().map(p => `${p}.squad/`);
+  return [
+    BLOCK_START,
+    '# Pole A: no squad content or state is tracked on this branch. The durable constitution',
+    '# rides squad/config/<callsign>; ephemeral state rides squad/state/<callsign> (fold pipeline).',
+    ...lines,
+    BLOCK_END,
+  ].join('\n');
+}
+
+/**
+ * Install (or refresh) the BLANKET Pole-A managed `.gitignore` block at `repoRoot` and untrack
+ * ALL currently-tracked `<pathPrefix>.squad` content — the Pole-B→A migration. Callers that must
+ * preserve durable content (`init`, `install-fold-pipeline`) seed the config orphan (sub-proposal B)
+ * BEFORE calling this, so the `git rm -r --cached` here leaves `main` infra-only with no durable loss.
+ *
+ * §F1 (canonical placement): the block is a SINGLE managed region in the host git-root `.gitignore`
+ * carrying one `<prefix>.squad/` line per callsign. On a multi-callsign subfolder host this ACCUMULATES
+ * each callsign's line rather than replacing the block, so installing callsign B does not drop the
+ * ignore for callsign A. Idempotent and marker-delimited: a re-run replaces the previous block
+ * (allowlist or blanket) with the merged, de-duplicated set.
+ *
+ * @param repoRoot   Directory that receives the `.gitignore` (the git root for a subfolder host).
+ * @param pathPrefix `''` for a root-hosted squad; `'<callsign>/'` for a subfolder host.
+ */
+export function applyBlanketGitignore(repoRoot: string, pathPrefix = ''): ApplyManagedGitignoreResult {
+  // Blanket untrack: remove the WHOLE `<prefix>.squad` subtree from the index (not just the
+  // allowlisted subset), so a Pole-B host's durable files stop being tracked on `main`.
+  let untracked = 0;
+  try {
+    const lsOutput = execFileSync('git', ['ls-files', '--', `${pathPrefix}.squad`], {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const tracked = lsOutput.trim().split('\n').filter(Boolean);
+    if (tracked.length > 0) {
+      // Remove the whole subtree with a SINGLE directory argument. Spreading every tracked
+      // path into argv can exceed Windows' ~32 KB CreateProcess limit on a large Pole-B host;
+      // `-r` already recurses, so one fixed-size arg untracks the entire subtree.
+      execFileSync('git', ['rm', '-r', '--cached', '--', `${pathPrefix}.squad`], {
+        cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      untracked = tracked.length;
+    }
+  } catch {
+    /* not a git repo, or nothing tracked — still install the ignore block below */
+  }
+
+  const gitignorePath = path.join(repoRoot, '.gitignore');
+  let existing = '';
+  try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { /* absent — create it */ }
+  // Merge this callsign's blanket line into any existing blanket set (accumulate, don't replace).
+  const mergedPrefixes = [...existingBlanketPrefixes(existing), pathPrefix];
+  const next = upsertManagedBlock(existing, buildBlanketBlock(mergedPrefixes));
+  const changed = next !== existing;
+  if (changed) fs.writeFileSync(gitignorePath, next, 'utf-8');
+  return { untracked, changed };
+}
+
+/**
+ * §F1 migration: remove a LEGACY per-subfolder managed block from `<repoRoot>/<subfolder>/.gitignore`,
+ * preserving any non-managed user lines. Older subfolder hosts carried the Pole-A ignore in the
+ * subfolder's own `.gitignore` (a bare `.squad/` line); the canonical placement is now the git-root
+ * block with a `<subfolder>/.squad/` line, so the legacy block is stripped when encountered. The file
+ * is deleted if only the managed block (and whitespace) remained. A no-op — returning false — when the
+ * file or its managed block is absent. Never touches the git-root `.gitignore`.
+ */
+export function removeLegacySubfolderManagedBlock(repoRoot: string, subfolder: string): boolean {
+  if (!subfolder) return false;
+  const legacyPath = path.join(repoRoot, subfolder, '.gitignore');
+  let existing: string;
+  try { existing = fs.readFileSync(legacyPath, 'utf-8'); } catch { return false; }
+  const startIdx = existing.indexOf(BLOCK_START);
+  if (startIdx === -1) return false;
+  const endMarkerIdx = existing.indexOf(BLOCK_END, startIdx);
+  const before = existing.slice(0, startIdx);
+  const after = endMarkerIdx !== -1 ? existing.slice(endMarkerIdx + BLOCK_END.length) : '';
+  let remainder = `${before}${after}`.replace(/\n{3,}/g, '\n\n');
+  if (remainder.trim().length === 0) {
+    fs.rmSync(legacyPath, { force: true });
+    return true;
+  }
+  remainder = remainder.replace(/^\n+/, '');
+  if (!remainder.endsWith('\n')) remainder += '\n';
+  fs.writeFileSync(legacyPath, remainder, 'utf-8');
+  return true;
+}

@@ -352,7 +352,7 @@ export class AgentLifecycleManager {
         const idleTimeMs = now - agent.lastActivityAt.getTime();
         
         if (idleTimeMs > this.defaultIdleTimeout && agent.status === 'active') {
-          agent.markIdle();
+          agent.setIdle();
         }
       }
     }, 30_000); // Check every 30 seconds
@@ -469,11 +469,8 @@ class AgentHandleImpl implements AgentHandle {
     }
   }
   
-  /**
-   * Mark agent as idle (called by lifecycle manager).
-   * @internal
-   */
-  markIdle(): void {
+  /** Transition agent status from active to idle. Called by the idle sweep timer. */
+  setIdle(): void {
     if (this.status === 'active') {
       this.status = 'idle';
     }

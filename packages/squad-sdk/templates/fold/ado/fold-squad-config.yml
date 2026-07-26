@@ -1,0 +1,228 @@
+# Squad config pipeline — ADO variant
+# Opens a review pull request for durable squad-config changes published to a config-inbox branch.
+#
+# Trigger: push to any branch under refs/heads/squad/config-inbox/* (the durable publish lane,
+# piece 53 §A). For each config-inbox ref this pipeline assembles a candidate durable tree and opens
+# a PR into squad/config/<callsign> via `az repos pr create`. It NEVER force-pushes the durable
+# branch — the human approval + merge of that PR is the ONLY gate that advances
+# squad/config/<callsign> (symmetric with the ephemeral fold, which force-pushes instead).
+#
+# ── Required permissions & reviewer gate ─────────────────────────────────────────────────────────
+#  1. Grant the build service identity ("<Project> Build Service (<Org>)") the
+#     "Contribute to pull requests" permission on the repository, so `az repos pr create` opens PRs.
+#  2. Expose the OAuth token to the job: this template maps System.AccessToken into
+#     SYSTEM_ACCESSTOKEN (see the `env:` block). Ensure "Limit job authorization scope to current
+#     project" does not strip access to the target repo.
+#  3. Add a branch policy on squad/config/<callsign> requiring a reviewer (e.g. a required reviewers
+#     policy or a group). That branch policy is the human gate; the auto-opened PR cannot complete
+#     without it.
+#  4. Branch creation: the build service identity must also be allowed to CREATE squad/config/<callsign>
+#     the first time — the genesis step below pushes an empty orphan when the branch is absent. If a
+#     branch policy or "restrict branch creation" rule blocks creation on the squad/config/* pattern,
+#     pre-create an empty squad/config/<callsign> branch once by hand so the first reviewed change is
+#     not blocked.
+
+# Manual run: use "Run pipeline" in the CI platform UI. No parameters required —
+# a manual run processes every discovered config-inbox callsign exactly as a push-triggered run.
+parameters: []
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - refs/heads/squad/config-inbox/*
+
+stages:
+  - stage: open_config_pr
+    displayName: Open Squad config review PRs by callsign
+    # Serialize runs so two config-inbox pushes never race the candidate push / PR open for the
+    # same callsign; batch: true coalesces and the PR-open is idempotent per candidate branch.
+    lockBehavior: sequential
+    jobs:
+      - deployment: open_config_pr
+        displayName: Assemble candidate and open config PRs
+        environment: squad-config
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # This pipeline is the only automation that opens PRs into squad/config/<callsign>.
+                # It never force-pushes that branch; the branch policy on it is the sole gate.
+
+                - checkout: self
+                  fetchDepth: 0
+                  persistCredentials: true
+
+                - bash: |
+                    git config user.email "squad-config@noreply"
+                    git config user.name "Squad Config Pipeline"
+                  displayName: Configure git identity
+
+                - bash: |
+                    set -euo pipefail
+
+                    # az repos needs the org URL and an authenticated token (System.AccessToken).
+                    ORG_URL="$(System.CollectionUri)"
+                    REPO_NAME="$(Build.Repository.Name)"
+                    export AZURE_DEVOPS_EXT_PAT="$SYSTEM_ACCESSTOKEN"
+
+                    callsigns="`git ls-remote --heads origin 'refs/heads/squad/config-inbox/*' \
+                      | sed -nE 's#^[0-9a-f]+\srefs/heads/squad/config-inbox/([^/]+)/.*#\1#p' \
+                      | sort -u`"
+
+                    if [ -z "$callsigns" ]; then
+                      echo "No Squad config-inbox callsigns discovered — nothing to do."
+                      exit 0
+                    fi
+
+                    for CALLSIGN in $callsigns; do
+                      if ! [[ "$CALLSIGN" =~ ^[a-z][a-z0-9-]{1,38}$ ]]; then
+                        echo "##vso[task.logissue type=warning]Skipping invalid callsign '$CALLSIGN'."
+                        continue
+                      fi
+
+                      CONFIG_BRANCH="squad/config/$CALLSIGN"
+                      echo "Processing config-inbox refs for $CALLSIGN into $CONFIG_BRANCH ..."
+
+                      # Genesis-seed an EMPTY orphan when the durable branch is absent (piece 52 §B)
+                      # so the first constitution still arrives through the reviewed PR, not a push.
+                      if ! git ls-remote --exit-code origin "refs/heads/${CONFIG_BRANCH}" >/dev/null 2>&1; then
+                        echo "  $CONFIG_BRANCH absent — genesis-seeding an empty orphan."
+                        git checkout --detach >/dev/null 2>&1 || true
+                        git branch -D "$CONFIG_BRANCH" >/dev/null 2>&1 || true
+                        git checkout --orphan "$CONFIG_BRANCH"
+                        git rm -rf . >/dev/null 2>&1 || true
+                        git commit --allow-empty -m "Initialize Squad config branch for $CALLSIGN"
+                        git push origin "HEAD:refs/heads/${CONFIG_BRANCH}"
+                      fi
+
+                      INBOX_REFS=`git ls-remote --heads origin "refs/heads/squad/config-inbox/${CALLSIGN}/*" | awk '{print $2}' | tr -d '\r'`
+
+                      while IFS= read -r REF; do
+                        [ -z "$REF" ] && continue
+                        SHORT_REF="${REF#refs/heads/}"
+                        echo "  Assembling candidate from $SHORT_REF ..."
+
+                        git fetch origin "+${REF}:refs/config-tmp/inbox" 2>/dev/null
+
+                        METADATA_SHA=`git ls-tree refs/config-tmp/inbox .squad/publish-metadata.json 2>/dev/null | awk '{print $3}'`
+                        PUB_AT="1970-01-01T00:00:00Z"
+                        DEV_ALIAS="unknown"
+                        if [ -n "$METADATA_SHA" ]; then
+                          META_JSON=`git cat-file blob "$METADATA_SHA" 2>/dev/null || echo '{}'`
+                          PUB_AT=`echo "$META_JSON" | jq -r '.publishedAt // "1970-01-01T00:00:00Z"'`
+                          DEV_ALIAS=`echo "$META_JSON" | jq -r '.inboxHandle // "unknown"'`
+                        else
+                          echo "  WARNING: Missing .squad/publish-metadata.json on $SHORT_REF — using defaults."
+                        fi
+
+                        # publishedAt is attacker-influenced (read straight from the inbox payload). A
+                        # malformed value would make the GIT_*_DATE commit below fail under `set -e`
+                        # and stall the lane, so normalize any non-ISO-8601 value to the epoch default.
+                        if ! printf '%s' "$PUB_AT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'; then
+                          echo "  WARNING: publishedAt '$PUB_AT' is not ISO-8601 — using epoch default."
+                          PUB_AT="1970-01-01T00:00:00Z"
+                        fi
+
+                        INBOX_SQUAD_TREE=`git ls-tree refs/config-tmp/inbox .squad 2>/dev/null | awk '{print $3}'`
+                        if [ -z "$INBOX_SQUAD_TREE" ]; then
+                          echo "  WARNING: No .squad/ subtree in $SHORT_REF — deleting empty ref and skipping."
+                          git push origin --delete "$SHORT_REF" || echo "  WARNING: Failed to delete $SHORT_REF."
+                          git update-ref -d refs/config-tmp/inbox 2>/dev/null || true
+                          continue
+                        fi
+
+                        git fetch origin "$CONFIG_BRANCH"
+                        # Name the candidate from the inbox ref's own unique id (<ts>-<seq>-<sessionId>),
+                        # NOT a fresh 1s-resolution timestamp: two config-inbox refs for the same
+                        # callsign handled inside one wall-clock second would otherwise collide onto a
+                        # single candidate branch, the second push would non-fast-forward reject, and
+                        # `set -e` would stall the whole lane.
+                        REF_ID="${SHORT_REF##*/}"
+                        CANDIDATE_BRANCH="squad/config-candidate/${CALLSIGN}/${REF_ID}"
+
+                        # Dedup without a ledger. The candidate name is deterministic per inbox ref, so
+                        # if an earlier run already opened this PR but failed to delete the inbox ref,
+                        # the candidate branch already exists on the remote. Re-attempt the ref cleanup
+                        # and skip rather than opening a duplicate review PR on every trigger.
+                        if git ls-remote --exit-code --heads origin "refs/heads/${CANDIDATE_BRANCH}" >/dev/null 2>&1; then
+                          echo "  Candidate $CANDIDATE_BRANCH already exists — $SHORT_REF already processed; cleaning inbox ref, no duplicate PR."
+                          git push origin --delete "$SHORT_REF" || echo "  WARNING: Failed to delete $SHORT_REF."
+                          git update-ref -d refs/config-tmp/inbox 2>/dev/null || true
+                          continue
+                        fi
+                        git checkout -B "$CANDIDATE_BRANCH" "origin/${CONFIG_BRANCH}"
+
+                        # CLEAN-REPLACE the durable subtree so file DELETIONS in the snapshot are
+                        # honored. `git archive | tar -x` only adds/overwrites — a publish whose sole
+                        # change is removing a durable file would otherwise diff empty, silently drop
+                        # the deletion, AND destroy the inbox ref on the "no change" path. Remove the
+                        # tracked durable tree first, then extract the full snapshot; the payload is the
+                        # complete CONFIG_ALLOWLIST tree, so a clean replace represents adds/edits/deletes.
+                        git rm -r --quiet --ignore-unmatch .squad >/dev/null 2>&1 || true
+                        # Exclude publish-metadata.json (publisher scratch; mirrors the fold's
+                        # publish-history.json exclusion).
+                        git archive refs/config-tmp/inbox .squad \
+                          | tar -x --exclude='.squad/publish-metadata.json'
+                        git add -A .squad/
+
+                        CHANGED_PATHS=`git diff --cached --name-only | tr '\n' ' '`
+                        # Defense-in-depth: the publish client already filters to CONFIG_ALLOWLIST, but
+                        # re-check server-side and SURFACE — never silently strip, which could drop a
+                        # valid change if the allowlist evolves — any changed .squad path outside the
+                        # durable allowlist so the reviewer (the gate) sees it. Mirrors CONFIG_ALLOWLIST
+                        # in packages/squad-cli/src/cli/commands/sync.ts; keep the two in sync.
+                        UNEXPECTED_PATHS=""
+                        while IFS= read -r CP; do
+                          [ -z "$CP" ] && continue
+                          case "$CP" in
+                            .squad/team.md|.squad/roster.md|.squad/routing.md|.squad/charter.md|.squad/scribe-charter.md|.squad/fact-checker-charter.md|.squad/config.json|.squad/casting-policy.json|.squad/ceremonies.md|.squad/issue-lifecycle.md|.squad/mcp-config.md|.squad/multi-agent-format.md|.squad/copilot-instructions.md|.squad/constraint-tracking.md|.squad/skill.md|.squad/plugin-marketplace.md) ;;
+                            .squad/templates/*|.squad/skills/*|.squad/files/triage-flow/*) ;;
+                            .squad/agents/*/charter.md) ;;
+                            *) UNEXPECTED_PATHS="${UNEXPECTED_PATHS}${CP} " ;;
+                          esac
+                        done < <(git diff --cached --name-only)
+                        if git diff --cached --quiet; then
+                          echo "  $SHORT_REF introduces no durable change — deleting ref, no PR."
+                          git push origin --delete "$SHORT_REF" || echo "  WARNING: Failed to delete $SHORT_REF."
+                          git update-ref -d refs/config-tmp/inbox 2>/dev/null || true
+                          continue
+                        fi
+
+                        GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+                          git commit \
+                            --author="Squad Config Pipeline <squad-config@noreply>" \
+                            -m "config: $DEV_ALIAS durable change (publishedAt=$PUB_AT)"
+
+                        git push origin "HEAD:refs/heads/${CANDIDATE_BRANCH}"
+
+                        PR_DESC="Automated durable-config review PR (piece 53). Developer: $DEV_ALIAS. Published at: $PUB_AT. Source config-inbox ref: $SHORT_REF. Changed durable paths: $CHANGED_PATHS. Approve + complete to advance $CONFIG_BRANCH; the branch policy on it is the only gate."
+
+                        # Surface any non-durable paths to the reviewer instead of silently accepting them.
+                        if [ -n "$UNEXPECTED_PATHS" ]; then
+                          echo "##vso[task.logissue type=warning]Non-durable paths present in config payload for $SHORT_REF: $UNEXPECTED_PATHS"
+                          PR_DESC="$PR_DESC ⚠️ REVIEW CAREFULLY: these changed paths are OUTSIDE the durable CONFIG_ALLOWLIST and should not normally arrive on this lane: $UNEXPECTED_PATHS"
+                        fi
+
+                        # Open the PR BEFORE deleting the inbox ref so a failure stays recoverable.
+                        if az repos pr create \
+                          --organization "$ORG_URL" \
+                          --repository "$REPO_NAME" \
+                          --source-branch "$CANDIDATE_BRANCH" \
+                          --target-branch "$CONFIG_BRANCH" \
+                          --title "config($CALLSIGN): durable change from $DEV_ALIAS" \
+                          --description "$PR_DESC"; then
+                          echo "  PR opened for $CANDIDATE_BRANCH → $CONFIG_BRANCH."
+                          git push origin --delete "$SHORT_REF" || echo "  WARNING: Failed to delete $SHORT_REF — continuing."
+                        else
+                          echo "##vso[task.logissue type=error]Failed to open PR for $CANDIDATE_BRANCH — leaving $SHORT_REF for retry."
+                        fi
+
+                        git update-ref -d refs/config-tmp/inbox 2>/dev/null || true
+                      done <<< "$INBOX_REFS"
+                    done
+                  displayName: Assemble candidate and open config PRs
+                  env:
+                    SYSTEM_ACCESSTOKEN: $(System.AccessToken)

@@ -5,10 +5,21 @@
  * @module platform/types
  */
 
-export type PlatformType = 'github' | 'azure-devops' | 'planner';
+export type PlatformType = 'github' | 'azure-devops' | 'unknown';
 
 /** Where work items are tracked — may differ from where code lives */
-export type WorkItemSource = 'github' | 'azure-devops' | 'planner';
+export type WorkItemSource = 'github' | 'azure-devops' | 'planner' | 'unknown';
+
+/**
+ * Thrown when platform configuration is missing, invalid, or unrecognised.
+ * Callers should catch this to show a clear, actionable remediation message.
+ */
+export class PlatformConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlatformConfigError';
+  }
+}
 
 /** Hybrid config: repo on one platform, work items on another */
 export interface HybridPlatformConfig {
@@ -49,11 +60,9 @@ export interface PlatformAdapter {
   addTag(workItemId: number, tag: string): Promise<void>;
   removeTag(workItemId: number, tag: string): Promise<void>;
   addComment(workItemId: number, comment: string): Promise<void>;
-  /**
-   * Assign a work item to a user. Pass undefined/empty to unassign the current assignee.
-   * '@me' assigns the current user on GitHub; the ADO adapter cannot resolve '@me' and skips it (no-op).
-   */
   setAssignee(workItemId: number, assignee: string | undefined): Promise<void>;
+  assignWorkItem?(id: number, assignee: string): Promise<void>;
+  getCurrentUser?(): string | undefined;
 
   /** Ensure a tag/label exists (creates it if missing). No-op on platforms with auto-created tags. */
   ensureTag?(tag: string, options?: { color?: string; description?: string }): Promise<void>;

@@ -14,3 +14,12 @@ Handbook assigned:
 Pattern: Guide update identified as high community value initiative. Handbook owns SDK patterns refresh; PAO owns documentation scaffolding.
 
 📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. Handbook owns Guide v0.4.1 patterns update (#476). High community interest. Coordinate with PAO on guide structure and with VOX on REPL examples for integration.
+
+---
+
+## 📌 Team Update — Piece 21 Ship Gate Cleared
+
+**Date:** 2026-05-22  
+**Event:** Post-stack-review gate clearance — all five required fixes shipped.
+
+Piece 21 is now gate-cleared. Follow-up work (FIX-6 bulk stale-path repair, FIX-7 cross-platform path display, FIX-8 dual-doctor unification) is deferred to piece 22.

@@ -11,10 +11,10 @@ import fs from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
-import { effectiveSquadDir } from '../../core/effective-squad-dir.js';
 import { fatal } from '../../core/errors.js';
 import { GREEN, RED, DIM, BOLD, RESET, YELLOW } from '../../core/output.js';
 import { withAdditionalMcpConfig } from '../../core/copilot-invocation.js';
+import { hasCodingAgent } from '../../core/squad-file-conventions.js';
 import {
   parseRoutingRules,
   parseModuleOwnership,
@@ -38,6 +38,7 @@ import type { WatchCapability, WatchContext, WatchPhase, CapabilityResult } from
 import { CapabilityRegistry } from './registry.js';
 import { createDefaultRegistry } from './capabilities/index.js';
 import { createVerboseLogger, type VerboseLogger } from './verbose.js';
+import { resolveWatchStartupSquadDir } from './startup.js';
 
 const storage = new FSStorageProvider();
 const execFileAsync = promisify(execFile);
@@ -310,7 +311,7 @@ async function runCheck(
   rules: ReturnType<typeof parseRoutingRules>,
   modules: ReturnType<typeof parseModuleOwnership>,
   roster: ReturnType<typeof parseRoster>,
-  hasCopilot: boolean,
+  agentEnabled: boolean,
   autoAssign: boolean,
   capabilities: MachineCapabilities | null,
   adapter: PlatformAdapter,
@@ -345,7 +346,7 @@ async function runCheck(
     });
 
     let unassignedCopilot: WatchWorkItem[] = [];
-    if (hasCopilot && autoAssign) {
+    if (agentEnabled && autoAssign) {
       try {
         const copilotIssues = await listWatchWorkItems(adapter, { label: 'squad:copilot', state: 'open', limit: 10 });
         unassignedCopilot = copilotIssues.filter(i => !i.assignees || i.assignees.length === 0);
@@ -674,10 +675,9 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     fatal('--interval must be a positive number of minutes');
   }
 
-  // Detect squad directory — follows external state if configured
-  const { local: squadDirInfo, stateDir } = effectiveSquadDir(dest);
-  const teamMd = path.join(stateDir, 'team.md');
-  const routingMdPath = path.join(stateDir, 'routing.md');
+  const squadDirInfo = resolveWatchStartupSquadDir(dest, config);
+  const teamMd = path.join(squadDirInfo.path, 'team.md');
+  const routingMdPath = path.join(squadDirInfo.path, 'routing.md');
   const teamRoot = path.dirname(squadDirInfo.path);
 
   if (!storage.existsSync(teamMd)) {
@@ -760,7 +760,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     console.log(`${DIM}Labels: ensured ${roster.length + 1} squad labels exist${RESET}`);
   }
 
-  const hasCopilot = content.includes('🤖 Coding Agent') || content.includes('@copilot');
+  const agentEnabled = hasCodingAgent(content);
   const autoAssign = content.includes('<!-- copilot-auto-assign: true -->');
   const monitorSessionId = 'ralph-watch';
   const eventBus = new EventBus();
@@ -914,7 +914,7 @@ export async function runWatch(dest: string, options: WatchOptions | WatchConfig
     }
 
     // Core: triage (always runs — not a capability)
-    const checkResult = await runCheck(rules, modules, roster, hasCopilot, autoAssign, capabilities, adapter, vlog);
+    const checkResult = await runCheck(rules, modules, roster, agentEnabled, autoAssign, capabilities, adapter, vlog);
     const roundState = checkResult.state;
 
     // Short-circuit remaining phases when the scan failed or was rate-limited

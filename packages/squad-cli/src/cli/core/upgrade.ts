@@ -5,19 +5,26 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, defaultRegistryFilePath, normalisedPathKey } from '@bradygaster/squad-sdk';
+import { loadRegistryFromDisk } from '@bradygaster/squad-sdk/registry';
+import { installCopilotPayload } from '@bradygaster/squad-sdk/copilot-payload';
 import { success, warn, info, dim, bold } from './output.js';
 import { fatal } from './errors.js';
 import { detectSquadDir } from './detect-squad-dir.js';
 import { TEMPLATE_MANIFEST, getTemplatesDir } from './templates.js';
+import { isConfigAllowlisted, isAllowlisted } from '../commands/sync.js';
 import { runMigrations } from './migrations.js';
 import { scrubEmails } from './email-scrub.js';
 import { getPackageVersion, stampVersion, readInstalledVersion } from './version.js';
 import { resolveSquadStateMcpSpec, type SquadStateMcpSpec } from './mcp-spec.js';
 export { resolveSquadStateMcpSpec } from './mcp-spec.js';
 import { ensureSquadStateMcpInRoot, tombstoneStaleSquadStateInProjectMcp } from './mcp-root.js';
+import { GITATTRIBUTES_RULES, GITIGNORE_ENTRIES, hasCodingAgent } from './squad-file-conventions.js';
+import { installCoordinatorAgent } from '../../commands/assign.js';
+import { getGitRoot } from '../../lib/git-root.js';
 
 const storage = new FSStorageProvider();
 
@@ -149,10 +156,39 @@ export interface UpgradeOptions {
   migrateDirectory?: boolean;
   self?: boolean;
   force?: boolean;
+  /** Override the user home used for global coordinator sync (test seam). */
+  homeDir?: string;
   /** When --self, install the insider (prerelease) tag instead of latest. */
   insider?: boolean;
   /** Preview what upgrade would change without writing. */
   dryRun?: boolean;
+  /** Install or refresh the per-repo Copilot payload (test seam). */
+  copilotPayloadInstaller?: typeof installCopilotPayload;
+  /**
+   * Piece 55 §F/D — managed cold-start upgrade: do NOT overwrite any HYDRATED team-root
+   * file with bundled template defaults. On a managed consumer host the team root is owned
+   * by the shared squad and hydrated from its orphan lanes — BOTH the durable constitution
+   * (`squad/config/<callsign>`: team.md, roster.md, charter.md, …) AND the ephemeral
+   * coordinator memory (`squad/state/<callsign>`: history.md, orchestration-log.md,
+   * casting-history.json, casting-registry.json). An upgrade that clobbered either lane would
+   * silently revert the host to generic scaffolds and — because the hydrate sentinel then
+   * matches the upstream SHA — would NOT self-heal until the upstream branch next advanced.
+   * Genuine machine-local scratch scaffolds (raw-agent-output.md, run-output.md — in neither
+   * lane) are still refreshed by the upgrade.
+   */
+  preserveHydratedTeamRoot?: boolean;
+}
+
+/**
+ * Piece 55 §D/§F — is this upgrade manifest destination a HYDRATED team-root file, i.e. one
+ * the shared squad owns and the managed cold-start hydrates from its orphan lanes? Covers both
+ * the durable (CONFIG_ALLOWLIST) and the ephemeral (PUBLISH_ALLOWLIST) lanes. Manifest
+ * destinations are `.squad`-relative (`charter.md`) or repo-relative (`../.github/...`);
+ * normalize against `.squad/` so only team-root files match and repo-relative tooling does not.
+ */
+function _isHydratedTeamRootDestination(destination: string): boolean {
+  const rel = path.posix.normalize(path.posix.join('.squad', destination.replace(/\\/g, '/')));
+  return isConfigAllowlisted(rel) || isAllowlisted(rel);
 }
 
 export interface UpdateInfo {
@@ -160,6 +196,43 @@ export interface UpdateInfo {
   toVersion: string;
   filesUpdated: string[];
   migrationsRun: string[];
+}
+
+function refreshCopilotPayloadForUpgrade(dest: string, squadPath: string, options: UpgradeOptions): void {
+  try {
+    const registryPath = defaultRegistryFilePath(options.homeDir);
+    const { registry } = loadRegistryFromDisk({ registryPath });
+    const matchingEntry = registry?.squads.find(entry =>
+      normalisedPathKey(entry.path) === normalisedPathKey(squadPath),
+    );
+
+    if (!matchingEntry?.callsign) {
+      return;
+    }
+
+    const payloadInstaller = options.copilotPayloadInstaller ?? installCopilotPayload;
+    const result = payloadInstaller({
+      hostDir: dest,
+      callsign: matchingEntry.callsign,
+      copilotHome: options.homeDir ? path.join(options.homeDir, '.copilot') : undefined,
+    });
+
+    success(
+      `refreshed Copilot payload (${result.skillsInstalled} skills, ${result.agentsInstalled} agents, ${result.instructionsInstalled} instructions)`,
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`Could not refresh Copilot payload during upgrade: ${message}`);
+  }
+}
+
+function smokeTestSdkSymbolResolution(homeDir: string): void {
+  try {
+    defaultRegistryFilePath(homeDir);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`SDK symbol resolution failed after upgrade — reinstall may be required: ${message}`);
+  }
 }
 
 /**
@@ -472,22 +545,6 @@ function writeWorkflowFile(file: string, srcPath: string, destPath: string, proj
 }
 
 /* ── Infrastructure ensure functions ────────────────────────────── */
-
-const GITATTRIBUTES_RULES = [
-  '.squad/decisions.md merge=union',
-  '.squad/agents/*/history.md merge=union',
-  '.squad/log/** merge=union',
-  '.squad/orchestration-log/** merge=union',
-];
-
-const GITIGNORE_ENTRIES = [
-  '.squad/orchestration-log/',
-  '.squad/log/',
-  '.squad/decisions/inbox/',
-  '.squad/sessions/',
-  '.squad/.cache/',
-  '.squad-workstream',
-];
 
 const ENSURE_DIRECTORIES = [
   '.squad/identity',
@@ -1045,7 +1102,10 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     fatal('No squad found — run init first.');
   }
 
-  const agentDest = path.join(dest, '.github', 'agents', 'squad.agent.md');
+  // §F1 (piece 55): the repo agent lands at the git root of `dest` — the same base `doctor` checks
+  // (getGitRoot(cwd) ?? cwd) and where git hooks install — so a subfolder host is not a false negative.
+  const repoRoot = getGitRoot(dest) ?? dest;
+  const agentDest = path.join(repoRoot, '.github', 'agents', 'squad.agent.md');
   const oldVersion = readInstalledVersion(agentDest) ?? '0.0.0';
   const squadConfig = readSquadConfig(squadDirInfo.path);
   const mcpConfigMode = detectMcpConfigMode(squadConfig, agentDest);
@@ -1113,6 +1173,13 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
     // Run infrastructure ensure checks even when already current
     await runEnsureChecks(dest, templatesDir, filesUpdated);
 
+    const homeDir = options.homeDir ?? os.homedir();
+    if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
+      console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
+    }
+    refreshCopilotPayloadForUpgrade(dest, squadDirInfo.path, options);
+    smokeTestSdkSymbolResolution(homeDir);
+
     return {
       fromVersion: oldVersion,
       toVersion: cliVersion,
@@ -1141,6 +1208,8 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   const filesToUpgrade = TEMPLATE_MANIFEST.filter(f => f.overwriteOnUpgrade && f.source !== 'squad.agent.md.template');
 
   for (const file of filesToUpgrade) {
+    // §D/§F: on a managed host, never clobber a hydrated team-root file (durable OR ephemeral).
+    if (options.preserveHydratedTeamRoot && _isHydratedTeamRootDestination(file.destination)) continue;
     const srcPath = path.join(templatesDir, file.source);
     const destPath = path.join(squadDirInfo.path, file.destination);
 
@@ -1185,7 +1254,7 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
 
   if (storage.existsSync(teamMdPath)) {
     const teamContent = storage.readSync(teamMdPath) ?? '';
-    const copilotEnabled = teamContent.includes('🤖 Coding Agent');
+    const copilotEnabled = hasCodingAgent(teamContent);
 
     if (copilotEnabled && storage.existsSync(copilotInstructionsSrc)) {
       storage.mkdirSync(path.dirname(copilotInstructionsDest), { recursive: true });
@@ -1197,6 +1266,13 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
 
   // Run infrastructure ensure checks
   await runEnsureChecks(dest, templatesDir, filesUpdated);
+
+  const homeDir = options.homeDir ?? os.homedir();
+  if (installCoordinatorAgent(homeDir, { requireExisting: true })) {
+    console.log('✅ Updated global coordinator agent (~/.copilot/agents/squad.agent.md)');
+  }
+  refreshCopilotPayloadForUpgrade(dest, squadDirInfo.path, options);
+  smokeTestSdkSymbolResolution(homeDir);
 
   console.log();
   info(`Upgrade complete: v${fromLabel} → v${cliVersion}`);

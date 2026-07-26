@@ -1,0 +1,7 @@
+---
+"@bradygaster/squad-cli": patch
+---
+
+Pipeline-file injection hygiene on shared hosts. The scoped `install-fold-pipeline --callsign <name>` now writes a distinct, callsign-named pipeline file `fold-squad-state.<callsign>.yml` (the callsign is validated with the shared `CALLSIGN_RE`) instead of the fixed `fold-squad-state.yml`. Two scoped installs for different callsigns on one repository no longer collide on the filename or trip the conflict gate; the idempotency/conflict gate and messages reference the resolved filename. The default (no `--callsign`) install is unchanged and still writes `fold-squad-state.yml`.
+
+The cross-repo `squad sync` pipeline injection — which embeds the host's fold-pipeline YAML into the published inbox snapshot — now resolves a single canonical pipeline path and embeds only that one, instead of independently embedding every directory copy. Candidates are evaluated in a fixed precedence (callsign-named before generic, Azure DevOps before GitHub) and the first existing file wins, so the snapshot never carries a second, stale alternate-directory copy. Note that selection is by fixed precedence, not by freshness: during a platform migration a stale generic file in the higher-precedence directory can still be the one embedded, so operators should remove stale generic files or install a callsign-scoped file to override. Single-platform hosts are unaffected.

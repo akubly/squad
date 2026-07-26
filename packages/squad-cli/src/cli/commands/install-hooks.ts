@@ -12,8 +12,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { normalisedPathKey } from '@bradygaster/squad-sdk/path-utils';
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -144,7 +146,150 @@ fi
 
 export interface InstallHooksOptions {
   force?: boolean;
+  /**
+   * @internal Test seam — inject a known post-commit sync invocation instead of
+   * resolving it from the running process (see .squad/decisions/inbox/piece-45-triage.md).
+   * Mirrors the `_installCrossRepoHookFn` seam convention in commands/assign.ts.
+   */
+  _squadInvocation?: string;
 }
+
+/**
+ * Convert a filesystem path to a POSIX/MSYS form safe for embedding in a
+ * `#!/bin/sh` script run by git's sh (Git Bash / MSYS on Windows). A Windows
+ * drive path (`C:\foo bar\node.exe`) becomes `/c/foo bar/node.exe`; a POSIX path
+ * is returned unchanged. Conversion is driven by the path shape (a drive-letter /
+ * backslash path is converted) so it is deterministic regardless of the host the
+ * install runs on.
+ */
+function toPosixShPath(p: string): string {
+  const slashed = p.replace(/\\/g, '/');
+  return slashed.replace(/^([A-Za-z]):\//, (_m, d: string) => `/${d.toLowerCase()}/`);
+}
+
+/** Single-quote a string for POSIX sh, escaping any embedded single quotes. */
+function shSingleQuote(s: string): string {
+  return `'${s.split("'").join("'\\''")}'`;
+}
+
+/**
+ * Resolve the CLI entry script of the running process so an installed hook can
+ * re-run the same CLI build that wrote it. Probes the built `cli-entry.js`
+ * relative to this module, then `process.argv[1]` when it names a runnable CLI
+ * entry. Returns an absolute path, or null when no *runnable* entry can be
+ * resolved.
+ *
+ * Only a built `.js` entry (or an installed bin shim) is accepted: a `.ts`
+ * source entry is deliberately rejected because a plain `node` hook cannot
+ * execute it (its `.js` import specifiers resolve to non-existent files in a
+ * source tree), so embedding it would write a hook that fails at commit time.
+ * When no runnable entry is found the caller degrades to the bare `squad`
+ * invocation (piece-45 decision B1) rather than embedding a broken one.
+ *
+ * Parameters default to the running module/process and exist for testability.
+ */
+export function resolveCliEntry(
+  moduleUrl: string = import.meta.url,
+  argv1: string | undefined = process.argv[1],
+): string | null {
+  try {
+    const dir = path.dirname(fileURLToPath(moduleUrl)); // <root>/cli/commands
+    const builtEntry = path.resolve(dir, '../../cli-entry.js');
+    if (fs.existsSync(builtEntry)) return builtEntry;
+  } catch {
+    // import.meta / file URL unavailable — fall through to argv[1].
+  }
+  if (argv1) {
+    const resolved = path.resolve(argv1);
+    const base = path.basename(resolved);
+    const isRunnableEntry = base === 'cli-entry.js' || /^squad(-cli|-test)?(\.js)?$/.test(base);
+    if (isRunnableEntry && fs.existsSync(resolved)) return resolved;
+  }
+  return null;
+}
+
+/**
+ * Build the `squad sync` invocation embedded in the cross-repo post-commit hook.
+ * When the CLI entry resolves, returns a resolved `<node> <cli-entry> sync --push
+ * --quiet` invocation with both paths converted to MSYS/POSIX form and single-
+ * quoted so it survives git's sh on every platform. When the entry cannot be
+ * resolved (`entryPath` is null), falls back to the bare `squad sync --push
+ * --quiet` (piece-45 decision B1: never break an install that previously worked).
+ */
+export function buildSquadSyncInvocation(execPath: string, entryPath: string | null): string {
+  if (!entryPath) return 'squad sync --push --quiet';
+  const node = shSingleQuote(toPosixShPath(execPath));
+  const entry = shSingleQuote(toPosixShPath(entryPath));
+  return `${node} ${entry} sync --push --quiet`;
+}
+
+/** Resolve the post-commit sync invocation for the running process (B1 fallback). */
+function resolveSquadSyncInvocation(): string {
+  return buildSquadSyncInvocation(process.execPath, resolveCliEntry());
+}
+
+/**
+ * Hook template for the cross-repo post-commit hook — HOST clone variant.
+ * Filters out .squad/-only commits: publishes only when non-.squad/ files changed.
+ * Uses git diff-tree --root (correct on root commit and shallow clones; never HEAD~1).
+ *
+ * The `invocation` is the resolved CLI entrypoint (see buildSquadSyncInvocation),
+ * embedded so the hook runs the same CLI build that installed it instead of a bare
+ * `squad` resolved from the global PATH.
+ */
+function crossRepoHostPostCommitTemplate(invocation: string): string {
+  return `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad cross-repo publish hook (host clone — filtered)
+# Installed by: squad assign --inbox-handle
+# Only publishes when a non-.squad/ file changed in this commit.
+if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
+  if git diff-tree --no-commit-id --name-only -r --root HEAD | grep -qv '^\\.squad/'; then
+    ${invocation}
+  fi
+fi
+`;
+}
+
+/**
+ * Hook template for the cross-repo post-commit hook — PRODUCT clone variant.
+ * Fires on ANY commit (unfiltered). The product commit is only the trigger;
+ * publishTeamRootToInbox snapshots the host .squad/ working tree.
+ *
+ * The `invocation` is the resolved CLI entrypoint (see buildSquadSyncInvocation).
+ */
+function crossRepoProductPostCommitTemplate(invocation: string): string {
+  return `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad cross-repo publish hook (product clone — unfiltered)
+# Installed by: squad assign
+if [ -z "$SQUAD_SYNC_ACTIVE" ]; then
+  ${invocation}
+fi
+`;
+}
+
+/**
+ * Hook template for the product .squad/-forbid pre-commit guard.
+ * Rejects commits that stage paths under .squad/ in the product clone.
+ * Forbids TRACKING, not on-disk existence (untracked .squad/ cache is fine).
+ */
+const PRODUCT_SQUAD_FORBID_PRE_COMMIT_TEMPLATE = `#!/bin/sh
+${SQUAD_HOOK_MARKER}
+# Squad product .squad/-forbid guard
+# Product clones must not track .squad/. Write team state to the host clone's .squad/ via TEAM_ROOT.
+if git diff --cached --name-only | grep -q '^\\.squad/'; then
+  echo "ERROR: Cannot commit .squad/ paths in the product clone." >&2
+  echo "  Product clones must not track .squad/." >&2
+  echo "  Write team state to the host clone's .squad/ via TEAM_ROOT." >&2
+  exit 1
+fi
+`;
+
+// TODO(piece-34-B): Copilot CLI external post-tool hook API not found at implementation time;
+// deferred to follow-up piece. See .squad/decisions/inbox/piece-34-B-deferred.md.
+// When the Copilot CLI exposes a file-based hook API, register a hook scoped to
+// TEAM_ROOT/.squad/** here that invokes `squad sync --push --quiet`.
 
 /**
  * Get the .git/hooks directory path for the repo.
@@ -254,6 +399,85 @@ export function installGitHooks(cwd: string, options: InstallHooksOptions = {}):
   }
 
   console.log(`\n${GREEN}${BOLD}Done.${RESET} Squad state will sync automatically on push/pull.\n`);
+}
+
+/**
+ * Install a post-commit hook in a clone that invokes `squad sync --push --quiet`
+ * after each commit. Protected by the SQUAD_SYNC_ACTIVE recursion guard.
+ *
+ * Determines template automatically based on whether the target path is a host clone
+ * (has .squad/team.md → host-filtered template) or a product clone (unfiltered template).
+ *
+ * Idempotent: calling twice on the same repo does not duplicate the hook section.
+ *
+ * @param repoPath - Absolute path to a clone (host or product).
+ * @param options - Hook install options.
+ * @throws {Error} if repoPath is not a git repository.
+ */
+export function installCrossRepoHook(repoPath: string, options: InstallHooksOptions = {}): void {
+  let gitRoot: string;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: repoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    throw new Error(
+      `installCrossRepoHook: "${repoPath}" is not a git repository. ` +
+      `Run 'squad assign' with a registered shared-squad host clone path before installing hooks.`,
+    );
+  }
+  if (normalisedPathKey(path.resolve(repoPath)) !== normalisedPathKey(gitRoot)) {
+    throw new Error(
+      `installCrossRepoHook: "${repoPath}" is not a git repository root ` +
+      `(root is "${gitRoot}"). Pass the git root directory, not a subdirectory.`,
+    );
+  }
+
+  // Determine variant: host clone has .squad/team.md, product does not.
+  const isHost = fs.existsSync(path.join(repoPath, '.squad', 'team.md'));
+  // Resolve the CLI entrypoint at install time so the hook runs the same CLI
+  // build that installed it, not a bare `squad` from the global PATH.
+  const invocation = options._squadInvocation ?? resolveSquadSyncInvocation();
+  const template = isHost
+    ? crossRepoHostPostCommitTemplate(invocation)
+    : crossRepoProductPostCommitTemplate(invocation);
+
+  const hooksDir = getHooksDir(repoPath);
+  fs.mkdirSync(hooksDir, { recursive: true });
+  installHook(hooksDir, 'post-commit', template, options.force ?? false);
+}
+
+/**
+ * Install a pre-commit hook in a product clone that rejects staging .squad/ paths.
+ * Product clones must not track .squad/; team state goes to the host clone's .squad/ via TEAM_ROOT.
+ *
+ * Idempotent. Installed in product clone only (NOT the host clone).
+ *
+ * @param productRepoPath - Absolute path to the product clone.
+ * @param options - Hook install options.
+ * @throws {Error} if productRepoPath is not a git repository.
+ */
+export function installProductSquadForbidHook(productRepoPath: string, options: InstallHooksOptions = {}): void {
+  let gitRoot: string;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: productRepoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    throw new Error(
+      `installProductSquadForbidHook: "${productRepoPath}" is not a git repository.`,
+    );
+  }
+  if (normalisedPathKey(path.resolve(productRepoPath)) !== normalisedPathKey(gitRoot)) {
+    throw new Error(
+      `installProductSquadForbidHook: "${productRepoPath}" is not a git repository root ` +
+      `(root is "${gitRoot}"). Pass the git root directory, not a subdirectory.`,
+    );
+  }
+
+  const hooksDir = getHooksDir(productRepoPath);
+  fs.mkdirSync(hooksDir, { recursive: true });
+  installHook(hooksDir, 'pre-commit', PRODUCT_SQUAD_FORBID_PRE_COMMIT_TEMPLATE, options.force ?? false);
 }
 
 /**

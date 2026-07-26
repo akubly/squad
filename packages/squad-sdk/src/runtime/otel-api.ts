@@ -10,6 +10,7 @@
  */
 
 import { createRequire } from 'node:module';
+import type { OTelSpanLike, OTelTracerLike, OTelInstrumentLike, OTelMeterLike, OTelDiagLike, OTelDiagLoggerLike, OTelDiagLogLevelMap } from './otel-types.js';
 
 // ---------------------------------------------------------------------------
 // Dynamic load — graceful fallback when @opentelemetry/api is absent
@@ -27,9 +28,7 @@ try {
 // No-op implementations (mirror the @opentelemetry/api surface we use)
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-const _noopSpan: any = {
+const _noopSpan: OTelSpanLike = {
   end() {},
   setStatus() { return _noopSpan; },
   setAttribute() { return _noopSpan; },
@@ -41,22 +40,28 @@ const _noopSpan: any = {
   spanContext() { return { traceId: '', spanId: '', traceFlags: 0 }; },
 };
 
-const _noopTracer: any = {
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, fn: F): ReturnType<F>;
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, options: unknown, fn: F): ReturnType<F>;
+function _noopStartActiveSpan<F extends (span: OTelSpanLike) => unknown>(name: string, options: unknown, context: unknown, fn: F): ReturnType<F>;
+function _noopStartActiveSpan(_name: string, fnOrOpts: unknown, ctxOrFn?: unknown, fn?: unknown): unknown {
+  const callback = typeof fn === 'function' ? fn : (typeof ctxOrFn === 'function' ? ctxOrFn : fnOrOpts);
+  if (typeof callback !== 'function') return undefined;
+  return callback(_noopSpan);
+}
+
+const _noopTracer: OTelTracerLike = {
   startSpan() { return _noopSpan; },
-  startActiveSpan(...args: any[]) {
-    const fn = args[args.length - 1];
-    if (typeof fn === 'function') return fn(_noopSpan);
-  },
+  startActiveSpan: _noopStartActiveSpan,
 };
 
-const _noopInstrument: any = {
+const _noopInstrument: OTelInstrumentLike = {
   add() {},
   record() {},
   addCallback() {},
   removeCallback() {},
 };
 
-const _noopMeter: any = {
+const _noopMeter: OTelMeterLike = {
   createCounter() { return _noopInstrument; },
   createUpDownCounter() { return _noopInstrument; },
   createHistogram() { return _noopInstrument; },
@@ -65,8 +70,6 @@ const _noopMeter: any = {
   createObservableGauge() { return _noopInstrument; },
   createGauge() { return _noopInstrument; },
 };
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // Exports — real API when available, no-ops otherwise
@@ -78,16 +81,16 @@ export const SpanStatusCode: { readonly UNSET: 0; readonly OK: 1; readonly ERROR
 
 /** Trace API entry point. */
 export const trace = _api?.trace ?? {
-  getTracer(): typeof _noopTracer { return _noopTracer; },
+  getTracer(): OTelTracerLike { return _noopTracer; },
 };
 
 /** Metrics API entry point. */
 export const metrics = _api?.metrics ?? {
-  getMeter(): typeof _noopMeter { return _noopMeter; },
+  getMeter(): OTelMeterLike { return _noopMeter; },
 };
 
 /** Diagnostics API. */
-export const diag: any = _api?.diag ?? { // eslint-disable-line @typescript-eslint/no-explicit-any
+export const diag: OTelDiagLike = _api?.diag ?? {
   setLogger() {},
   disable() {},
   verbose() {},
@@ -98,16 +101,23 @@ export const diag: any = _api?.diag ?? { // eslint-disable-line @typescript-esli
 };
 
 /** Diagnostics console logger class. */
-export const DiagConsoleLogger: any = _api?.DiagConsoleLogger ?? class NoopDiagLogger {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+export const DiagConsoleLogger: { new(): OTelDiagLoggerLike } = _api?.DiagConsoleLogger ?? class NoopDiagLogger {
+  verbose(_msg: string, ..._args: unknown[]): void {}
+  debug(_msg: string, ..._args: unknown[]): void {}
+  info(_msg: string, ..._args: unknown[]): void {}
+  warn(_msg: string, ..._args: unknown[]): void {}
+  error(_msg: string, ..._args: unknown[]): void {}
+};
 
 /** Diagnostics log level enum. */
-export const DiagLogLevel: any = _api?.DiagLogLevel ?? { // eslint-disable-line @typescript-eslint/no-explicit-any
+export const DiagLogLevel: OTelDiagLogLevelMap = _api?.DiagLogLevel ?? {
   NONE: 0, ERROR: 30, WARN: 50, INFO: 60, DEBUG: 70, VERBOSE: 80, ALL: 9999,
 };
 
 /** Whether @opentelemetry/api was successfully loaded. */
 export const otelApiAvailable: boolean = _api !== undefined;
 
-// Type re-exports — compile-time only, erased at runtime
-export type Tracer = import('@opentelemetry/api').Tracer;
-export type Meter = import('@opentelemetry/api').Meter;
+// Type aliases — resolves to the local structural interfaces; no compile-time
+// dependency on @opentelemetry/api, while remaining structurally compatible.
+export type Tracer = OTelTracerLike;
+export type Meter = OTelMeterLike;

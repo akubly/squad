@@ -17,7 +17,6 @@ import { promisify } from 'node:util';
 import { resolve as resolvePath } from 'node:path';
 import { success, warn, info, BOLD, RESET, DIM } from '../core/output.js';
 import { fatal } from '../core/errors.js';
-import { detectSquadDir } from '../core/detect-squad-dir.js';
 import {
   discoverSquads,
   formatDiscoveryTable,
@@ -28,19 +27,23 @@ import {
   removeRegistryEntry,
   type DiscoveredSquad,
 } from '@bradygaster/squad-sdk';
+import { resolveSquadDir } from '../core/squad-resolver.js';
+import { detectSquadDir } from '../core/detect-squad-dir.js';
 
 const execFileAsync = promisify(execFile);
 
-export async function discoverCommand(): Promise<void> {
-  const squadDirInfo = detectSquadDir(process.cwd());
-  const squadDir = squadDirInfo.path;
+export async function discoverCommand(cwd = process.env['SQUAD_TEAM_ROOT'] || process.cwd()): Promise<void> {
+  const squadDir = resolveSquadDir(cwd);
+  if (!squadDir) {
+    fatal('No squad found. Run "squad init" first.');
+  }
 
   const squads = discoverSquads(squadDir);
   const output = formatDiscoveryTable(squads);
   info(output);
 }
 
-export async function delegateCommand(args: string[]): Promise<void> {
+export async function delegateCommand(args: string[], cwd = process.env['SQUAD_TEAM_ROOT'] || process.cwd()): Promise<void> {
   const squadName = args[0];
   const description = args.slice(1).join(' ');
 
@@ -48,8 +51,10 @@ export async function delegateCommand(args: string[]): Promise<void> {
     fatal('Usage: squad delegate <squad-name> "<description>"');
   }
 
-  const squadDirInfo = detectSquadDir(process.cwd());
-  const squadDir = squadDirInfo.path;
+  const squadDir = resolveSquadDir(cwd);
+  if (!squadDir) {
+    fatal('No squad found. Run "squad init" first.');
+  }
 
   const squads = discoverSquads(squadDir);
   const target = findSquadByName(squads, squadName);

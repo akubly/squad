@@ -160,6 +160,20 @@ export class GitHubAdapter implements PlatformAdapter {
     this.gh(args);
   }
 
+  async assignWorkItem(id: number, assignee: string): Promise<void> {
+    this.gh(['issue', 'edit', String(id), '--repo', this.repoFlag, '--add-assignee', assignee]);
+  }
+
+  getCurrentUser(): string | undefined {
+    try {
+      const output = execFileSync('gh', ['auth', 'status', '--active'], EXEC_OPTS);
+      const match = output.match(/Logged in to github\.com account (\S+)/);
+      return match?.[1] ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async listPullRequests(options: { status?: string; limit?: number }): Promise<PullRequest[]> {
     const args = ['pr', 'list', '--repo', this.repoFlag, '--json', 'number,title,headRefName,baseRefName,state,isDraft,reviewDecision,author,url'];
     if (options.status) args.push('--state', mapStatusToGhState(options.status));

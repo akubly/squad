@@ -6,6 +6,7 @@
 
 import { execSync } from 'node:child_process';
 import type { PlatformType, WorkItemSource } from './types.js';
+import { PlatformConfigError } from './types.js';
 
 /** Parsed GitHub remote info */
 export interface GitHubRemoteInfo {
@@ -73,6 +74,14 @@ export function parseAzureDevOpsRemote(url: string): AzureDevOpsRemoteInfo | nul
     return { org: devAzureSsh[1]!, project: devAzureSsh[2]!, repo: devAzureSsh[3]! };
   }
 
+  // Legacy SSH visualstudio.com: org@vs-ssh.visualstudio.com:v3/org/project/repo
+  const vsSsh = url.match(
+    /^[^@]+@vs-ssh\.visualstudio\.com:v3\/([^/]+)\/([^/]+)\/([^/.]+?)(?:\.git)?(?:\/)?$/i,
+  );
+  if (vsSsh) {
+    return { org: vsSsh[1]!, project: vsSsh[2]!, repo: vsSsh[3]! };
+  }
+
   // Legacy visualstudio.com: https://org.visualstudio.com/project/_git/repo
   // (Org subdomain keeps the no-dot constraint — the `.visualstudio.com` anchor
   // requires it. Only the repo capture is widened.)
@@ -87,9 +96,47 @@ export function parseAzureDevOpsRemote(url: string): AzureDevOpsRemoteInfo | nul
 }
 
 /**
+ * Return a canonical form of a git remote URL for platform matching.
+ *
+ * Normalisation rules:
+ * - Lowercase the host only; preserve owner, org, project, and repo casing.
+ * - Strip HTTPS user info (e.g. `org@`), `.git` suffix, and trailing slash.
+ * - Collapse all Azure DevOps URL forms (dev.azure.com HTTPS, ssh.dev.azure.com SSH,
+ *   and legacy *.visualstudio.com) to `dev.azure.com/{org}/{project}/_git/{repo}`.
+ * - Leave non-ADO hosts on a generic canonical `host/path` form.
+ */
+export function normalizeRemoteUrl(url: string): string {
+  const trimmed = url.trim();
+
+  // Azure DevOps: normalise all forms to the canonical dev.azure.com path.
+  const ado = parseAzureDevOpsRemote(trimmed);
+  if (ado) {
+    return `dev.azure.com/${ado.org}/${ado.project}/_git/${ado.repo}`;
+  }
+
+  // SSH form: git@host:path/to/repo.git
+  const sshMatch = trimmed.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch) {
+    const host = sshMatch[1]!.toLowerCase();
+    const path = sshMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
+    return `${host}/${path}`;
+  }
+
+  // HTTPS form: https?://[user@]host/path[.git][/]
+  const httpsMatch = trimmed.match(/^https?:\/\/(?:[^@]+@)?([^/]+)\/(.+)$/);
+  if (httpsMatch) {
+    const host = httpsMatch[1]!.toLowerCase();
+    const path = httpsMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
+    return `${host}/${path}`;
+  }
+
+  return trimmed.toLowerCase();
+}
+
+/**
  * Detect platform type from git remote URL string.
- * Returns 'github' for github.com remotes, 'azure-devops' for ADO remotes.
- * Defaults to 'github' if unrecognized.
+ * Returns 'github' for github.com remotes, 'azure-devops' for ADO remotes,
+ * or 'github' as the default for unrecognized hosts.
  */
 export function detectPlatformFromUrl(url: string): PlatformType {
   if (/github\.com/i.test(url)) return 'github';
@@ -101,34 +148,80 @@ export function detectPlatformFromUrl(url: string): PlatformType {
 
 /**
  * Detect platform from a repository root by reading the git remote.
- * Reads 'origin' remote URL and determines whether it's GitHub or Azure DevOps.
- * Defaults to 'github' if detection fails.
+ *
+ * Priority chain:
+ *   1. `SQUAD_PLATFORM` env var (offline-safe override)
+ *   2. `git remote get-url origin` → URL-based detection
+ *   3. Typed configuration error with remediation hint
+ *
+ * Throws PlatformConfigError when origin is missing, the host is unrecognized,
+ * or SQUAD_PLATFORM is set to an invalid value.
+ * Set `SQUAD_PLATFORM=github|azure-devops` to override.
  */
 export function detectPlatform(repoRoot: string): PlatformType {
+  // 1. Honor explicit SQUAD_PLATFORM env var before shelling out.
+  const envPlatform = process.env['SQUAD_PLATFORM'];
+  if (envPlatform) {
+    const normalized = envPlatform.toLowerCase().trim();
+    if (normalized === 'github' || normalized === 'azure-devops') {
+      return normalized as PlatformType;
+    }
+    // 'planner' is a WorkItemSource, not a git platform.
+    if (normalized === 'planner') {
+      throw new PlatformConfigError(
+        'SQUAD_PLATFORM=planner is not valid. Planner is a work-item source, not a git platform. ' +
+        'Set SQUAD_WORK_ITEMS=planner in your squad config instead, and use ' +
+        'SQUAD_PLATFORM=github or SQUAD_PLATFORM=azure-devops for the git remote.',
+      );
+    }
+    throw new PlatformConfigError(
+      `Invalid SQUAD_PLATFORM value "${envPlatform}". Valid values: github, azure-devops`,
+    );
+  }
+
+  // 2. Read origin remote URL.
+  let remoteUrl: string;
   try {
-    const remoteUrl = execSync('git remote get-url origin', {
+    remoteUrl = execSync('git remote get-url origin', {
       cwd: repoRoot,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-
-    return detectPlatformFromUrl(remoteUrl);
   } catch {
-    return 'github';
+    throw new PlatformConfigError(
+      'No git remote "origin" found. ' +
+      'Set SQUAD_PLATFORM=github|azure-devops to specify the platform without a remote.',
+    );
   }
+
+  const platform = detectPlatformFromUrl(remoteUrl);
+  if (platform === 'unknown') {
+    throw new PlatformConfigError(
+      `Unrecognized git host in remote URL "${remoteUrl}". ` +
+      'Set SQUAD_PLATFORM=github|azure-devops to override.',
+    );
+  }
+
+  return platform;
 }
 
 /**
  * Detect work-item source for hybrid setups.
  * When a squad config specifies `workItems: 'planner'`, work items come from
  * Planner even though the repo is on GitHub or Azure DevOps.
+ * Returns 'github' as the safe default when platform detection fails.
  */
 export function detectWorkItemSource(
   repoRoot: string,
   configWorkItems?: string,
 ): WorkItemSource {
   if (configWorkItems === 'planner') return 'planner';
-  return detectPlatform(repoRoot);
+  try {
+    const platform = detectPlatform(repoRoot);
+    return platform === 'unknown' ? 'github' : platform;
+  } catch {
+    return 'github';
+  }
 }
 
 /**

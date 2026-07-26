@@ -28,6 +28,8 @@ docs/tests/screenshots/
 .squad/.first-run
 .squad/.watch-pids
 .squad/.cache/
+# Squad: idempotency sentinel for hydrateTeamRootFromStateRef (local, must not be committed)
+.squad/.last-hydrate-sha
 
 # Images folder (root only — don't ignore docs/public/images/)
 /images/

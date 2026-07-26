@@ -1,0 +1,6 @@
+---
+"@bradygaster/squad-cli": patch
+"@bradygaster/squad-sdk": patch
+---
+
+squad assign: one-command cold-start onboarding of a shared-squad consumer into a CLI-managed host clone (`~/.squad/hosts/<callsign>/`) — flag-driven identity, orphan-branch hydrate, and auto-wire so the host is usable with no follow-up; deterministic hands-off freshness sync from the coordinator session-start hook; doctor: fix the subfolder-host repo-agent-path false negative and the custom `squad-`-prefixed skill orphan false positive so a fresh managed host is green. The managed entry records `clones[]` so `squad sync --pull` runs from the managed clone (freshness + Scribe pull-before-push); the auto-wire upgrade preserves every hydrated team-root file — both the durable constitution (CONFIG_ALLOWLIST) and the ephemeral coordinator memory (PUBLISH_ALLOWLIST: history.md, orchestration-log.md, casting-history/registry.json) — so it never overwrites hydrated content with bundled scaffolds; managed durable hydrate is clean-overwrite (prunes files removed upstream while the ephemeral lane stays additive); re-runs realign the managed clone origin; and the Scribe pull-before-push targets the namespaced `squad/state/<callsign>` ref.

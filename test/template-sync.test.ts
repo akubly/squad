@@ -6,15 +6,17 @@
  * Special target:   .github/agents/ (squad.agent.md only)
  *
  * Coverage strategy:
- *   1. Dynamic enumeration — every file in .squad-templates/ must be byte-for-byte
+ *   1. Pre-sync parity gate — sync must not rewrite tracked mirror files.
+ *   2. Dynamic enumeration — every file in .squad-templates/ must be byte-for-byte
  *      identical across all mirror targets (and .github/agents/ for squad.agent.md).
- *   2. Script execution — `node scripts/sync-templates.mjs` must exit 0.
- *   3. Negative guard — .github/agents/ must not contain stray synced files.
- *   4. Semantic checks — universe counts, casting-policy internal consistency.
+ *   3. Script execution — `node scripts/sync-templates.mjs` must exit 0.
+ *   4. Negative guard — .github/agents/ must not contain stray synced files.
+ *   5. Semantic checks — universe counts, casting-policy internal consistency.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, existsSync, readdirSync, writeFileSync, rmSync, mkdirSync, cpSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -22,32 +24,41 @@ import { execSync } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
-// Re-sync templates before any byte-comparison checks.
-// Other test files (e.g., acceptance tests) may run `squad init` in the
-// repo root, overwriting .github/agents/squad.agent.md from the CLI
-// template and making it diverge from .squad-templates/squad.agent.md.
+let mirrorFilesChangedBySync: string[] = [];
+
 beforeAll(() => {
-  execSync('node scripts/sync-templates.mjs', {
-    cwd: ROOT,
-    encoding: 'utf-8',
-    timeout: 60_000,
-  });
+  const beforeSync = snapshotMirrorHashes(TRACKED_MIRROR_FILES);
+
+  runSyncTemplates();
+
+  const afterSync = snapshotMirrorHashes(TRACKED_MIRROR_FILES);
+  mirrorFilesChangedBySync = TRACKED_MIRROR_FILES.filter(
+    (relPath) => beforeSync.get(relPath) !== afterSync.get(relPath)
+  );
 });
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function readFile(relPath: string): string {
-  return readFileSync(resolve(ROOT, relPath), 'utf-8');
+function readFile(relPath: string, baseDir = ROOT): string {
+  return readFileSync(resolve(baseDir, relPath), 'utf-8');
 }
 
-function readFileBytes(relPath: string): Buffer {
-  return readFileSync(resolve(ROOT, relPath));
+function readFileBytes(relPath: string, baseDir = ROOT): Buffer {
+  return readFileSync(resolve(baseDir, relPath));
 }
 
-function fileExists(relPath: string): boolean {
-  return existsSync(resolve(ROOT, relPath));
+function fileExists(relPath: string, baseDir = ROOT): boolean {
+  return existsSync(resolve(baseDir, relPath));
+}
+
+function hashFile(relPath: string): string | null {
+  if (!fileExists(relPath)) {
+    return null;
+  }
+
+  return createHash('sha256').update(readFileBytes(relPath)).digest('hex');
 }
 
 /** Recursively collect all file paths relative to `dir`. */
@@ -106,6 +117,69 @@ const SQUAD_AGENT_LOCATIONS = [
   'packages/squad-sdk/templates/squad.agent.md.template',
 ] as const;
 
+function getMirrorTargets(relFile: string): string[] {
+  const targets = MIRROR_TARGETS.map((target) => {
+    const destName = relFile === AGENT_MD_FILE ? `${AGENT_MD_FILE}.template` : relFile;
+    return `${target}/${destName}`;
+  });
+
+  if (relFile === AGENT_MD_FILE) {
+    targets.push(`${AGENT_MD_EXTRA_TARGET}/${AGENT_MD_FILE}`);
+  }
+
+  return targets;
+}
+
+const TRACKED_MIRROR_FILES = collectFiles(SOURCE_DIR).flatMap((relFile) => getMirrorTargets(relFile));
+
+function snapshotMirrorHashes(relPaths: readonly string[]): Map<string, string | null> {
+  return new Map(relPaths.map((relPath) => [relPath, hashFile(relPath)]));
+}
+
+function runSyncTemplates(cwd = ROOT): string {
+  return execSync('node scripts/sync-templates.mjs', {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 60_000,
+  });
+}
+
+const SYNC_SANDBOX_TARGET_DIRS = [
+  'templates',
+  '.github/agents',
+  'packages/squad-cli/templates',
+  'packages/squad-sdk/templates',
+] as const;
+
+function withSyncSandbox(name: string, callback: (sandboxRoot: string) => void): void {
+  const sandboxRoot = join(
+    ROOT,
+    'test',
+    `.${name}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+
+  mkdirSync(sandboxRoot, { recursive: true });
+
+  try {
+    mkdirSync(resolve(sandboxRoot, 'scripts'), { recursive: true });
+    cpSync(resolve(ROOT, 'scripts', 'sync-templates.mjs'), resolve(sandboxRoot, 'scripts', 'sync-templates.mjs'));
+    cpSync(resolve(ROOT, SOURCE_DIR), resolve(sandboxRoot, SOURCE_DIR), { recursive: true });
+
+    for (const relPath of SYNC_SANDBOX_TARGET_DIRS) {
+      mkdirSync(resolve(sandboxRoot, relPath), { recursive: true });
+    }
+
+    callback(sandboxRoot);
+  } finally {
+    rmSync(sandboxRoot, { recursive: true, force: true });
+  }
+}
+
+const OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS = [
+  'packages/squad-cli/templates/squad.agent.md',
+  'packages/squad-sdk/templates/squad.agent.md',
+] as const;
+
 const CASTING_POLICY_LOCATIONS = [
   `${SOURCE_DIR}/casting-policy.json`,
   'templates/casting-policy.json',
@@ -114,7 +188,20 @@ const CASTING_POLICY_LOCATIONS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// 1. Dynamic enumeration — byte-for-byte parity for ALL synced files
+// 1. Pre-sync parity gate — tracked mirrors must already match canonical files
+// ---------------------------------------------------------------------------
+
+describe('pre-sync parity gate', () => {
+  it('does not rewrite tracked mirror files when sync runs', () => {
+    expect(
+      mirrorFilesChangedBySync.length,
+      `sync-templates updated tracked mirror files. Commit the synced mirrors before running this suite:\n- ${mirrorFilesChangedBySync.join('\n- ')}`
+    ).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. Dynamic enumeration — byte-for-byte parity for ALL synced files
 // ---------------------------------------------------------------------------
 
 describe('dynamic template enumeration (all synced files)', () => {
@@ -156,23 +243,61 @@ describe('dynamic template enumeration (all synced files)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. Script execution — sync-templates.mjs must exit cleanly
+// 3. Script execution — sync-templates.mjs must exit cleanly
 // ---------------------------------------------------------------------------
 
 describe('sync-templates.mjs script execution', () => {
   it('exits with code 0 (no syntax errors, no crashes)', () => {
-    // execSync throws on non-zero exit codes
-    const output = execSync('node scripts/sync-templates.mjs', {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
+    const output = runSyncTemplates();
     expect(output).toContain('Synced');
   });
 });
 
+describe('optional package-local squad.agent.md mirrors', () => {
+  it('refreshes existing package-local mirrors from the canonical template', () => {
+    withSyncSandbox('template-sync-existing-mirror', (sandboxRoot) => {
+      const canonicalPath = `${SOURCE_DIR}/${AGENT_MD_FILE}`;
+      const canonicalBytes = readFileBytes(canonicalPath, sandboxRoot);
+
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        writeFileSync(resolve(sandboxRoot, relPath), Buffer.from(`stale mirror for ${relPath}\n`, 'utf-8'));
+      }
+
+      const output = runSyncTemplates(sandboxRoot);
+      expect(output).toContain('Synced');
+
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        expect(fileExists(relPath, sandboxRoot), `${relPath} should exist`).toBe(true);
+        expect(
+          Buffer.compare(readFileBytes(relPath, sandboxRoot), canonicalBytes),
+          `${relPath} should match ${canonicalPath}`
+        ).toBe(0);
+      }
+    });
+  });
+
+  it('leaves package-local mirrors absent until a runtime path creates them', () => {
+    withSyncSandbox('template-sync-absent-mirror', (sandboxRoot) => {
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        rmSync(resolve(sandboxRoot, relPath), { force: true });
+        expect(fileExists(relPath, sandboxRoot), `${relPath} should start absent`).toBe(false);
+      }
+
+      const output = runSyncTemplates(sandboxRoot);
+      expect(output).toContain('Synced');
+
+      for (const relPath of OPTIONAL_PACKAGE_LOCAL_AGENT_MIRRORS) {
+        expect(
+          fileExists(relPath, sandboxRoot),
+          `${relPath} should remain absent until a runtime path creates it`
+        ).toBe(false);
+      }
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
-// 3. Negative guard — .github/agents/ should only have squad.agent.md
+// 4. Negative guard — .github/agents/ should only have squad.agent.md
 // ---------------------------------------------------------------------------
 
 describe('.github/agents/ contains only squad.agent.md', () => {
@@ -185,7 +310,7 @@ describe('.github/agents/ contains only squad.agent.md', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. squad.agent.md — universe count consistency
+// 5. squad.agent.md — universe count consistency
 // ---------------------------------------------------------------------------
 
 describe('squad.agent.md universe count', () => {
@@ -213,7 +338,28 @@ describe('squad.agent.md universe count', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. casting-policy.json — content parity & internal consistency
+// 6. squad.agent.md — fail-shut team root resolution
+// ---------------------------------------------------------------------------
+
+describe('squad.agent.md fail-shut resolution chain', () => {
+  const canonicalContent = readFile(SQUAD_AGENT_LOCATIONS[0]);
+
+  it('states each resolution step is a probe, not a gate', () => {
+    expect(canonicalContent).toContain('Each step is a probe, not a gate.');
+  });
+
+  it('requires evidence from steps 1 through 5 before declaring no team found', () => {
+    expect(canonicalContent).toMatch(
+      /None matched\*\* — you may ONLY conclude this after explicitly attempting steps 1–5\./
+    );
+    expect(canonicalContent).toContain(
+      'Before declaring "no team found", cite the negative results from steps 1–5.'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. casting-policy.json — content parity & internal consistency
 // ---------------------------------------------------------------------------
 
 describe('casting-policy.json content parity', () => {

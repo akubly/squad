@@ -25,7 +25,7 @@ function docsBuildSkipReason(): string | null {
 // Expected content directories in src/content/docs/
 const EXPECTED_GET_STARTED = ['installation', 'first-session', 'five-minute-start', 'choosing-your-path', 'migration'];
 
-const EXPECTED_GUIDES = ['build-autonomous-agent', 'building-extensions', 'building-resilient-agents', 'contributing', 'contributors', 'extensibility', 'faq', 'github-auth-setup', 'personal-squad', 'sample-prompts', 'shell', 'tips-and-tricks'];
+const EXPECTED_GUIDES = ['build-autonomous-agent', 'building-extensions', 'building-resilient-agents', 'contributing', 'contributors', 'extensibility', 'faq', 'github-auth-setup', 'personal-squad', 'sample-prompts', 'shared-squad', 'shell', 'tips-and-tricks'];
 
 const EXPECTED_REFERENCE = ['cli', 'sdk', 'config', 'api-reference', 'integration', 'tools-and-hooks', 'glossary'];
 
@@ -134,6 +134,43 @@ function getAllMarkdownFiles(): string[] {
 
 function readFile(filepath: string): string {
   return readFileSync(filepath, 'utf-8');
+}
+
+function extractMarkdownTable(content: string, headerLine: string): string {
+  const start = content.indexOf(headerLine);
+  if (start === -1) {
+    throw new Error(`Table header not found: ${headerLine}`);
+  }
+
+  const lines = content.slice(start).split('\n');
+  const tableLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith('|')) {
+      tableLines.push(line);
+      continue;
+    }
+    if (tableLines.length > 0) break;
+  }
+
+  return tableLines.join('\n');
+}
+
+function extractHelpBlock(content: string, command: string): string {
+  if (command === '--help') {
+    const start = content.indexOf("if (cmd === '--help' || cmd === '-h' || cmd === 'help') {");
+    const end = content.indexOf('  // No args → launch interactive shell; whitespace-only arg → show help', start);
+    if (start === -1 || end === -1) {
+      throw new Error('Help block not found for global help');
+    }
+    return content.slice(start, end);
+  }
+
+  const start = content.indexOf(`    if (cmd === '${command}') {`);
+  const end = content.indexOf('    // For other commands, fall through to the main help', start);
+  if (start === -1 || end === -1) {
+    throw new Error(`Help block not found for command: ${command}`);
+  }
+  return content.slice(start, end);
 }
 
 // --- Source Markdown Validation (always runs) ---
@@ -377,5 +414,84 @@ describe.skipIf(DOCS_BUILD_SKIP_REASON !== null)(
     expect(html).toContain('id="search-btn"');
     expect(html).toContain('id="search-modal"');
   });
-  },
-);
+});
+
+// --- CLI reference and shared-squad guide content ---
+
+describe('CLI reference and shared-squad guide', () => {
+  const cliRefPath = join(DOCS_CONTENT_DIR, 'reference', 'cli.md');
+  const sharedSquadPath = join(DOCS_CONTENT_DIR, 'guide', 'shared-squad.md');
+  const readmePath = join(process.cwd(), 'README.md');
+  const cliEntryPath = join(process.cwd(), 'packages', 'squad-cli', 'src', 'cli-entry.ts');
+
+  it('CLI reference includes current lifecycle commands', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('squad assign <callsign>');
+    expect(content).toContain('squad assign <url> --clone-to <path>');
+    expect(content).toContain('--skills-from <callsign>');
+    expect(content).toContain('squad unassign [--callsign <name>] [--target-dir <path>] [--registry-path <file>]');
+    expect(content).toContain('### squad list');
+    expect(content).toContain('squad list [--registry-path <file>]');
+    expect(content).toContain('squad doctor --purge');
+    expect(content).toContain('squad doctor --normalize-callsigns');
+    expect(content).toContain('The doctor exits with code 1 when it finds error-severity issues; otherwise it exits 0.');
+  });
+
+  it('CLI reference documents the fold-pipeline service-connection compliance path (piece 48 F)', () => {
+    const content = readFile(cliRefPath);
+    expect(content).toContain('--fold-service-connection <name>');
+    expect(content).toMatch(/minimum.*permission/i);
+    expect(content).toContain('System.AccessToken');
+    expect(content).toContain('Securing Azure DevOps Build Service Accounts');
+    expect(content).toContain('aka.ms/azdosc');
+    expect(content).toContain('dev.azure.com/contoso/MyProject');
+  });
+
+  it('CLI reference does not document the removed register command as available', () => {
+    const content = readFile(cliRefPath);
+    const commandTable = extractMarkdownTable(content, '| Command | Description |');
+    expect(commandTable).not.toMatch(/\|\s*`squad register\b/);
+    expect(content).not.toMatch(/^###\s+squad register\b/m);
+  });
+
+  it('shared-squad guide teaches warm and cold setup', () => {
+    expect(existsSync(sharedSquadPath)).toBe(true);
+    const content = readFile(sharedSquadPath);
+    expect(content).toContain('squad init --callsign');
+    expect(content).toContain('squad assign <url> --clone-to <path>');
+  });
+
+  it('shared-squad guide explains Copilot payload delivery', () => {
+    expect(existsSync(sharedSquadPath)).toBe(true);
+    const content = readFile(sharedSquadPath);
+    expect(content).toContain('.copilot/');
+    expect(content).toContain('skills');
+    expect(content).toContain('agents');
+    expect(content).toContain('MCP');
+    expect(content).toContain('callsign-prefixed');
+  });
+
+  it('README command table includes lifecycle commands and doctor cleanup flags', () => {
+    const content = readFile(readmePath);
+    const commandTable = extractMarkdownTable(content, '| Command | What it does |');
+    expect(commandTable).toContain('squad assign <callsign>');
+    expect(commandTable).toContain('squad unassign');
+    expect(commandTable).toContain('squad list');
+    expect(commandTable).toContain('squad triage');
+    expect(commandTable).toContain('squad copilot');
+    expect(commandTable).toContain('--purge');
+    expect(commandTable).toContain('--normalize-callsigns');
+  });
+
+  it('terminal help lists assign, unassign, init flags, and doctor health flags', () => {
+    const content = readFile(cliEntryPath);
+    const globalHelp = extractHelpBlock(content, '--help');
+    const initHelp = extractHelpBlock(content, 'init');
+    const doctorHelp = extractHelpBlock(content, 'doctor');
+    expect(globalHelp).toContain('assign');
+    expect(globalHelp).toContain('unassign');
+    expect(initHelp).toContain('--callsign');
+    expect(doctorHelp).toContain('--normalize-callsigns');
+    expect(doctorHelp).toContain('--purge');
+  });
+});

@@ -6,220 +6,353 @@
 
 Quality gate authority for all PRs. Test assertion arrays (EXPECTED_GUIDES, EXPECTED_FEATURES, EXPECTED_SCENARIOS, etc.) MUST stay in sync with files on disk. When reviewing PRs with CI failures, always check if dev branch has the same failures — don't block PRs for pre-existing issues. 3,931 tests passing, 149 test files, ~89s runtime.
 
-📌 **Team update (2026-03-26T06:41:00Z — Crash Recovery Execution & Community PR Review):** Post-CLI crash recovery completed: Round 1 baseline verified (5,038 tests ✅ green), Round 2 executed duplicate closures (#605/#604/#602) and 9-PR community batch review. FIDO approved 3 PRs (#625 notification-routing, #603 Challenger agent, #608 security policy—merged via Coordinator) and issued change requests on 6 PRs identifying systemic issues: changeset package naming (4 PRs used unscoped `squad-cli` instead of `@bradygaster/squad-cli`); file paths (2 PRs placed files at root instead of correct package structure). Quality gate result: high-bar community acceptance—approved 3/9 (33%), change-request 6/9 (67%), 0 rejections. PR #592 (legacy, high-quality) also merged. All actions complete; dev branch remains green. Decision inbox merged and deleted. Next: Monitor 6 change-request PRs for author responses.
+## Current Session — Piece 34 Review Cycle (2026-06-06)
 
-📌 **Team update (2026-03-25T15:23Z — Triage Session & PR Review Batch):** FIDO reviewed 10 open PRs for quality and merge readiness. Identified 3 duplicate/overlap pairs consolidating 6 PRs into 4: #607 (retro enforcement, comprehensive) approved for merge, #605 closed as duplicate (less comprehensive). #603 (Challenger agent, correct paths) approved for merge, #604 closed as duplicate (wrong file paths). #606 (tiered memory superset, 3-tier model) approved for merge, #602 closed as duplicate (narrower 2-tier scope). Merge-ready PRs identified: #611 (blocked on #610), #592 (joniba wiring guide, high-quality). Draft #567 not ready. Impact: reduces PR count from 10 to 7, eliminates file conflicts, preserves unique value. All other PRs (#611, #608, #592, #567) can proceed independently. Decisions merged to decisions.md and decisions inbox deleted.
+### Piece 34 Adversarial Review & A3 Test Standard
 
-## Learnings
+**Initial Review (Commit `b0045b27`):**
+- A3 recursion-guard test asserts exit 0 but does not prove guard fired
+- Test is not load-bearing; would pass if guard removed
+- Verdict: REJECT until test corrected
 
-### Test Assertion Sync Discipline
-EXPECTED_* arrays in docs-build.test.ts must match filesystem reality. When PRs add new content files, verify the corresponding test arrays are updated. Consider dynamic discovery pattern (used for blog posts) for resilience against content additions. Stale assertions that block CI are FIDO's responsibility.
+**Reviewer-Rejection Lockout:**
+- EECOM locked out; FIDO required to revise (owns test-standard)
+- Implemented sh-function sentinel + marker-file approach
+- Three-case structure with load-bearing guard-absent case (Case 3)
+- Re-verification: APPROVE
 
-### PR Quality Gate Pattern
-Verdict scale: GO (merge), FAIL (block until fixed), NO-GO (reject). Always verify: test discipline (assertions synced), CI status (distinguish pre-existing vs new failures), content accuracy, cross-reference validity. When detecting CI failures, run baseline comparison (dev branch vs PR branch) to isolate regressions.
+**Binding Standard (for all future hook tests):**
 
-### Name-Agnostic Testing
-Tests reading live .squad/ files must assert structure/behavior, not specific agent names. Names change during team rebirths. Two test classes: live-file tests (survive rebirths, property checks) and inline-fixture tests (self-contained, can hardcode).
+> Any test claiming to verify a recursion guard MUST detect whether the guarded command was invoked, not merely whether the script exited 0.
 
-### Dynamic Content Discovery
-Blog tests use filesystem discovery (readdirSync) instead of hardcoded arrays. Pattern: discover from disk, sort, validate build output exists.
+Acceptable approaches:
+1. Sentinel binary on PATH with exit code / marker file
+2. Marker file approach
+3. Stderr check (if guard path produces no stderr)
 
-### Command Wiring Regression Test
-cli-command-wiring.test.ts prevents "unwired command" bug: verifies every .ts file in commands/ is imported in cli-entry.ts. Bidirectional validation.
+**Outcome:** FIDO owns this standard. All future recursion-guard test assertions must pass FIDO's invocation-detection check.
 
-### CLI Packaging Smoke Test
-cli-packaging-smoke.test.ts validates packaged CLI artifact (npm pack → install → execute). Tests 27 commands + 3 aliases. Catches: missing imports, broken exports, bin misconfiguration, ESM resolution failures. Complements source-level wiring test.
+## Key Patterns
 
-### CastingEngine Integration Review
-CastingEngine augments LLM casting with curated names for recognized universes. Unrecognized universes preserve LLM names. Import from `@bradygaster/squad-sdk/casting`, use casting-engine.ts AgentRole type (9 roles). Partial mapping: unmapped roles skip engine casting.
+- Test suite timeout/contention produces 10–20× apparent regressions vs real failure count — always spot-check in isolation
+- Observable-behavior regression guards (e.g., absence of refs on remote) provide protection but are mode-fragile vs spy-based NOT-called assertions
+- Full idempotency checks comparing HEAD to orphan SHA are structurally broken unless HEAD is explicitly updated
+- sessionId flows into git ref names — must validate for git-ref legality, not just alias/branch-name fields
 
-### PR #331 Quality Gate Review — NO-GO (Blocking Issues Found) (2026-03-10T14:13:00Z)
+## Archive
 
-**CRITICAL VIOLATIONS DETECTED:**
+Older reviews (pieces 04–33) documented in `history-archive.md`.
 
-1. **Stale Test Assertions (Hard Rule Violation)** — EXPECTED_SCENARIOS array in test/docs-build.test.ts contains only 7 values ['issue-driven-dev', 'existing-repo', 'ci-cd-integration', 'solo-dev', 'monorepo', 'team-of-humans', 'cross-org-auth'], but 25 scenario files exist on disk (aspire-dashboard, client-compatibility, disaster-recovery, keep-my-squad, large-codebase, mid-project, multi-codespace, multiple-squads, new-project, open-source, private-repos, release-process, scaling-workstreams, switching-models, team-portability, team-state-storage, troubleshooting, upgrading, + 7 in array). My charter: "When I add test count assertions, I MUST keep them in sync with the actual files on disk. Stale assertions that block CI are MY responsibility to prevent." This is MY responsibility to catch.
+Consequence: if the `if [ -z "$SQUAD_SYNC_ACTIVE" ]; then ... fi` guard were removed, the test assertion `expect(result.status).toBe(0)` would STILL PASS — `squad sync` would be called (and possibly fail), `unset` would run, script exits 0. The kill-list criterion requires "a test that would fail if the guard were removed." This test would not fail. The test is effectively a more expensive version of the template-grep pattern (A2 already checks the guard string is present).
 
-2. **Missing EXPECTED_FEATURES Array** — PR adds 'features' to the sections list in test/docs-build.test.ts (line 46), but NO EXPECTED_FEATURES array exists. Test line 171 "all expected doc pages produce HTML in dist/" will skip features entirely. 32 feature files exist (.md files in docs/src/content/docs/features/).
+A compliant A3 must detect INVOCATION of `squad sync`, not just exit code. Options: (a) write a sentinel `squad` script to a temp dir on PATH that exits non-zero, assert the hook exits non-zero without the guard; (b) write a sentinel `squad` script that creates a marker file, assert the marker does NOT exist after running with `SQUAD_SYNC_ACTIVE=1`; (c) assert the process's stderr is empty (no "squad: command not found" or squad output).
 
-📌 **Team update (2026-03-11T01:27:57Z):** PR #331 quality gate resolved. FIDO fixed test assertion sync in docs-build.test.ts: EXPECTED_SCENARIOS updated to 25 entries, EXPECTED_FEATURES array created with 32 entries, test assertions updated for features validation. Tests: 6/6 passing. Commit: 6599db6. Blocking NO-GO converted to approval gate cleared. Lesson reinforced: test assertions must be synced to filesystem state; CI passing ≠ coverage.
+---
 
-3. **Incomplete Test Coverage Sync** — PAO's history (line 41) states "Updated EXPECTED_SCENARIOS in docs-build.test.ts to match remaining files" after deleting ralph-operations.md and proactive-communication.md. But the diff shows ONLY a single-line change (adding 'features' to sections array). The full test update was not committed.
+**A3 REVISION (FIDO owns this fix; reviewer-rejection lockout applies to EECOM)**
 
-**POSITIVE FINDINGS:**
-- ✅ CI passed (test run completed successfully on GitHub)
-- ✅ Markdown structure tests pass (6/6 syntax checks)
-- ✅ Docs are well-written: sentence-case headings, active voice, present tense, second person
-- ✅ Cross-references valid (labels.md link verified)
-- ✅ No duplicate "How It Works" heading in reviewer-protocol.md
-- ✅ Content intact (no accidental loss)
-- ✅ Microsoft Style Guide compliance confirmed
+Applied fix in working tree (uncommitted). Design:
 
-**ROOT CAUSE:** PAO staged the boundary review changes but the test update commit was incomplete. The assertion arrays must be synchronized before merge.
+- **Approach:** sh function preamble. Define `squad() { printf "" > "$MARKER"; }` before the hook body. A sh function shadows any PATH entry, so `squad sync --push --quiet` always invokes our function. No PATH manipulation, no file-permission issues — identical behavior on Windows (MSYS2 sh.exe) and Unix.
+- **Why not PATH injection:** git's sh.exe (MSYS2) does not ship `touch` on PATH. PATH-based sentinels require `chmod +x` which is a no-op on Windows NTFS from Node.js. Function preamble is unambiguous.
+- **Three cases:**
+  1. Guard active (`SQUAD_SYNC_ACTIVE=1`) → marker ABSENT ✓ (guard fires, if-block skipped)
+  2. Guard inactive (unset) → marker PRESENT ✓ (if-block runs, `squad` function invoked)
+  3. Guard-removal proof: strip `if [...]` and `fi` from a local copy of the hook body; run with `SQUAD_SYNC_ACTIVE=1`; assert marker PRESENT ✓ (proves Case 1 would FAIL if guard removed)
 
-**REQUIRED FIX:** Update test/docs-build.test.ts:
-1. EXPECTED_SCENARIOS = [ all 25 actual scenario files, sorted ]
-2. EXPECTED_FEATURES = [ all 32 actual feature files, sorted ]
-3. Regenerate to match disk reality (use filesystem discovery if the project wants test-resilience)
+**Results after fix:** `install-hooks.test.ts` — 6/6 PASS (A1–A6), 1 SKIP (B). All assertions GREEN.
 
-**VERDICT:** 🔴 **NO-GO** — Merge blocked until test assertions sync with disk state. This is a quality gate violation.
+---
 
-### Test Assertion Sync Fix (2026-03-10T14:20:00Z)
+**NON-BLOCKING GAP — Single-repo push path has no piece-34 regression test**
 
-**Issue resolved:** Fixed stale test assertions in test/docs-build.test.ts identified during PR #331 review.
+The `writeLastPublish(repoRoot)` call is inserted after `syncPush()` on the single-repo path. Risk is extremely low (`writeLastPublish` is try-catch wrapped and cannot throw), but no new test exercises the single-repo push path under piece-34. Pre-existing `cross-repo-sync.test.ts` B2 exercises the single-repo fallback but was written before `writeLastPublish` was added. Not a blocker given the non-throwing best-effort nature of `writeLastPublish`, but coverage is incomplete per FIDO scope item 5.
 
-**Changes made:**
-1. Expanded EXPECTED_SCENARIOS from 7 to 25 entries (matched all .md files in docs/src/content/docs/scenarios/)
-2. Added EXPECTED_FEATURES array with 32 entries (matched all .md files in docs/src/content/docs/features/)
-3. Updated test logic to include features section in HTML build validation
+---
 
-**Validation:** All structure validation tests passing (6/6). Build tests skipped as expected (Astro not installed). Arrays now accurately reflect disk state.
+**Kill-list items assessed:**
 
-**Commit:** 6599db6 on branch squad/289-squad-dir-explainer
+| Kill-list constraint | Test | Status |
+|---|---|---|
+| Docs-repo clone ONLY; no CWD fallback | A1 (installs in docsRepo not productRepo) | ✅ |
+| Recursion guard exercised behaviorally | A3 (sentinel function; invocation-detection; guard-removal proof) | ✅ (after fix) |
+| Error (not warning) on non-git path | A4 (expects throw matching /not a git repository/i) | ✅ |
+| Idempotent: marker appears exactly once | A5 (marker count = 1 after two calls) | ✅ |
+| No hook from ensureHooksForBackend | A6 (calls ensureHooksForBackend; asserts no post-commit) | ✅ |
+| B determination documented before commit | it.skip stub + decisions/inbox/piece-34-B-deferred.md | ✅ |
+| --dry-run does NOT call publishTeamRootToInbox | C1 (spy asserts not.toHaveBeenCalled) | ✅ |
+| squad sync status: all six fields | C2 (regex match for each field label + values) | ✅ |
+| .last-publish read when present / "never" when absent | C3, C4 | ✅ |
+| --quiet suppresses stdout, errors reach stderr | C6 (logSpy and publishSpy asserted) | ✅ |
+| assign with developerAlias triggers hook install | P34.A1 | ✅ |
+| assign gracefully degrades when hook throws | P34.A2 (warning in result.warnings) | ✅ |
+| Registry-first topology preserved | All registry mock tests pass; config.json not primary | ✅ |
 
-**Learning:** When test assertions reference file counts, they MUST be kept in sync with disk reality. The principle applies to ALL assertion arrays (EXPECTED_SCENARIOS, EXPECTED_FEATURES, EXPECTED_GUIDES, EXPECTED_REFERENCE, etc.). Consider dynamic discovery pattern (used in EXPECTED_BLOG) for resilience against content additions.
+---
 
-📌 **Team update (2026-03-10T14-44-23Z):** PR #310 scroll flicker fix merged. 4 root causes identified: Ink clearTerminal issue, timer amplification, log-update trailing newline, unstable Static keys. Postinstall patch pattern adopted for Ink internals. Version pin recommended for stability gate. Build: 3,931 tests pass, zero regressions.
-### PR #331 Quality Gate Review — NO-GO (Blocking Issues Found) (2026-03-10T14:13:00Z)
+**Conditional APPROVE:** Fix must be folded into the product commit (`b0045b27`) before the branch is pushed. No other changes needed.
 
-**CRITICAL VIOLATIONS DETECTED:**
+---
 
-1. **Stale Test Assertions (Hard Rule Violation)** — EXPECTED_SCENARIOS array in test/docs-build.test.ts contains only 7 values ['issue-driven-dev', 'existing-repo', 'ci-cd-integration', 'solo-dev', 'monorepo', 'team-of-humans', 'cross-org-auth'], but 25 scenario files exist on disk (aspire-dashboard, client-compatibility, disaster-recovery, keep-my-squad, large-codebase, mid-project, multi-codespace, multiple-squads, new-project, open-source, private-repos, release-process, scaling-workstreams, switching-models, team-portability, team-state-storage, troubleshooting, upgrading, + 7 in array). My charter: "When I add test count assertions, I MUST keep them in sync with the actual files on disk. Stale assertions that block CI are MY responsibility to prevent." This is MY responsibility to catch.
+**Patterns learned:**
 
-2. **Missing EXPECTED_FEATURES Array** — PR adds 'features' to the sections list in test/docs-build.test.ts (line 46), but NO EXPECTED_FEATURES array exists. Test line 171 "all expected doc pages produce HTML in dist/" will skip features entirely. 32 feature files exist (.md files in docs/src/content/docs/features/).
+- **Exit-0 guard tests fail when the last shell command is a cleanup step.** When a hook template ends with `unset VARIABLE`, any intermediate command failure is masked. A behavioral guard test must detect invocation, not just exit code. Pattern to watch: any `unset`/`trap`/`exec` at the end of a hook template neutralizes exit-code-based guard assertions.
+- **Recursion guard tests need a sentinel function or a failing-binary, not just exit-code.** Define `squad() { ... }` before the hook body to intercept invocations — sh functions shadow PATH entries, works on all platforms.
+- **git's sh.exe (MSYS2) does not ship `touch` on PATH.** Use `printf "" > file` or `> file` (empty redirect) for cross-platform file creation in sh tests. Do not assume POSIX utilities beyond what git-bash guarantees.
+- **Full-suite worker-timeout count fluctuates** but is always pre-existing IPC noise; isolated runs are the reliable signal.
 
-📌 **Team update (2026-03-11T01:27:57Z):** PR #331 quality gate resolved. FIDO fixed test assertion sync in docs-build.test.ts: EXPECTED_SCENARIOS updated to 25 entries, EXPECTED_FEATURES array created with 32 entries, test assertions updated for features validation. Tests: 6/6 passing. Commit: 6599db6. Blocking NO-GO converted to approval gate cleared. Lesson reinforced: test assertions must be synced to filesystem state; CI passing ≠ coverage.
+---
 
-3. **Incomplete Test Coverage Sync** — PAO's history (line 41) states "Updated EXPECTED_SCENARIOS in docs-build.test.ts to match remaining files" after deleting ralph-operations.md and proactive-communication.md. But the diff shows ONLY a single-line change (adding 'features' to sections array). The full test update was not committed.
+## Piece 35 Review — Fold Pipeline in Docs Repo (2026-06-07)
 
-**POSITIVE FINDINGS:**
-- ✅ CI passed (test run completed successfully on GitHub)
-- ✅ Markdown structure tests pass (6/6 syntax checks)
-- ✅ Docs are well-written: sentence-case headings, active voice, present tense, second person
-- ✅ Cross-references valid (labels.md link verified)
-- ✅ No duplicate "How It Works" heading in reviewer-protocol.md
-- ✅ Content intact (no accidental loss)
-- ✅ Microsoft Style Guide compliance confirmed
+**SHA reviewed:** `64eecd475605a8f9cc1d6f9707d6ae72f055d59a`  
+**Branch:** `squad/piece-35-fold-pipeline-in-docs-repo`  
+**Verdict:** **APPROVE**
 
-**ROOT CAUSE:** PAO staged the boundary review changes but the test update commit was incomplete. The assertion arrays must be synchronized before merge.
+### What passed
 
-**REQUIRED FIX:** Update test/docs-build.test.ts:
-1. EXPECTED_SCENARIOS = [ all 25 actual scenario files, sorted ]
-2. EXPECTED_FEATURES = [ all 32 actual feature files, sorted ]
-3. Regenerate to match disk reality (use filesystem discovery if the project wants test-resilience)
+| Check | Result |
+|---|---|
+| (a) `pull_request`/`pr` absence — parsed YAML in both template tests | ✅ PASS — `not.toHaveProperty` on parsed object, not raw grep |
+| (b) Single-writer invariant comment — exact verbatim string in both tests | ✅ PASS — raw.toContain appropriate (comments stripped by YAML parser) |
+| (c) Installer: github→.github/workflows/, ado→.azure-pipelines/, idempotent, conflict→exit 1+path, missing dir→exit 1 | ✅ PASS — D1–D6 all GREEN |
+| (d) Registry-first D7: entry.path ends in .squad; docsRepoPath = path.dirname; config.json wrong-path not used | ✅ PASS — adversarially strong (writes wrong path, proves it's not used) |
+| (e) Piece-34 regression guard: install-hooks + sync-command | ✅ PASS — 12 GREEN, 1 pre-existing SKIP, zero new failures |
+| (f) New test files 27/27 | ✅ PASS |
+| (g) --force-with-lease in both templates + tests; permissions.contents=write parsed; no allowScripts at pool | ✅ PASS — permissions/allowScripts are REAL parsed-object assertions |
 
-**VERDICT:** 🔴 **NO-GO** — Merge blocked until test assertions sync with disk state. This is a quality gate violation.
+### Adversarial findings — no blockers
 
-### Test Assertion Sync Fix (2026-03-10T14:20:00Z)
+**Registry field name:** kickoff brief example used `registry?.entries.find(...)` but actual `Registry` type (registry.ts line 27) has `squads: RegistryEntry[]`. Implementation correctly uses `registry?.squads.find(...)`. Tests match. Not a defect — brief example was stale.
 
-**Issue resolved:** Fixed stale test assertions in test/docs-build.test.ts identified during PR #331 review.
+**`--force-with-lease` raw check:** `raw.toContain('--force-with-lease')` could be fooled by a comment-only occurrence. Actual templates have the flag in the push command, not a comment. Acceptable: bash script content is a YAML string; parsed-object assertion is not meaningful here.
 
-**Changes made:**
-1. Expanded EXPECTED_SCENARIOS from 7 to 25 entries (matched all .md files in docs/src/content/docs/scenarios/)
-2. Added EXPECTED_FEATURES array with 32 entries (matched all .md files in docs/src/content/docs/features/)
-3. Updated test logic to include features section in HTML build validation
+**Idempotency key: ref-name vs SHA:** Spec step 3 says "skip refs whose SHA appears as `foldedRefs[].sha`". Templates use `.[].foldedRefs[].ref` (ref-name membership) instead. This is the **correct** approach per the ref-membership-fold-idempotency skill (immune to clock skew, immune to same-second ties). Deviation from spec wording is a deliberate improvement consistent with team canon.
 
-**Validation:** All structure validation tests passing (6/6). Build tests skipped as expected (Astro not installed). Arrays now accurately reflect disk state.
+**Non-blocking gap (same as piece 34):** No pipeline-execution-level test for fold bash logic (clock skew, malformed JSON abort, prune step). Template tests are structural only. Not a blocker for merge — bash execution testing would require a real git environment and is out of scope for unit test suite.
 
-**Commit:** 6599db6 on branch squad/289-squad-dir-explainer
+### Learnings
 
-**Learning:** When test assertions reference file counts, they MUST be kept in sync with disk reality. The principle applies to ALL assertion arrays (EXPECTED_SCENARIOS, EXPECTED_FEATURES, EXPECTED_GUIDES, EXPECTED_REFERENCE, etc.). Consider dynamic discovery pattern (used in EXPECTED_BLOG) for resilience against content additions.
+- **Raw string assertions for YAML comments are correct:** YAML `parse()` strips comments from the parsed object. `raw.toContain(...)` is the only valid assertion for comment presence. Don't downgrade these to "weak."
+- **`Registry.squads` is the array field name** (not `entries`). The kickoff brief example used `entries` — that was an error in the brief. Always verify against `packages/squad-sdk/src/registry.ts` interface.
+- **Registry-first adversarial test pattern proven:** D7 pre-writes a wrong `stateLocation` in config.json, then verifies the registry-derived path is used and the config.json path is NOT. This is the gold-standard pattern for registry-first regression tests. Carry forward.
+- **`process.exit` spy pattern for CLI commands:** `vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error(...) })` is the correct pattern for testing CLI exit codes without actually terminating the test process. EECOM applied it correctly in D3/D4/D6.
 
-### Issue Triage (2026-03-22T06:44:01Z)
+---
 
-**Flight triaged 6 unlabeled issues and filed 1 new issue.**
+## Piece 40 Adversarial Review — Callsign-namespaced transport (2026-06-11)
 
-FIDO assigned:
-- **#477 (Code Quality Linting PRD)** → squad:fido (monorepo async/promise quality, ESLint 9 PoC ready)
+**Branch:** `squad/piece-40-callsign-namespaced-transport`  
+**Base commit:** `ff86b81c` (piece-39 tip; all piece-40 changes are uncommitted working-tree)  
+**Verdict:** **CONDITIONAL APPROVE — one non-blocking advisory for Flight**
 
-Pattern: Quality tooling gap identified. ESLint 9 modernization + async/promise pattern enforcement for monorepo.
+### Build & Test Results
 
-📌 **Team update (2026-03-22T06:44:01Z):** Flight issued comprehensive triage. FIDO owns Code Quality Linting PRD (#477). ESLint 9 PoC already drafted; ready for implementation planning.
+| Check | Result |
+|---|---|
+| `npm run build` | ✅ PASS (exit 0) |
+| Piece-40 test file (22 EECOM + 5 FIDO edge) | ✅ 27/27 PASS |
+| cross-repo-sync.test.ts B1/B3 (updated) | ✅ 16/16 PASS |
+| test/cli/assign.test.ts P34.A1/P34.A3 | ❌ 2 FAIL — **confirmed pre-existing on clean piece-39 base** |
+| Full suite worker-timeout pattern | ⚠️ Pre-existing IPC contention; all files pass in isolation |
 
-### Agent Name Extraction Test Coverage (#577)
+### P34.A1/P34.A3 Pre-existing Verdict
 
-Extracted inline regex-based agent name parsing from `shell/index.ts` into a testable pure function `parseAgentFromDescription` in `shell/agent-name-parser.ts`. Created 30 tests across 7 categories: happy path, emoji variations, case insensitivity, fuzzy fallback, no-match, edge cases, and adversarial inputs. The function uses a 3-tier matching strategy: (1) leading emoji+name+colon regex, (2) name+colon anywhere regex, (3) fuzzy word-boundary match against known agent names. Shell index.ts now imports and delegates to this function. Build and tests green.
+Definitive: `git stash` to clean piece-39 HEAD (`ff86b81c`), ran `vitest run test/cli/assign.test.ts` — same 2 failures, same test names, 0 piece-40 files involved. Piece-40 did NOT introduce these failures.
 
-**Learning:** Inline regex logic in UI code is untestable and fragile. Extracting to a pure function with explicit inputs (description string + known names array) makes it trivially testable and enables VOX's parallel fix to land cleanly.
+### Scrub Gate
 
-📌 **Team update (2026-03-23T23:15Z):** Orchestration complete. Agent name extraction refactor shipped: FIDO's parser module (30 tests, all passing), VOX's 3-tier cascading patterns, Procedures' spawn template standardization. All decisions merged to decisions.md. Agent IDs now display correctly in Copilot CLI. Canonical patterns: `agent-name-parser.ts` is source of truth for extraction logic.
-### Init Scaffolding Completeness Tests (#579)
+- **Gate 1 FAIL:** 32 strip-listed paths — **identical to baseline (32)**. Zero new paths introduced.
+- **Gate 2 PASS:** No wifi.aware mentions. Unchanged.
+- **Gate 3 WARN:** akubly refs in .squad/ state files — pre-existing, Scribe responsibility.
+- **Gate 4 WARN:** Possible internal refs — pre-existing pattern (squad's own product dirs).
+- **Gate 6:** PASS (22 files) — *improved* from baseline WARN.
+- All other gates: PASS or SKIP (unchanged from baseline).
 
-Added `test/init-scaffolding.test.ts` — 15 tests covering three gaps exposed by issue #579:
+### Changeset / SDK Scope Finding (for Flight)
 
-1. **Casting directory scaffolding** — After `initSquad()` and `runInit()`, verifies `.squad/casting/` directory and all three JSON files (registry.json, policy.json, history.json) exist and parse as valid JSON. Also confirms re-init does not overwrite existing casting files.
+`INBOX_HANDLE_RE` is defined in `packages/squad-sdk/src/validation.ts` (confirmed). EECOM added `CALLSIGN_RE` to the same file — placement is consistent. The repository policy (CONTRIBUTING.md + `squad-ci.yml` `changelog-gate` step) requires a changeset entry when `packages/squad-sdk/src/` is modified. The current changeset (`callsign-namespaced-transport.md`) declares only `@bradygaster/squad-cli: patch`. **An `@bradygaster/squad-sdk: patch` entry is also required by policy.** FIDO reports the gap; Flight rules on whether to add it or apply `skip-changelog`.
 
-2. **No-remote resilience** — Confirms init succeeds without errors when: git repo has no remote configured, brand-new `git init` repo, or no git at all. Uses `execFileSync` to create isolated git repos in temp dirs.
+### FIDO Edge Tests Added (5)
 
-3. **Doctor validation after init** — Runs `runDoctor()` against a freshly-initialized directory and asserts zero failures, specifically that `casting/registry.json exists` check passes. Also tests negative cases (missing file → fail, corrupt JSON → fail).
+| Test | What it covers |
+|---|---|
+| FIDO-E1 | `publishTeamRootToInbox` rejects `/` in callsign, digit-start, single-char (distinct from A3's UPPERCASE/leading-dash/40-char) |
+| FIDO-E2 | `installFoldPipeline` rejects same classes; no file written (distinct from C7's uppercase-only) |
+| FIDO-E3 | GitHub `--callsign team-b` (different hyphenated name) injects correctly into BOTH trigger and target in one test |
+| FIDO-E4 | ADO `--callsign team-b` injects correctly into BOTH trigger and target in one test |
+| FIDO-E5 | `publish-metadata.json` callsign round-trips byte-for-byte (using `team-b`; confirms no normalisation side-effect) |
 
-Pattern: Tests follow existing `test/cli/init.test.ts` and `test/cli/doctor.test.ts` conventions — vitest, `randomBytes` temp dirs in cwd, imports from compiled dist via package exports (`@bradygaster/squad-cli/core/init`, `@bradygaster/squad-cli/commands/doctor`, `@bradygaster/squad-sdk`).
+All 27 tests in the piece-40 file pass.
 
-Commit: 7660a27 on branch squad/579-init-scaffolding-hardening.
+### Learnings
 
-### Personal Squad Init Discovery Tests (#576)
+- **Full-suite IPC timeout pattern persists** (piece-32 observation confirmed again). Parallel git-operation-heavy tests cause `vitest-worker Timeout calling "onTaskUpdate"` — 200+ apparent failures reduce to zero genuine failures when files run in isolation. Standard spot-check procedure applies.
+- **CALLSIGN_RE and INBOX_HANDLE_RE are byte-identical** — placing CALLSIGN_RE in `validation.ts` alongside INBOX_HANDLE_RE is the correct canonical location. However, modifying `squad-sdk/src/` requires a matching SDK changeset entry per repo policy.
+- **Empty string callsign is a special case**: the implementation treats it as "no callsign" (falls back to 2-component branch), NOT as an invalid callsign. This is intentional per A5. Don't add empty-string to the "Invalid callsign" assertion list; it tests separately under A5.
+- **Worker timeout count fluctuates across runs** but is always noise. Reported full-suite as 214 failed / 36 files, isolated runs all green — confirms piece-40 introduced zero regressions.
 
-**Task:** Write tests for personal squad discovery and init flows (Issue #576 — npx init --global not discovering personal squad).
 
-**Test file:** `test/personal-squad-init.test.ts` — 35 tests, 10 describe blocks, all passing.
 
-**Coverage areas:**
-1. `resolveGlobalSquadPath()` — platform-specific path resolution (Windows APPDATA, Linux XDG_CONFIG_HOME, consistency)
-2. `resolvePersonalSquadDir()` — kill-switch (SQUAD_NO_PERSONAL), directory existence, npx-agnostic discovery
-3. `personalInit` contract — directory structure creation, config.json shape, idempotency
-4. `resolveSquadPaths()` — personalDir field inclusion, null when disabled
-5. Edge: empty personal-squad dir (exists but no agents/)
-6. Edge: partial state (agent dirs without charter.md, missing Role metadata defaults to "personal", stray files skipped)
-7. `mergeSessionCast()` — project-wins precedence, case-insensitive collision, empty inputs
-8. `ensureSquadPathTriple()` — personal dir in allowed roots, null personalDir graceful handling
-9. Charter metadata parsing edge cases (whitespace trimming, sourceDir correctness, multi-agent discovery)
+---
 
-**Key finding:** `resolvePersonalSquadDir()` is install-method-agnostic — it resolves from env vars and `os.homedir()`, never from `process.argv`. The npx issue (#576) is therefore NOT in path resolution but likely in the CLI command wiring or the `--global` flag routing. Tests confirm the SDK layer works correctly.
+## Learnings — Piece 40 Adversarial Re-Review (2026-06-12)
 
-**Commit:** c307187 on branch squad/576-personal-squad-init-npx
-### Publish Policy CI Gate (#557)
+**Commit reviewed:** `b64bef25` (diff base `ff86b81c`)  
+**Verdict:** **BLOCK** on two findings: one HIGH (spec-mandated behavior absent in `assign.ts`) and one HIGH (fold template orphan case not parameterized — first-run pipeline uses wrong local branch name)
 
-Added `publish-policy` job to squad-ci.yml — lightweight lint that scans all `.github/workflows/*.yml` for bare `npm publish` commands missing `-w`/`--workspace`. Catches the incident class where root package.json gets published instead of a workspace package. Also wrote `test/publish-policy.test.ts` (36 tests) covering: workspace-scoped passes, bare publish fails, comment/echo/grep/YAML-name line skipping, findViolations line numbering, and live validation of all 15 workflow files. Key pattern: meta-references (echo, grep, YAML name keys containing "npm publish") must be excluded from lint — the CI script's own text would otherwise self-trigger.
+### Finding 1 — HIGH — `squad assign --callsign` does NOT set `stateBranch` default
 
-📌 **Team update (2026-03-24T06-release-hardening):** Publish policy CI gate (#557) implemented. Added `publish-policy` job to squad-ci.yml: lightweight lint scans `.github/workflows/*.yml` for bare `npm publish` commands, rejects non-workspace-scoped invocations. Wrote test/publish-policy.test.ts (36 tests) validating: workspace-scoped passes, bare publish fails, meta-reference (echo/grep/YAML-name) skipping, live validation of 15 workflow files. Pattern: catch "publish root package.json" incident class before merge. Both lint + playbook docs create enforcement + education loop.
+**Location:** `assign.ts:570`, `assign.ts:830`  
+**Defect:** `init.ts` was correctly updated (line 197) to write `stateBranch: "squad/state/<callsign>"` when `--callsign` is provided. `assign.ts` uses a pure additive-merge pattern (`...(opts.stateBranch !== undefined ? {stateBranch} : {})`) and does NOT auto-default `stateBranch` when a callsign is present.  
+**Spec citation:** Sub-proposal B hard constraint: "When `squad init --callsign <name>` (or `squad assign`) sets up a new entry, the default `stateBranch` written to the registry entry should be `squad/state/<callsign>`."  
+**Repro:** `squad assign myteam --callsign myteam` (no `--state-branch`) → registry entry has no `stateBranch` → `runSync --pull` falls back to `squad-state` fallback, pulling from wrong branch.  
+**No test covers this path.** There is zero coverage for "squad assign + callsign → stateBranch defaulted."
 
-### PR Review Batch — 10 Open PRs (2026-03-24)
+### Finding 2 — MEDIUM — Fold template orphan case: `git checkout --orphan squad-state` not replaced
 
-Reviewed all 10 open PRs for quality, test coverage, and merge readiness.
+**Location:** `templates/fold/github/fold-squad-state.yml:115`, `templates/fold/ado/fold-squad-state.yml:115`  
+**Defect:** The six regex substitutions in `install-fold-pipeline.ts:144-161` match `refs/heads/squad-state` (with prefix) and full-command forms, but NOT the bare `squad-state` in `git checkout --orphan squad-state`. The orphan case fires on first pipeline run when no state branch exists yet. The ephemeral runner creates a local branch named `squad-state` instead of `squad/state/<callsign>`. The push target IS correctly parameterized (`HEAD:refs/heads/squad/state/<callsign>`) so the remote branch name is correct — the defect is cosmetic on ephemeral runners and doesn't cause data corruption.  
+**Repro:** `install-fold-pipeline --callsign team-a` then grep generated YAML for `checkout --orphan` — still shows `squad-state`.  
+**No test asserts the orphan line is replaced.** C2/C4 check that `squad/state/team-a` is present but don't assert `--orphan squad-state` is absent.
 
-**Critical finding — Duplicate/overlapping PRs (tamirdresher):**
-- **PRs #607 / #605** overlap on retrospective ceremony — both add weekly retro ceremony with Ralph enforcement. #607 adds ceremony + enforcement skill + guide (444 lines), #605 modifies existing templates/ceremonies.md + ralph-reference.md (217 lines). Both solve the same problem (retro enforcement) with different file structures. #607 is more comprehensive (includes enforcement guide + pseudocode), #605 is more concise (inline in existing templates). **Verdict: Pick one** — recommend #607 (standalone ceremony file is more discoverable).
-- **PRs #604 / #603** are complete duplicates — both add Challenger agent template + fact-checking skill. #604 has `templates/challenger.md` (153 lines), #603 has `.squad/templates/agents/challenger.md` + `.squad/skills/fact-checking/SKILL.md` (133 lines). File locations differ but content is nearly identical. **Verdict: Close one as duplicate** — recommend #603 (file locations match project conventions).
-- **PRs #606 / #602** overlap on tiered memory/history — #606 adds tiered-memory skill (hot/cold/wiki tiers, 370 lines), #602 adds tiered-history skill (hot/cold split, 158 lines). #606 is broader (3 tiers, scribe integration, spawn templates), #602 is narrower (2 tiers, history.md only). Both cite same production data source. **Verdict: #606 supersedes #602** — recommend closing #602 as subset.
+### Finding 3 — MEDIUM — C5/C6 "byte-identical" backward-compat tests are substring checks only
 
-**Quality assessment:**
-- **PR #611 (TypeDoc API):** CI passing, large well-scoped PR (1569 additions), includes tests (Playwright), screenshots provided, PAO reviewed. Ready to merge pending PAO's requested fixes (crosslink banner, nav URL simplification). Quality: HIGH.
-- **PR #608 (Security policy):** Trivial (28 lines), no tests needed, no CI configured. Adds SECURITY.md with standard vulnerability reporting text. Quality: ACCEPTABLE (minor typo: "timely manor" → "timely manner").
-- **PR #592 (Enforcement wiring):** Well-documented (549 additions), adds missing step to hiring process + 3 appendices. CI passing, no code changes, docs-only. Quality: HIGH.
-- **PR #567 (StorageProvider):** DRAFT status, clean implementation (321 additions), 18 tests passing, Wave 1 foundation PR (no call-site migration yet). Quality: HIGH, but keep as DRAFT until Wave 2 ready.
+**Location:** `piece-40-callsign-transport.test.ts:573-576`, `:595-597`  
+**Gap:** Spec requires no-callsign output to be "verbatim" / "unchanged." Tests only check 2 substrings present. The code (`templateContent = rawTemplate`) guarantees identity, but no test does `expect(installed).toBe(rawTemplate)`. A future refactor introducing `.trim()` or CRLF normalization would silently pass.
 
-**CI status:** 9/10 PRs have CI passing. #608 (security policy) has no CI configured on branch "patch-1" (external contributor branch).
+### Finding 4 — MEDIUM — INT1 integration test lacks cross-contamination (negative) assertion
 
-**Test coverage:**
-- #611: Playwright tests included (8 tests)
-- #607, #605, #604, #603, #606, #602: All docs-only, no tests needed
-- #592: Docs-only, no tests needed
-- #567: 18 tests included, all passing
+**Location:** `piece-40-callsign-transport.test.ts:849-907`  
+**Gap:** INT1 verifies each squad creates refs under its own namespace and metadata matches. It does NOT assert Squad A's pull cannot observe Squad B's state refs. The hydrateTeamRootFromStateRef is mocked — no actual content isolation is verified. Happy-path test only.
 
-**Overlap resolution needed:** tamirdresher has 6 PRs, 3 pairs have significant overlap. Recommend: merge #607 (not #605), merge #603 (close #604), merge #606 (close #602).
+### Finding 5 — LOW — `--dry-run` output shows old 2-component branch format in cross-repo mode
 
-**Blocking issues:**
-- None for mergeability — all non-overlapping PRs are technically ready
-- Deduplication decision needed for tamirdresher's PRs before merging any of them
+**Location:** `sync.ts:816`  
+**Defect:** `console.log("Target inbox branch: squad/inbox/${effectiveAlias}/<timestamp>-<sessionId>")` omits the callsign segment. Cross-repo dry-run shows misleading branch format.
 
-### Community PR Batch Review — Post-Crash Recovery (2026-03-26)
+### Finding 6 — LOW — CALLSIGN_RE duplicates INBOX_HANDLE_RE without enforcement coupling
 
-Reviewed 9 community PRs (8 from tamirdresher, 1 from eric-vanartsdalen). Key findings:
+**Location:** `validation.ts:15-17`  
+**Risk:** Two identical regex constants; a change to one won't propagate to the other. Fragile long-term.
 
-1. **Changeset package name pattern:** 4 of 8 Tamir PRs (#623, #622, #621, #614) use unscoped `"squad-cli"` / `"squad-sdk"` instead of `"@bradygaster/squad-cli"` / `"@bradygaster/squad-sdk"`. Only #625 got this right. This is a recurring community contributor mistake — consider adding guidance to CONTRIBUTING.md or PR template.
+### Finding 7 — CONFIRMED PRE-EXISTING — P34.A1/A3 failures not worsened by piece-40
 
-2. **File path pattern:** PRs #607 and #606 place files at root `ceremonies/`, `skills/`, `docs/`, `templates/` directories that don't exist. Skills belong in `packages/squad-cli/templates/skills/` and SDK equivalent. Community contributors don't know the monorepo layout.
+`assign.ts` was NOT touched in this diff (confirmed: `git log ff86b81c..b64bef25 -- assign.ts` returns empty). P34.A1/A3 fail because `installCrossRepoHook` is called with unexpected count — a pre-piece-40 issue. Piece-40 cannot have introduced or worsened these.
 
-3. **Verdicts:** ✅ MERGE: #625 (notification-routing), #603 (Challenger agent), #608 (SECURITY.md). ⚠️ NEEDS CHANGES: #623, #622, #621, #614 (changeset fix), #607, #606 (path restructuring).
+### Test-discipline verdict on cross-repo-sync B1/B3 modifications
 
-**Learning:** Community contributors consistently struggle with two things: (a) scoped npm package names in changesets, and (b) monorepo file placement. Both are preventable with better contributor docs.
+Adding `callsign: 'docs-squad'` and `callsign: 'dev-squad'` to registry entries in B1 and B3 is **CORRECT** — these tests exercise cross-repo push, which now requires a callsign per the new fatal guard. The tests still validate what they originally validated (cross-repo inbox ref created with correct session ID). A4 independently tests the "no callsign → fatal error" path. No regression suppression.
 
+### Key new learnings
+
+- **Regex replacement chains must enumerate ALL surface forms.** `refs/heads/squad-state` (with prefix) and `git fetch origin squad-state` (without prefix) are both present in templates. The orphan case `git checkout --orphan squad-state` is a third form — no prefix, no context command — that escaped all 6 substitutions. Pattern: when parameterizing YAML by string-replace, grep the raw template for ALL occurrences of the target string first and enumerate replacement patterns to cover each.
+- **Spec "or assign" language requires verification of BOTH paths.** When a spec says "init (or assign)", check BOTH code paths. init.ts getting the change while assign.ts is silently skipped is the most common spec-compliance gap pattern in iterative feature work.
+- **Substring backward-compat tests are insufficient for "verbatim/unchanged" contracts.** The correct assertion is `expect(installed).toBe(rawTemplateContent)` where rawTemplateContent is read from the actual template file. Checking 2 patterns are present only proves those 2 patterns — not that nothing else changed.
+- **Integration isolation tests need negative assertions.** Verifying Squad A creates refs under `team-a/` is necessary but not sufficient. The isolation claim requires `expect(refsA.some(r => r.includes('team-b'))).toBe(false)` — a negative cross-contamination check.
+
+---
+
+## Piece 40 Re-review — CONTROL's Revision Pass (2026-06-12)
+
+**Working-tree state:** CONTROL fixes applied, NOT yet committed. Prior BLOCK commit: `b64bef25`.
+
+### H1 — install-fold-pipeline.ts callsign block (lines 143–174) ✓ RESOLVED
+
+Both platforms now add two new replacement passes before the broad `/squad-state/g`:
+
+- **GitHub:** `.replace(/'\+refs\/heads\/squad\/inbox\/\*\*:refs\/remotes\/origin\/squad\/inbox\/\*\*'/g, ...)` scopes the enumeration fetch refspec; `.replace(/'refs\/heads\/squad\/inbox\/\*'/g, ...)` scopes the ls-remote pattern.
+- **ADO:** Matching replacements for `*` (single-level) glob variant.
+- **Broad sweep:** `.replace(/squad-state/g, \`squad/state/${callsign}\`)` replaces ALL remaining tokens — commands, step names, comments, refs — including the previously-missed `git checkout --orphan squad-state` (M4).
+- **Safety confirmed:** `fold-squad-state` does NOT appear anywhere in either template's YAML body, so the broad `/squad-state/g` cannot produce a corrupt `fold-squad/state/...` string.
+- **No-callsign path unchanged:** `templateContent = rawTemplate` verbatim (byte-identical). ✓
+
+### H2 — assign.ts cold-start stateBranch defaulting (line 842–846) ✓ RESOLVED
+
+- `CALLSIGN_RE` imported at module level (line 28).
+- Invalid callsign rejected at line 726 before any clone or registry write (`ERR_ASSIGN_MISSING_ARG`).
+- New-entry default: `!reactivating ? { stateBranch: \`squad/state/${callsign}\` } : {}` — defaults only for genuinely new entries.
+- Reactivating entries: `reactivating = true` → conditional spreads `{}` → existing `stateBranch` preserved via `...baseEntry` spread.
+- Explicit `--state-branch` wins: `opts.stateBranch !== undefined` check takes precedence over default.
+- P32.B4 (cold-start reactivation flag preservation): still PASSES — no regression. ✓
+- **Note:** Warm path (lines 562–572, adding a clone to an existing entry) still doesn't auto-default stateBranch. Spec language says "sets up a new entry" — warm path is not creating a new entry. Accepted as per spec intent.
+
+### M3 — init.ts callsign validation ✓ RESOLVED
+
+- `CALLSIGN_RE` imported (line 23), guard at line 100 throws `ERR_SQUAD_INIT_INVALID_CALLSIGN` before any filesystem or registry write.
+- Test M3: validates `['Bad/Name', 'UPPER', '-bad', '1squad', 'a']`; asserts `writeRegistry` not called. ✓
+
+### M4 — Orphan branch parameterization ✓ RESOLVED (via broad replace in H1)
+
+- `git checkout --orphan squad-state` → `git checkout --orphan squad/state/<callsign>` by broad `/squad-state/g`. ✓
+- C8 asserts `ghContent.not.toContain('squad-state')` (total absence) and `.toContain('git checkout --orphan squad/state/team-b')`. ✓
+
+### M5 — C5/C6 byte-identical assertions ✓ RESOLVED
+
+- C5: `expect(installed).toBe(fs.readFileSync(templatePath, 'utf-8'))` — actual byte-equality against raw template. ✓
+- C6: same for ADO. ✓
+- `TEMPLATES_ROOT` in test (`process.cwd()/packages/squad-cli/templates/fold`) resolves to same directory as `install-fold-pipeline.ts`'s `TEMPLATES_ROOT` (`__dirname/../../../templates/fold`). ✓
+- New C8: proves callsign-set output has zero bare `squad-state` tokens and zero global inbox glob on both platforms. ✓
+
+### M6 — INT1 cross-contamination negative assertion ✓ RESOLVED
+
+- Lines 1063–1065: `expect(refsA.some(r => r.includes('team-b'))).toBe(false)` and `expect(refsB.some(r => r.includes('team-a'))).toBe(false)`. ✓
+
+### LOW — dry-run callsign in branch preview ✓ RESOLVED
+
+- `sync.ts:816`: `const callsignPrefix = registryCallsign ? \`${registryCallsign}/\` : ''` prepended to inbox branch display string. ✓
+
+### Test Results
+
+| File | Result |
+|---|---|
+| `piece-40-callsign-transport.test.ts` | ✅ All pass (now 34 tests: 27 original + M3 + H2-1..H2-4 + C8) |
+| `cross-repo-sync.test.ts` | ✅ 16/16 pass |
+| `assign.test.ts` | ❌ 2 FAIL — P34.A1/A3 (pre-existing, unchanged from baseline) |
+| `init.test.ts` | ✅ All pass |
+| `init-v2.test.ts` | ✅ All pass |
+| Full suite | ⚠️ 43 files reported failed — all pre-existing IPC worker-timeout contention; isolated runs all green |
+
+### Scrub Gate
+
+- Gate 1: 32 strip-listed paths — **identical to baseline**, zero new paths introduced. ✓
+- Gate 2: PASS (no wifi-aware mentions). ✓
+- Gate 3/4: WARN — pre-existing .squad/ state file references, Scribe responsibility. ✓
+- Gate 6: PASS (18 files changed). ✓
+
+### Learnings from Re-review
+
+- **Broad `/squad-state/g` is the correct architecture** for a template parameterization that has many surface forms of the same token. Six fragmented regexes with coverage gaps are strictly worse than one comprehensive regex applied inside an `if (callsign)` guard with a verbatim no-callsign path. The only precondition is confirming the output file name (`fold-squad-state`) does not appear inside the template content — grep the template first, then apply the broad replace.
+- **Confirming "fold-squad-state" absence from template body is the critical safety check** for the broad replace approach. If the pipeline YAML ever self-referenced its own filename, the broad replace would corrupt it. Add to review checklist.
+- **H2 warm-path clarification**: Spec language "sets up a new entry" correctly scopes the stateBranch default to cold-start (new entries) only. Warm path (adding a clone to existing entry) deliberately preserves what the entry already has. Don't conflate "assigns a clone" with "creates a registry entry."
+- **TEMPLATES_ROOT path equivalence test pattern**: When a test asserts byte-identity between installed output and a source template, verify that the test's hardcoded template path (`process.cwd()/...`) resolves to the same file as the production code's `__dirname`-relative path. A path mismatch would make C5/C6 compare against the wrong file and silently pass even when the template was wrong.
+
+### Verdict: PASS
+
+All prior BLOCK findings (H1, H2) and MEDIUM findings (M3–M6) are resolved. No new defects introduced. P34.A1/A3 pre-exist and are unchanged. Scrub baseline unchanged.
+
+---
+
+FIDO reviewed six pieces (24, 25, 32, 32-nits, 32-verify, 32.5) across May–June 2026. Key review patterns:
+
+### Piece Outcomes
+- **P24 (SDK Adapter):** APPROVE-WITH-NITS (three mandatory on testing/arity, one undisclosed return-type)
+- **P25 (Resolver Rename):** APPROVE-WITH-NITS (dependency-mode control discovery; no blockers)
+- **P32 (Registry State):** APPROVE-WITH-NITS (22 apparent test regressions = timeout contention, zero real failures)
+- **P32 Nit-fix:** APPROVE (all nits verified; 27/27 GREEN)
+- **P32.5 (Transport Helpers):** APPROVE (findings documented; implementation sound; 10/10 GREEN)
+
+### Critical Learnings
+- **Dependency-mode control required:** Clean npm install creates nested stale SDK; workspace-linked mode controls skew
+- **Timeout contention cascades:** Full-suite runs produce 10–20× apparent regression count vs isolation; always spot-check before blocker
+- **idempotency via orphan-SHA comparison is broken:** HEAD and snapshot commit SHAs can never match; three fix options documented
+- **sessionId must validate for git-ref legality:** Caller strings flowing into ref names need pre-flight validation
+- **Verify code presence before reviewing:** "not a function" errors indicate missing exports, not test logic issues
+
+### Non-Blocking Patterns (All Pieces)
+- Type-union return-type removals require explicit sign-off
+- Multi-overload functions need 3+ tests per path for arity coverage
+- Guard-order tests must simulate downstream behavior, not identity mock
+- Test isolation needs pinned env vars across all test cases
+
+Full details in entries above (Piece 32.5 entry contains adversarial findings re: idempotency, sessionId, PII-test robustness, boundary testing).

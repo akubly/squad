@@ -1,7 +1,7 @@
 /**
  * Squad directory resolution — walk-up and global path algorithms.
  *
- * resolveSquad()            — find .squad/ by walking up from startDir to .git boundary
+ * resolveSquadDir()         — find .squad/ by walking up from startDir to .git boundary
  * resolveSquadPaths()       — dual-root resolution (projectDir / teamDir) for remote squad mode
  * resolveGlobalSquadPath()  — platform-specific global config directory
  *
@@ -17,6 +17,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { FSStorageProvider } from './storage/fs-storage-provider.js';
+import { resolveSquad as resolveRegistrySquad, type ResolvedSquad } from './resolution-v2.js';
 import { resolveStateBackend, StateBackendStorageAdapter, type StateBackend, type StateBackendType } from './state-backend.js';
 import type { StorageProvider } from './storage/storage-provider.js';
 
@@ -188,7 +189,7 @@ function getMainWorktreePath(worktreeDir: string, gitFilePath: string): string |
  * @param startDir - Directory to start searching from. Defaults to `process.cwd()`.
  * @returns Absolute path to `.squad/` or `null`.
  */
-export function resolveSquad(startDir?: string): string | null {
+export function resolveSquadDir(startDir?: string): string | null {
   const cacheKey = path.resolve(startDir ?? process.cwd());
   const cached = readCache(resolveSquadCache, cacheKey);
   if (cached !== undefined) return cached;
@@ -237,6 +238,12 @@ function resolveSquadUncached(startDir: string): string | null {
     current = parent;
   }
 }
+
+/**
+ * @deprecated Use {@link resolveSquadDir} instead.
+ * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
+ */
+export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 
 // ============================================================================
 // Dual-root resolution (Issue #311)
@@ -490,7 +497,7 @@ export function ensurePersonalSquadDir(): string {
  * never clutters the repo root or arbitrary filesystem locations.
  *
  * @param filePath  - Absolute path to validate.
- * @param squadRoot - Absolute path to the `.squad/` directory (e.g. from `resolveSquad()`).
+ * @param squadRoot - Absolute path to the `.squad/` directory (e.g. from `resolveSquadDir()`).
  * @returns The resolved absolute `filePath` if it is safe.
  * @throws If `filePath` is outside `.squad/` and not in the system temp directory.
  */
@@ -813,6 +820,8 @@ export interface SquadStateContext {
   repoRoot: string;
   /** StorageProvider backed by the active state backend — pass to SDK modules */
   storage: StorageProvider;
+  /** Registry-aware squad resolution captured at command entry */
+  resolution: ResolvedSquad;
 }
 
 /**
@@ -827,19 +836,23 @@ export interface SquadStateContext {
  * @returns Resolved context, or null if no squad directory is found.
  */
 export function resolveSquadState(startDir?: string, cliOverride?: StateBackendType): SquadStateContext | null {
-  const paths = resolveSquadPaths(startDir);
+  const effectiveStart = startDir ?? process.cwd();
+  const resolution = resolveRegistrySquad({ cwd: effectiveStart });
+  if (!resolution) return null;
+
+  const paths = resolveSquadPaths(resolution.path);
   if (!paths) return null;
 
   // Resolve actual repo root via git — handles linked worktrees correctly
-  const effectiveStart = startDir ?? process.cwd();
+  const repoRootStart = path.resolve(paths.projectDir, '..');
   let repoRoot: string;
   try {
     repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: effectiveStart, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: repoRootStart, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
     // Fallback: derive from .squad/ parent if git is unavailable
-    repoRoot = path.resolve(paths.projectDir, '..');
+    repoRoot = repoRootStart;
   }
 
   // Resolve the backend from config + CLI override
@@ -851,5 +864,5 @@ export function resolveSquadState(startDir?: string, cliOverride?: StateBackendT
     ? new FSStorageProvider()
     : new StateBackendStorageAdapter(backend, paths.projectDir);
 
-  return { paths, backend, repoRoot, storage: stateStorage };
+  return { paths, backend, repoRoot, storage: stateStorage, resolution };
 }

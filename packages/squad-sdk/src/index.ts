@@ -5,13 +5,39 @@
  */
 
 import { createRequire } from 'module';
+import { resolveSquadDir as resolveLegacySquadDir } from './resolution.js';
+import { resolveSquad as resolveRegistrySquad } from './resolution-v2.js';
+import type { ResolvedSquad, ResolveOpts } from './resolution-v2.js';
+
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
 export const VERSION: string = pkg.version;
 
+export function resolveSquadDir(opts: ResolveOpts): ResolvedSquad | null;
+export function resolveSquadDir(startDir?: string): string | null;
+export function resolveSquadDir(startDirOrOpts?: string | ResolveOpts): string | ResolvedSquad | null {
+  if (typeof startDirOrOpts === 'object' && startDirOrOpts !== null) {
+    return resolveRegistrySquad(startDirOrOpts);
+  }
+  return resolveLegacySquadDir(startDirOrOpts);
+}
+
+/**
+ * @deprecated Use {@link resolveSquadDir} instead.
+ * `resolveSquad` will be removed in a future major release of `@bradygaster/squad-sdk`.
+ */
+export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
+
 // Export public API
-export { resolveSquad, resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePersonalSquadDir, ensureSquadPath, ensureSquadPathTriple, loadDirConfig, isConsultMode, scratchDir, scratchFile, deriveProjectKey, resolveExternalStateDir, resolveSquadHome, ensureSquadHome, resolvePresetsDir, resolveSquadState, clearResolveSquadCache } from './resolution.js';
+export { resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePersonalSquadDir, ensureSquadPath, ensureSquadPathTriple, loadDirConfig, isConsultMode, scratchDir, scratchFile, deriveProjectKey, resolveExternalStateDir, resolveSquadHome, ensureSquadHome, resolvePresetsDir, resolveSquadState, clearResolveSquadCache } from './resolution.js';
 export type { ResolvedSquadPaths, SquadDirConfig, SquadStateContext } from './resolution.js';
+export type { Registry, RegistryEntry } from './registry.js';
+export { upsertEntry, registerEntry } from './registry.js';
+export type { ResolvedSquad, ResolveOpts, ResolveErrorCode } from './resolution-v2.js';
+export { clonesMatch, collectCwdRemoteUrls, normalizeRemoteUrl } from './resolution-v2.js';
+export { CALLSIGN_PATTERN, CALLSIGN_MAX_LENGTH, isValidCallsign, assertValidCallsign, formatCallsignValidationMessage } from './callsign.js';
+export { normalisedPathKey, pathsRefSameLocation, defaultRegistryFilePath } from './path-utils.js';
+export { managedHostsRoot, managedHostPath } from './managed-hosts.js';
 export * from './config/index.js';
 export * from './agents/onboarding.js';
 export { resolvePersonalAgents, mergeSessionCast } from './agents/personal.js';
@@ -44,7 +70,6 @@ export {
   type CrossSquadIssueOptions,
   type CrossSquadIssueResult,
   type CrossSquadWorkStatus,
-  type RegistryEntry,
   type AddRegistryEntryResult,
   validateManifest,
   readManifest,
@@ -68,6 +93,20 @@ export * from './sharing/index.js';
 export * from './upstream/index.js';
 export * from './remote/index.js';
 export * from './streams/index.js';
+export {
+  CopilotPayloadError,
+  installCopilotPayload,
+  uninstallCopilotPayload,
+  diagnoseCopilotPayload,
+} from './copilot-payload.js';
+export type {
+  InstallCopilotPayloadOpts,
+  InstallCopilotPayloadResult,
+  UninstallCopilotPayloadOpts,
+  UninstallCopilotPayloadResult,
+  DiagnoseCopilotPayloadOpts,
+  DiagnoseCopilotPayloadResult,
+} from './copilot-payload.js';
 
 // Builder functions (SDK-First Squad Mode)
 export {

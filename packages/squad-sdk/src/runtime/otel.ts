@@ -88,6 +88,7 @@ function ensureSDK(config?: OTelConfig): void {
     }
     return;
   }
+  if (!NodeSDK || !OTLPTraceExporter || !OTLPMetricExporter || !PeriodicExportingMetricReader) return;
 
   const debugMode = config?.debug || process.env['SQUAD_DEBUG'] === '1';
   if (debugMode) {

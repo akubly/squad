@@ -89,15 +89,18 @@ function _handleTopLevelSignal(signal: 'SIGINT' | 'SIGTERM'): void {
 process.on('SIGINT', () => _handleTopLevelSignal('SIGINT'));
 process.on('SIGTERM', () => _handleTopLevelSignal('SIGTERM'));
 
-import { FSStorageProvider, resolveSquadState } from '@bradygaster/squad-sdk';
-import type { SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
+import { FSStorageProvider, resolveSquadState, resolveSquadDir as sdkResolveSquadDir } from '@bradygaster/squad-sdk';
+import type { ResolvedSquad, SquadStateContext, StateBackendType } from '@bradygaster/squad-sdk';
+import { ConfigurationError } from '@bradygaster/squad-sdk/adapter/errors';
 import path from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 import { fatal, SquadError } from './cli/core/errors.js';
 import { BOLD, RESET, DIM, RED, GREEN, YELLOW } from './cli/core/output.js';
-import { runInit } from './cli/core/init.js';
 import { runCost } from './cli/commands/cost.js';
 import { getPackageVersion } from './cli/core/version.js';
 import { printCommandHelp, printGenericCommandHelp } from './cli/core/command-help.js';
+import { resolveSquadDir } from './cli/core/squad-resolver.js';
+import type { DoctorFinding } from './cli/commands/doctor-types.js';
 
 // Lazy-load squad-sdk to avoid triggering @github/copilot-sdk import on Node 24+
 // (Issue: copilot-sdk has broken ESM imports - vscode-jsonrpc/node without .js extension)
@@ -117,9 +120,67 @@ function getSquadStartDir(): string {
   return process.env['SQUAD_TEAM_ROOT'] || process.cwd();
 }
 
+const INIT_OPTIONS_WITH_VALUES = new Set([
+  '--target-dir',
+  '--registry-path',
+  '--callsign',
+  '--mode',
+  '--preset',
+  '--state-backend',
+]);
+
+function findInitUrlLikeArg(args: string[], isUrlLikeArg: (arg: string) => boolean): string | undefined {
+  let skipNext = false;
+
+  for (const token of args.slice(1)) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    if (token.startsWith('--')) {
+      const eqIdx = token.indexOf('=');
+      const flag = eqIdx === -1 ? token : token.slice(0, eqIdx);
+      if (eqIdx === -1 && INIT_OPTIONS_WITH_VALUES.has(flag)) {
+        skipNext = true;
+      }
+      continue;
+    }
+
+    if (isUrlLikeArg(token)) {
+      return token;
+    }
+  }
+
+  return undefined;
+}
+
+function formatResolverReason(source: ResolvedSquad['source']): string {
+  switch (source) {
+    case 'local':
+      return 'Found .squad/ in repository tree';
+    case 'env':
+      return 'Resolved from selected registry callsign';
+    case 'clones':
+      return 'Resolved from registered clone path';
+    case 'origins':
+      return 'Resolved from registered Git origin';
+    case 'platform':
+      return 'Resolved from platform squad path';
+    case 'worktree':
+      return 'Resolved from linked worktree';
+    default: {
+      const _exhaustive: never = source;
+      return _exhaustive;
+    }
+  }
+}
+
+/** Render a single unified doctor finding with a severity-keyed color prefix. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  
+  const noColor = !process.stdout.isTTY || !!process.env['NO_COLOR'];
+
   // --team-root flag: override team root for resolution
   const teamRootIdx = args.indexOf('--team-root');
   if (teamRootIdx !== -1 && args[teamRootIdx + 1]) {
@@ -127,7 +188,7 @@ async function main(): Promise<void> {
     // Remove --team-root and its value from args
     args.splice(teamRootIdx, 2);
   }
-  
+
   const hasGlobal = args.includes('--global');
   // --economy activates economy mode for this session (sets env var for spawner)
   const hasEconomy = args.includes('--economy');
@@ -148,151 +209,60 @@ async function main(): Promise<void> {
 
   // --help / -h / help
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
-    console.log(`\n${BOLD}squad${RESET} v${VERSION} — Add an AI agent team to any project\n`);
+    const b = noColor ? '' : BOLD;
+    const r = noColor ? '' : RESET;
+    // Command name column width: wide enough for 'install-fold-pipeline' (21 chars) + 2-char gap.
+    const COMMAND_COL_WIDTH = 24;
+    console.log(`\n${b}squad${r} v${VERSION} — Add an AI agent team to any project\n`);
     console.log(`Usage: squad [command] [options]\n`);
     console.log(`Commands:`);
-    console.log(`  ${BOLD}(default)${RESET}  Launch interactive shell (no args)`);
-    console.log(`             Flags: --global (init in personal squad directory)`);
-    console.log(`  ${BOLD}init${RESET}       Initialize Squad (markdown-only, default)`);
-    console.log(`             Flags: --sdk (SDK builder syntax)`);
-    console.log(`                    --roles (use base roles)`);
-    console.log(`                    --global (personal squad dir)`);
-    console.log(`                    --no-workflows (skip CI setup)`);
-    console.log(`                    --preset <name> (apply a preset after init)`);
-    console.log(`                    --state-backend <type> (local|orphan|two-layer)`);
-    console.log(`             Usage: init --mode remote <team-repo-path>`);
-    console.log(`             Creates .squad/config.json pointing to an external team root`);
-    console.log(`  ${BOLD}upgrade${RESET}    Update Squad-owned files to latest version`);
-    console.log(`             Overwrites: squad.agent.md, templates dir (.squad/templates/)`);
-    console.log(`             Never touches: .squad/ or .ai-team/ (your team state)`);
-    console.log(`             Flags: --global (upgrade personal squad)`);
-    console.log(`                    --migrate-directory (rename .ai-team/ → .squad/)`);
-    console.log(`                    --state-backend <type> (migrate to orphan|two-layer)`);
-    console.log(`  ${BOLD}update-check${RESET} Report cached CLI update status (for tooling/CI)`);
-    console.log(`             Flags: --json (structured output), --refresh (bypass cache)`);
-    console.log(`  ${BOLD}migrate${RESET}    Convert between markdown and SDK-First squad formats`);
-    console.log(`             Flags: --to sdk|markdown, --from ai-team, --dry-run`);
-    console.log(`  ${BOLD}sync${RESET}       Sync squad-state branch(es) with remote (push/pull/both)`);
-    console.log(`             Flags: --push, --pull, --remote <name>, --quiet`);
-    console.log(`             No-op for local/worktree backends. Invoked by git hooks.`);
-    console.log(`  ${BOLD}status${RESET}     Show which squad is active and why`);
-    console.log(`  ${BOLD}roles${RESET}      List built-in Squad roles`);
-    console.log(`             Usage: roles [--category <name>] [--search <query>]`);
-    console.log(`  ${BOLD}cost${RESET}       Report token usage from orchestration logs`);
-    console.log(`             Flags: --all, --agent <name>`);
-    console.log(`  ${BOLD}triage${RESET}     Scan for work and categorize issues`);
-    console.log(`             Usage: triage [--interval <minutes>] [--execute]`);
-    console.log(`             Default: checks every 10 minutes (Ctrl+C to stop)`);
-    console.log(`             Core flags:`);
-    console.log(`                    --execute (spawn agents to work on issues)`);
-    console.log(`                    --copilot-flags "..." (extra copilot CLI flags)`);
-    console.log(`                    --max-concurrent N (parallel issue limit, default 1)`);
-    console.log(`                    --timeout N (max minutes per issue, default 30)`);
-    console.log(`             Capabilities (opt-in via --<name> or config.json):`);
-    console.log(`                    --self-pull       git fetch/pull at round start`);
-    console.log(`                    --board           project board lifecycle + reconciliation`);
-    console.log(`                    --board-project N project number (default 1)`);
-    console.log(`                    --monitor-teams   scan Teams for actionable messages`);
-    console.log(`                    --monitor-email   scan email for actionable items`);
-    console.log(`                    --two-pass        lightweight list then hydrate actionable`);
-    console.log(`                    --wave-dispatch   wave-based parallel sub-task dispatch`);
-    console.log(`                    --retro           enforce retrospective checks`);
-    console.log(`                    --decision-hygiene auto-merge decision inbox`);
-    console.log(`             Disable: --no-<capability> overrides config.json`);
-    console.log(`             Logging: --log-file <path> tee output to file with timestamps`);
-    console.log(`  ${BOLD}loop${RESET}       Prompt-driven continuous work loop`);
-    console.log(`             Usage: loop [--init] [--file <path>] [--interval <min>]`);
-    console.log(`             Reads loop.md and runs it each cycle (no issues needed)`);
-    console.log(`             Flags: --init (generate boilerplate loop.md)`);
-    console.log(`                    --file <path> (custom loop file)`);
-    console.log(`                    --monitor-email, --monitor-teams (add monitoring)`);
-    console.log(`  ${BOLD}cast${RESET}       Show current session cast (project + personal agents)`);
-    console.log(`             Usage: cast [--name <name>] [--role <role>] (alias: hire)`);
-    console.log(`  ${BOLD}copilot${RESET}    Add/remove the Copilot coding agent (@copilot)`);
-    console.log(`             Usage: copilot [--off] [--auto-assign]`);
-    console.log(`  ${BOLD}plugin${RESET}     Manage plugin marketplaces`);
-    console.log(`             Usage: plugin marketplace add|remove|list|browse`);
-    console.log(`  ${BOLD}export${RESET}     Export squad to a portable JSON snapshot`);
-    console.log(`             Default: squad-export.json (use --out <path> to override)`);
-    console.log(`  ${BOLD}import${RESET}     Import squad from an export file`);
-    console.log(`             Usage: import <file> [--force]`);
-    console.log(`  ${BOLD}scrub-emails${RESET}  Remove email addresses from Squad state files`);
-    console.log(`             Usage: scrub-emails [directory] (default: .ai-team/)`);
-    console.log(`  ${BOLD}start${RESET}      Start Copilot with remote access from phone/browser`);
-    console.log(`             Usage: start [--tunnel] [--port <n>] [--command <cmd>]`);
-    console.log(`                    [copilot flags...]`);
-    console.log(`             Examples: start --tunnel --yolo`);
-    console.log(`                       start --tunnel --model claude-sonnet-4.6`);
-    console.log(`                       start --tunnel --command "gh copilot"`);
-    console.log(`  ${BOLD}nap${RESET}        Context hygiene (compress, prune, archive .squad/ state)`);
-    console.log(`             Usage: nap [--deep] [--dry-run]`);
-    console.log(`             Flags: --deep (thorough cleanup), --dry-run (preview only)`);
-    console.log(`  ${BOLD}memory${RESET}     Governed memory operations`);
-    console.log(`             Usage: memory write --content "..." --class LOCAL`);
-    console.log(`             Diagnostics: --log-level info|debug or --verbose`);
-    console.log(`  ${BOLD}state-mcp${RESET}  MCP bridge exposing Squad runtime state tools`);
-    console.log(`  ${BOLD}doctor${RESET}     Validate squad setup (check files, config, health)`);
-    console.log(`  ${BOLD}consult${RESET}    Enter consult mode with your personal squad`);
-    console.log(`             Flags: --status, --check`);
-    console.log(`  ${BOLD}extract${RESET}    Extract learnings from consult mode session`);
-    console.log(`             Flags: --dry-run, --clean, --yes, --accept-risks`);
-    console.log(`  ${BOLD}subsquads${RESET}  Manage Squad SubSquads (multi-Codespace scaling)`);
-    console.log(`             Usage: subsquads <list|status|activate <name>>`);
-    console.log(`             Aliases: workstreams, streams (deprecated)`);
-    console.log(`  ${BOLD}link${RESET}       Link project to a remote team root`);
-    console.log(`             Usage: link <team-repo-path>`);
-    console.log(`  ${BOLD}externalize${RESET}  Move local squad state to an external team root`);
-    console.log(`  ${BOLD}internalize${RESET}  Pull an external team root back into the project`);
-    console.log(`  ${BOLD}build${RESET}      Compile squad.config.ts into .squad/ markdown`);
-    console.log(`             Flags: --check (validate only), --dry-run (preview)`);
-    console.log(`                    --watch (rebuild on change)`);
-    console.log(`  ${BOLD}aspire${RESET}     Launch Aspire dashboard for observability`);
-    console.log(`             Flags: --docker (force Docker), --port <n> (dashboard port)`);
-    console.log(`  ${BOLD}schedule${RESET}   Manage scheduled tasks`);
-    console.log(`             Usage: schedule list | run <id> | init | status`);
-    console.log(`  ${BOLD}personal${RESET}   Manage your personal squad (ambient agents)`);
-    console.log(`             Usage: personal init | list | add <name>`);
-    console.log(`                    --role <role> | remove <name>`);
-    console.log(`  ${BOLD}preset${RESET}     Manage squad presets (curated agent collections)`);
-    console.log(`             Usage: preset list | show <name>`);
-    console.log(`                    apply <name> [--force] | save <name>`);
-    console.log(`                    init [--remote]`);
-    console.log(`  ${BOLD}rc${RESET}         Start Remote Control bridge (phone/browser → Copilot)`);
-    console.log(`             Usage: rc [--tunnel] [--port <n>] [--path <dir>]`);
-    console.log(`  ${BOLD}copilot-bridge${RESET}  Check Copilot ACP stdio compatibility`);
-    console.log(`  ${BOLD}init-remote${RESET}    Link project to remote team root (shorthand)`);
-    console.log(`             Usage: init-remote <team-repo-path>`);
-    console.log(`  ${BOLD}rc-tunnel${RESET}      Check devtunnel CLI availability`);
-    console.log(`  ${BOLD}discover${RESET}   List known squads and their capabilities`);
-    console.log(`  ${BOLD}delegate${RESET}   Create work in another squad`);
-    console.log(`             Usage: delegate <squad-name> <description>`);
-    console.log(`  ${BOLD}registry${RESET}   Manage peer squads for cross-squad discovery (no inheritance)`);
-    console.log(`             Usage: registry add <name> <path>`);
-    console.log(`                    registry list`);
-    console.log(`                    registry remove <name>`);
-    console.log(`  ${BOLD}upstream${RESET}    Manage upstream Squad sources`);
-    console.log(`             Usage: upstream add <source> [--name <n>] [--ref <branch>]`);
-    console.log(`                    upstream remove <name>`);
-    console.log(`                    upstream list`);
-    console.log(`                    upstream sync [name]`);
-    console.log(`  ${BOLD}economy${RESET}    Toggle economy mode (cost-conscious model selection)`);
-    console.log(`             Usage: economy [on|off]`);
-    console.log(`  ${BOLD}externalize${RESET}  Move .squad/ state out of the working tree`);
-    console.log(`             Stores state in platform-local storage`);
-    console.log(`             Flags: --key <name> (explicit project key)`);
-    console.log(`  ${BOLD}internalize${RESET}  Restore externalized state into the working tree`);
-
-    console.log(`  ${BOLD}version${RESET}    Print installed version`);
-    console.log(`  ${BOLD}help${RESET}       Show this help message`);
-    console.log(`\nFlags:`);
-    console.log(`  ${BOLD}--version, -v${RESET}  Print version`);
-    console.log(`  ${BOLD}--help, -h${RESET}     Show help`);
-    console.log(`  ${BOLD}--global${RESET}       Use personal (global) squad path (for init, upgrade)`);
-    console.log(`  ${BOLD}--economy${RESET}      Activate economy mode for this session (cheaper models)`);
-    console.log(`  ${BOLD}--team-root${RESET}    Override team root path for resolution`);
-    console.log(`\nInstallation:`);
-    console.log(`  npm install --save-dev @bradygaster/squad-cli`);
-    console.log(`  npm install --save-dev @bradygaster/squad-cli@insider\n`);
+    console.log(`  ${b}${'(default)'.padEnd(COMMAND_COL_WIDTH)}${r}Launch interactive shell`);
+    console.log(`  ${b}${'init'.padEnd(COMMAND_COL_WIDTH)}${r}Initialize squad in current directory`);
+    console.log(`  ${b}${'assign'.padEnd(COMMAND_COL_WIDTH)}${r}Bind this checkout to a registered squad`);
+    console.log(`  ${b}${'unassign'.padEnd(COMMAND_COL_WIDTH)}${r}Remove this checkout's binding from a registered squad`);
+    console.log(`  ${b}${'list'.padEnd(COMMAND_COL_WIDTH)}${r}List registered squads`);
+    console.log(`  ${b}${'doctor'.padEnd(COMMAND_COL_WIDTH)}${r}Validate setup and registry health`);
+    console.log(`  ${b}${'upgrade'.padEnd(COMMAND_COL_WIDTH)}${r}Update Squad-owned files to latest`);
+    console.log(`  ${b}${'migrate'.padEnd(COMMAND_COL_WIDTH)}${r}Convert markdown <-> SDK squad formats`);
+    console.log(`  ${b}${'status'.padEnd(COMMAND_COL_WIDTH)}${r}Show which squad is active and why`);
+    console.log(`  ${b}${'roles'.padEnd(COMMAND_COL_WIDTH)}${r}List built-in Squad roles`);
+    console.log(`  ${b}${'cost'.padEnd(COMMAND_COL_WIDTH)}${r}Report token usage`);
+    console.log(`  ${b}${'triage'.padEnd(COMMAND_COL_WIDTH)}${r}Scan for work and categorize issues`);
+    console.log(`  ${b}${'loop'.padEnd(COMMAND_COL_WIDTH)}${r}Prompt-driven continuous work loop`);
+    console.log(`  ${b}${'hire'.padEnd(COMMAND_COL_WIDTH)}${r}Team creation wizard`);
+    console.log(`  ${b}${'copilot'.padEnd(COMMAND_COL_WIDTH)}${r}Add/remove the Copilot coding agent`);
+    console.log(`  ${b}${'plugin'.padEnd(COMMAND_COL_WIDTH)}${r}Manage plugin marketplaces`);
+    console.log(`  ${b}${'export'.padEnd(COMMAND_COL_WIDTH)}${r}Export squad to a portable JSON snapshot`);
+    console.log(`  ${b}${'import'.padEnd(COMMAND_COL_WIDTH)}${r}Import squad from an export file`);
+    console.log(`  ${b}${'scrub-emails'.padEnd(COMMAND_COL_WIDTH)}${r}Remove emails from state files`);
+    console.log(`  ${b}${'start'.padEnd(COMMAND_COL_WIDTH)}${r}Start Copilot with remote access`);
+    console.log(`  ${b}${'nap'.padEnd(COMMAND_COL_WIDTH)}${r}Context hygiene for .squad/ state`);
+    console.log(`  ${b}${'consult'.padEnd(COMMAND_COL_WIDTH)}${r}Enter consult mode with your personal squad`);
+    console.log(`  ${b}${'extract'.padEnd(COMMAND_COL_WIDTH)}${r}Extract learnings from consult mode session`);
+    console.log(`  ${b}${'subsquads'.padEnd(COMMAND_COL_WIDTH)}${r}Manage SubSquads`);
+    console.log(`  ${b}${'link'.padEnd(COMMAND_COL_WIDTH)}${r}Link to a remote team root`);
+    console.log(`  ${b}${'build'.padEnd(COMMAND_COL_WIDTH)}${r}Compile squad.config.ts to markdown`);
+    console.log(`  ${b}${'aspire'.padEnd(COMMAND_COL_WIDTH)}${r}Launch .NET Aspire dashboard`);
+    console.log(`  ${b}${'schedule'.padEnd(COMMAND_COL_WIDTH)}${r}Manage scheduled tasks`);
+    console.log(`  ${b}${'personal'.padEnd(COMMAND_COL_WIDTH)}${r}Manage your personal squad`);
+    console.log(`  ${b}${'preset'.padEnd(COMMAND_COL_WIDTH)}${r}Manage squad presets`);
+    console.log(`  ${b}${'cast'.padEnd(COMMAND_COL_WIDTH)}${r}Show current session cast`);
+    console.log(`  ${b}${'sync'.padEnd(COMMAND_COL_WIDTH)}${r}Synchronize squad state with remote`);
+    console.log(`  ${b}${'install-fold-pipeline'.padEnd(COMMAND_COL_WIDTH)}${r}Install the fold pipeline YAML into the shared-squad host repository`);
+    console.log(`  ${b}${'upstream'.padEnd(COMMAND_COL_WIDTH)}${r}Manage upstream Squad sources`);
+    console.log(`  ${b}${'economy'.padEnd(COMMAND_COL_WIDTH)}${r}Toggle economy mode`);
+    console.log(`  ${b}${'version'.padEnd(COMMAND_COL_WIDTH)}${r}Print installed version`);
+    console.log(`  ${b}${'help'.padEnd(COMMAND_COL_WIDTH)}${r}Show this help message`);
+    console.log(`\nRun ${b}squad <command> --help${r} for command details.\n`);
+    console.log(`Flags:`);
+    console.log(`  ${b}--version, -v${r}  Print version`);
+    console.log(`  ${b}--help, -h${r}     Show help`);
+    console.log(`  ${b}--global${r}       Use personal squad path`);
+    console.log(`  ${b}--economy${r}      Economy mode (cheaper models)`);
+    console.log(`  ${b}--team-root${r}    Override team root path`);
+    console.log(`  ${b}--dry-run${r}      Dry-run mode (no writes)`);
+    console.log(`\nInstall: npm i -D @bradygaster/squad-cli`);
+    console.log(`Insider: npm i -D @bradygaster/squad-cli@insider\n`);
     return;
   }
 
@@ -334,41 +304,201 @@ async function main(): Promise<void> {
   }
 
   // Route subcommands
-  if (cmd === 'init') {
-    const modeIdx = args.indexOf('--mode');
-    const mode = (modeIdx !== -1 && args[modeIdx + 1]) ? args[modeIdx + 1] : undefined;
 
-    if (mode === 'remote') {
-      const teamPath = args[modeIdx + 2];
-      if (!teamPath) {
-        fatal('Usage: squad init --mode remote <team-repo-path>');
-      }
-      const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
-      const dest = process.cwd();
-      writeRemoteConfig(dest, teamPath);
-      await runInit(dest);
+  // Per-command --help: side-effect-free, exits 0
+  if (args.includes('--help') || args.includes('-h')) {
+    const b = noColor ? '' : BOLD;
+    const r = noColor ? '' : RESET;
+    if (cmd === 'init') {
+      console.log(`\n${b}squad init${r} — Initialize a squad\n`);
+      console.log(`Usage: squad init [options]\n`);
+      console.log(`Options:`);
+      console.log(`  --sdk             SDK builder syntax`);
+      console.log(`  --roles           Use base roles`);
+      console.log(`  --global          Personal squad dir`);
+      console.log(`  --no-workflows    Skip CI setup`);
+      console.log(`  --preset <name>   Apply a preset`);
+      console.log(`  --state-backend   local|orphan|two-layer`);
+      console.log(`  --target-dir <p>  Init in a specific dir`);
+      console.log(`  --callsign <name> Register under this name`);
+      console.log(`  --no-register     Scaffold only`);
+      console.log(`  --registry-path   Alternate registry file`);
+      console.log(`  --yes             Auto-apply git-rm-cached + .gitignore for orphan backend`);
+      console.log(`  --mode remote <p> Link to remote team root\n`);
+      return;
+    }
+    if (cmd === 'list') {
+      console.log(`\n${b}squad list${r} — List registered squads\n`);
+      console.log(`Usage: squad list [--registry-path <path>]\n`);
+      console.log(`Prints a tab-separated table of registered squads.`);
+      console.log(`Columns: CALLSIGN, PATH, ORIGINS, CLONES, STATUS\n`);
+      return;
+    }
+    if (cmd === 'doctor') {
+      console.log(`\n${b}squad doctor${r} — Validate setup and health\n`);
+      console.log(`Usage: squad doctor [options]\n`);
+      console.log(`  squad doctor [--registry-path <path>]`);
+      console.log(`  squad doctor --normalize-callsigns [--apply] [--yes] [--registry-path <path>]`);
+      console.log(`  squad doctor --purge <callsign> [--yes] [--registry-path <path>]\n`);
+      console.log(`Runs system checks (Node, git, config) and`);
+      console.log(`registry health (entries, paths, resolution).`);
+      console.log(`Exit 0 unless registry has error-severity issues.\n`);
+      console.log(`Flags:`);
+      console.log(`  ${b}--normalize-callsigns${r}  Detect case-colliding callsign pairs`);
+      console.log(`  ${b}--apply${r}               Merge collisions (requires --normalize-callsigns)`);
+      console.log(`  ${b}--purge <callsign>${r}    Remove a registry entry entirely`);
+      console.log(`  ${b}--yes${r}                 Skip confirmation prompts`);
+      console.log(`  ${b}--registry-path${r}       Alternate registry file\n`);
+      return;
+    }
+    if (cmd === 'sync') {
+      console.log(`\n${b}squad sync${r} — Synchronize squad state with remote\n`);
+      console.log(`Usage: squad sync [--push | --pull | --both | --push-config] [options]\n`);
+      console.log(`Options:`);
+      console.log(`  --push              Push ephemeral squad state to remote`);
+      console.log(`  --pull              Pull squad state (and durable config) from remote`);
+      console.log(`  --both              Push and pull (default)`);
+      console.log(`  --push-config       Publish durable config changes to the config-inbox (opens a review PR)`);
+      console.log(`  --remote <name>     Remote name (default: origin)`);
+      console.log(`  --inbox-handle <handle>  Inbox handle for cross-repo inbox publish`);
+      console.log(`  --registry-path <path>   Alternate registry file (matches init); default registry when absent`);
+      console.log(`  --dry-run           Print pending files and target inbox branch without publishing`);
+      console.log(`  --quiet             Suppress output\n`);
+      console.log(`Environment:`);
+      console.log(`  SQUAD_TEAM_ROOT          Override team root path`);
+      console.log(`  SQUAD_INBOX_HANDLE       Inbox handle fallback`);
+      console.log(`  COPILOT_SESSION_ID       Session ID for inbox branch naming\n`);
+      return;
+    }
+    if (cmd === 'install-fold-pipeline') {
+      console.log(`\n${b}squad install-fold-pipeline${r} — Install a fold pipeline into the host repository\n`);
+      console.log(`Usage: squad install-fold-pipeline <github|ado> [--callsign <name>] [--force]`);
+      console.log(`                                   [--delete-folded-refs] [--fold-service-connection <name>] [--runner "<labels>"]`);
+      console.log(`                                   [--state-only | --config-only]\n`);
+      console.log(`Installs repository-root pipeline definitions for the shared-squad host: the state`);
+      console.log(`fold pipeline (folds Squad inbox refs into squad/state/<callsign>) AND the durable`);
+      console.log(`config pipeline (opens a review PR from squad/config-inbox/** into squad/config/<callsign>).`);
+      console.log(`Both are installed by default. Without --callsign, each pipeline discovers callsigns`);
+      console.log(`at run time and handles each independently.\n`);
+      console.log(`Options:`);
+      console.log(`  --callsign <name>                 Generate pipelines scoped to one callsign`);
+      console.log(`  --force                           Overwrite an existing, differing pipeline file`);
+      console.log(`                                    (the prior content is saved to <file>.bak)`);
+      console.log(`  --state-only                      Install only the state fold pipeline`);
+      console.log(`  --config-only                     Install only the durable config pipeline`);
+      console.log(`  --delete-folded-refs              Render the state pipeline with inbox-branch cleanup`);
+      console.log(`                                    enabled (deletes only successfully-folded refs)`);
+      console.log(`  --fold-service-connection <name>  (ado) Push the folded state branch under the`);
+      console.log(`                                    named Azure DevOps service connection identity`);
+      console.log(`                                    instead of the build-service account\n`);
+      console.log(`  --runner "<labels>"               (github) Render runs-on: [<labels>] for a`);
+      console.log(`                                    self-hosted runner (e.g. "self-hosted,Windows,X64")`);
+      console.log(`                                    on BOTH the state and config pipelines; a non-Linux`);
+      console.log(`                                    label set also sets defaults.run.shell: bash.`);
+      console.log(`                                    ADO is agent-pool-driven — select the pool in the portal\n`);
+      console.log(`Prerequisite: the CI service identity must have Contribute, Create branch,`);
+      console.log(`and Force push permission on the host repository (for example,`);
+      console.log(`dev.azure.com/contoso/MyProject) because the job creates and force-updates`);
+      console.log(`squad/state/<callsign> branches. See the fold-pipeline setup docs for the`);
+      console.log(`least-privilege --fold-service-connection alternative (aka.ms/azdosc).\n`);
+      return;
+    }
+    if (cmd === 'assign') {
+      console.log(`\n${b}squad assign${r} — Bind this checkout to a registered squad\n`);
+      console.log(`Usage: squad assign [<callsign>] [options]\n`);
+      console.log(`Positional:`);
+      console.log(`  <callsign>                   Target squad callsign (warm path)`);
+      console.log(`Options:`);
+      console.log(`  --inbox-handle <handle>     Per-developer namespace for inbox branches`);
+      console.log(`  --state-remote <name>        Git remote name for state operations`);
+      console.log(`  --state-branch <name>        Orphan branch holding folded canonical state`);
+      console.log(`  --skills-from <sel>          Skill source: host, none, or local path`);
+      console.log(`  --callsign <name>            Cold-start: callsign to register the cloned squad under`);
+      console.log(`  --allow-origin-collision     Record the assignment despite remotes matching other squads' origins`);
+      console.log(`  --no-bind                    Managed cold-start: stand up the host only; do not bind the current clone`);
+      console.log(`  --yes                        Auto-apply git-rm-cached + .gitignore entries\n`);
+      return;
+    }
+    // For other commands, fall through to the main help
+  }
+
+  if (cmd === 'init') {
+    // Reject URL-like positional arguments early with a clear usage message.
+    const { isUrlLikeArg } = await import('./commands/init.js');
+    const urlLikeArg = findInitUrlLikeArg(args, isUrlLikeArg);
+    if (urlLikeArg) {
+      fatal(
+        `"squad init" does not accept repository URLs.\n` +
+        `  Clone the repository with git first, then run:\n` +
+        `    squad init --target-dir <local-dir>\n` +
+        `  To skip registry registration: squad init --target-dir <local-dir> --no-register`,
+      );
       return;
     }
 
-    const sdkMod = hasGlobal ? await lazySquadSdk() : null;
-    const dest = hasGlobal ? sdkMod!.resolveGlobalSquadPath() : process.cwd();
+    const { runInit: runRegistryInit } = await import('./commands/init.js');
+    const targetDirIdx = args.indexOf('--target-dir');
+    const targetDirArg = (targetDirIdx !== -1 && args[targetDirIdx + 1]) ? args[targetDirIdx + 1] : undefined;
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
+    const hasNoRegister = args.includes('--no-register');
+    const modeIdx = args.indexOf('--mode');
+    const mode = (modeIdx !== -1 && args[modeIdx + 1]) ? args[modeIdx + 1] : undefined;
+    const remoteTeamPath = mode === 'remote' ? args[modeIdx + 2] : undefined;
+
+    if (mode === 'remote' && !remoteTeamPath) {
+      fatal('Usage: squad init --mode remote <team-repo-path>');
+    }
+
+    const sdkMod = hasGlobal && !targetDirArg ? await lazySquadSdk() : null;
+    const targetDir = targetDirArg ?? (hasGlobal ? sdkMod!.resolveGlobalSquadPath() : undefined);
+    const resolvedTargetDir = targetDir ? path.resolve(process.cwd(), targetDir) : process.cwd();
     const noWorkflows = args.includes('--no-workflows');
     const mcpFrontmatter = args.includes('--mcp-frontmatter');
     const sdk = args.includes('--sdk');
     const roles = args.includes('--roles');
     const presetIdx = args.indexOf('--preset');
     const presetName = (presetIdx !== -1 && args[presetIdx + 1]) ? args[presetIdx + 1] : undefined;
-    // Parse --state-backend flag for init
     const sbIdx = args.indexOf('--state-backend');
     const initStateBackend = (sbIdx !== -1 && args[sbIdx + 1]) ? args[sbIdx + 1] : undefined;
-    // Global init: suppress workflows (no GitHub CI in ~/.config/squad/) and bootstrap personal squad
-    runInit(dest, { includeWorkflows: !noWorkflows && !hasGlobal, sdk, roles, isGlobal: hasGlobal, stateBackend: initStateBackend, mcpFrontmatter }).then(async () => {
+
+    try {
+      const result = await runRegistryInit({
+        targetDir,
+        callsign,
+        noRegister: hasNoRegister,
+        registryPath,
+        cwd: process.cwd(),
+        includeWorkflows: !noWorkflows && !hasGlobal,
+        sdk,
+        roles,
+        isGlobal: hasGlobal,
+        stateBackend: initStateBackend,
+        remoteTeamPath,
+        yes: args.includes('--yes'),
+      });
+
+      if (mode === 'remote' && remoteTeamPath) {
+        const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
+        await writeRemoteConfig(resolvedTargetDir, remoteTeamPath);
+      }
+
+      const ok = noColor ? 'OK' : `${GREEN}✔${RESET}`;
+      if (result.registered) {
+        console.log(`${ok} Initialized and registered: ${result.registered.callsign} → ${result.registered.path}`);
+      } else if (result.reactivated) {
+        console.log(`${ok} Reactivated: ${result.reactivated.callsign} → ${result.reactivated.path}`);
+      } else {
+        console.log(`${ok} Initialized squad (no registry entry written).`);
+      }
+
       if (presetName) {
         const { seedBuiltinPresets, applyPreset } = await import('@bradygaster/squad-sdk/presets');
         const { resolvePresetsDir, ensureSquadHome } = await import('@bradygaster/squad-sdk/resolution');
         const nodePath = await import('node:path');
 
-        // Auto-initialize squad home + presets if they don't exist yet
         if (!resolvePresetsDir()) {
           console.log(`\n⚙️  No presets found — setting up squad home...`);
           ensureSquadHome();
@@ -379,7 +509,7 @@ async function main(): Promise<void> {
           seedBuiltinPresets();
         }
 
-        const targetAgentsDir = nodePath.join(dest, '.squad', 'agents');
+        const targetAgentsDir = nodePath.join(resolvedTargetDir, '.squad', 'agents');
         const results = applyPreset(presetName, targetAgentsDir);
         const installed = results.filter(r => r.status === 'installed');
         const skipped = results.filter(r => r.status === 'skipped');
@@ -394,16 +524,18 @@ async function main(): Promise<void> {
           console.error(`❌ Preset '${presetName}' not found. Run 'squad preset list' to see available presets.`);
         }
       }
-    }).catch(err => {
-      fatal(err.message);
-    });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const isConflict = err instanceof ConfigurationError;
+      process.exit(isConflict ? 2 : 1);
+    }
     return;
   }
 
   if (cmd === 'upgrade') {
     const { runUpgrade, selfUpgradeCli } = await import('./cli/core/upgrade.js');
     const { migrateDirectory } = await import('./cli/core/migrate-directory.js');
-    
     const migrateDir = args.includes('--migrate-directory');
     const selfUpgrade = args.includes('--self');
     const forceUpgrade = args.includes('--force');
@@ -414,8 +546,8 @@ async function main(): Promise<void> {
     // Parse --state-backend for backend migration
     const sbIdx = args.indexOf('--state-backend');
     const upgradeStateBackend = (sbIdx !== -1 && args[sbIdx + 1]) ? args[sbIdx + 1] : undefined;
-    
-    // Warn when --insider is used without --self (it has no effect on project upgrades)
+
+    // Warn when --insider is used without --self(it has no effect on project upgrades)
     if (insider && !selfUpgrade) {
       console.warn('⚠️ --insider only applies with --self (squad upgrade --self --insider). Ignoring.');
     }
@@ -518,26 +650,6 @@ async function main(): Promise<void> {
   if (cmd === 'state-mcp') {
     const { runStateMcp } = await import('./cli/commands/state-mcp.js');
     await runStateMcp(getSquadStartDir());
-    return;
-  }
-
-  if (cmd === 'sync') {
-    const { runSync } = await import('./cli/commands/sync.js');
-    const quiet = args.includes('--quiet');
-    const remoteIdx = args.indexOf('--remote');
-    const remote = (remoteIdx !== -1 && args[remoteIdx + 1]) ? args[remoteIdx + 1] : undefined;
-    let direction: 'push' | 'pull' | 'both' = 'both';
-    if (args.includes('--push') && !args.includes('--pull')) direction = 'push';
-    else if (args.includes('--pull') && !args.includes('--push')) direction = 'pull';
-    try {
-      await runSync({ direction, remote, cwd: getSquadStartDir(), quiet });
-    } catch (err: unknown) {
-      if (!quiet) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`squad sync failed: ${msg}`);
-      }
-      process.exit(1);
-    }
     return;
   }
 
@@ -876,7 +988,9 @@ async function main(): Promise<void> {
 
   if (cmd === 'status') {
     const sdk = await lazySquadSdk();
-    const repoSquad = sdk.resolveSquad(getSquadStartDir());
+    const startDir = getSquadStartDir();
+    const resolvedSquad = sdkResolveSquadDir({ cwd: startDir, env: process.env });
+    const repoSquad = resolvedSquad?.path ?? null;
     const globalPath = sdk.resolveGlobalSquadPath();
     const globalSquadDir = path.join(globalPath, '.squad');
     const storage = new FSStorageProvider();
@@ -884,10 +998,22 @@ async function main(): Promise<void> {
 
     console.log(`\n${BOLD}Squad Status${RESET}\n`);
 
-    if (repoSquad) {
+    if (resolvedSquad) {
       console.log(`  Active squad: ${BOLD}repo${RESET}`);
-      console.log(`  Path:         ${repoSquad}`);
-      console.log(`  Reason:       Found .squad/ in repository tree`);
+      console.log(`  Path:         ${resolvedSquad.path}`);
+      console.log(`  Reason:       ${formatResolverReason(resolvedSquad.source)}`);
+      if (resolvedSquad.callsign) {
+        console.log(`  Callsign:     ${resolvedSquad.callsign}`);
+      }
+      const { formatRegistryStatusBlock } = await import('./commands/status.js');
+      const registryBlock = formatRegistryStatusBlock(
+        resolvedSquad,
+        process.env as Record<string, string | undefined>,
+      );
+      if (registryBlock) {
+        console.log();
+        process.stdout.write(registryBlock);
+      }
     } else if (globalExists) {
       console.log(`  Active squad: ${BOLD}personal (global)${RESET}`);
       console.log(`  Path:         ${globalSquadDir}`);
@@ -948,6 +1074,22 @@ async function main(): Promise<void> {
   if (cmd === 'start') {
     console.log(`\n${YELLOW}⚠ DEPRECATED:${RESET} "squad start" is deprecated and will be removed in a future release.`);
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
+    let resolvedForStart: ResolvedSquad | null = null;
+    try {
+      resolvedForStart = sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env });
+    } catch (err) {
+      fatal(err instanceof Error ? err.message : String(err));
+    }
+    if (!resolvedForStart) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
+      );
+      return;
+    }
+    if (!existsSync(resolvedForStart.path) || !statSync(resolvedForStart.path).isDirectory()) {
+      fatal(`Resolved squad path does not exist or is not a directory: ${resolvedForStart.path}`);
+    }
     const { runStart } = await import('./cli/commands/start.js');
     const hasTunnel = args.includes('--tunnel');
     const portIdx = args.indexOf('--port');
@@ -957,7 +1099,7 @@ async function main(): Promise<void> {
     const customCmd = (cmdIdx !== -1 && args[cmdIdx + 1]) ? args[cmdIdx + 1] : undefined;
     const squadFlags = ['start', '--tunnel', '--port', port.toString(), '--command', customCmd || ''].filter(Boolean);
     const copilotArgs = args.slice(1).filter(a => !squadFlags.includes(a));
-    await runStart(getSquadStartDir(), { tunnel: hasTunnel, port, copilotArgs, command: customCmd });
+    await runStart(getSquadStartDir(), { tunnel: hasTunnel, port, copilotArgs, command: customCmd, squadDir: resolvedForStart.path });
     return;
   }
 
@@ -977,13 +1119,164 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'register') {
+    // BREAKING: the `register` subcommand was removed. Emit the teaching error
+    // before any unknown-command handling, ignore additional flags, and exit
+    // with a command-usage failure code so scripted callers can detect the
+    // removal condition specifically.
+    console.error(
+      'ERR_SQUAD_REGISTER_REMOVED: squad register has been removed.\n' +
+      'Use squad assign <callsign> to bind this checkout to a registered squad.\n' +
+      'For a new squad host, run squad init --callsign <name>.\n' +
+      'Run squad list to see registered squads.',
+    );
+    process.exit(2);
+  }
+
+  if (cmd === 'list') {
+    const { runList } = await import('./commands/list.js');
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
+    const output = await runList({ registryPath });
+    console.log(output);
+    return;
+  }
+
   if (cmd === 'doctor') {
-    const { doctorCommand } = await import('./cli/commands/doctor.js');
-    await doctorCommand();
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = (registryPathIdx !== -1 && args[registryPathIdx + 1]) ? args[registryPathIdx + 1] : undefined;
+    const hasYes = args.includes('--yes');
+    const hasNormalize = args.includes('--normalize-callsigns');
+    const hasApply = args.includes('--apply');
+    const purgeIdx = args.indexOf('--purge');
+    const hasPurge = purgeIdx !== -1;
+
+    // N5: --apply requires --normalize-callsigns
+    if (hasApply && !hasNormalize) {
+      fatal('--apply requires --normalize-callsigns');
+      return;
+    }
+
+    // F2: --normalize-callsigns and --purge are mutually exclusive
+    if (hasNormalize && hasPurge) {
+      fatal('--normalize-callsigns and --purge are mutually exclusive');
+      return;
+    }
+
+    // --normalize-callsigns mode
+    if (hasNormalize) {
+      const { runDoctorNormalize } = await import('./commands/doctor.js');
+      const result = await runDoctorNormalize({ registryPath, apply: hasApply, yes: hasYes });
+      for (const line of result.lines) {
+        console.log(line);
+      }
+      return;
+    }
+
+    // --purge <callsign> mode
+    if (hasPurge) {
+      const purgeCallsign = args[purgeIdx + 1];
+      if (!purgeCallsign || purgeCallsign.startsWith('--')) {
+        fatal('Usage: squad doctor --purge <callsign>');
+        return;
+      }
+      const { formatCallsignValidationMessage } = await import('@bradygaster/squad-sdk');
+      const { runDoctorPurge } = await import('./commands/doctor.js');
+      const result = await runDoctorPurge({ callsign: purgeCallsign, registryPath, yes: hasYes });
+      if (result.invalidCallsign) {
+        fatal(formatCallsignValidationMessage(purgeCallsign));
+        return;
+      }
+      if (result.noRegistry) {
+        console.error('No registry found.');
+        process.exit(1);
+        return;
+      }
+      if (result.notFound) {
+        const hint = result.notFound.suggestion ? ` Did you mean "${result.notFound.suggestion}"?` : '';
+        fatal(`Callsign "${purgeCallsign}" not found in the registry.${hint}`);
+        return;
+      }
+      if (result.refused) {
+        const list = result.refused.consumers.map(c => `  - ${c}`).join('\n');
+        console.error(
+          `Cannot purge "${purgeCallsign}": entry is active with ${result.refused.consumers.length} clone binding(s):\n${list}\n` +
+          `Run "squad unassign --callsign ${purgeCallsign}" from each clone directory first.`,
+        );
+        process.exit(2);
+        return;
+      }
+      if (result.cancelled) {
+        console.log('Purge cancelled.');
+        return;
+      }
+      if (result.removed) {
+        console.log(`Removed registry entry "${purgeCallsign}".`);
+        if (result.hostPath) {
+          console.log(`Host directory was not deleted: ${result.hostPath}`);
+        }
+        return;
+      }
+      return;
+    }
+
+    // Unified doctor: system + registry findings in a single pass
+    const { runUnifiedDoctor, renderFinding, deriveExitCode } = await import('./cli/commands/doctor.js');
+    const { findings, passCount } = await runUnifiedDoctor({
+      cwd: getSquadStartDir(),
+      registryPath,
+    });
+
+    const systemFindings = findings.filter(f => f.source === 'system');
+    const registryFindings = findings.filter(f => f.source === 'registry');
+
+    console.log('Squad Doctor');
+    if (systemFindings.length > 0) {
+      console.log(noColor ? 'System doctor' : `${BOLD}System doctor${RESET}`);
+      for (const f of systemFindings) renderFinding(f, noColor);
+    }
+    if (registryFindings.length > 0) {
+      console.log(noColor ? '\nRegistry doctor' : `\n${BOLD}Registry doctor${RESET}`);
+      for (const f of registryFindings) renderFinding(f, noColor);
+    }
+
+    const registryExitCode = deriveExitCode(registryFindings);
+    const warnCount = findings.filter(f => f.severity === 'warn').length;
+    const errorCount = findings.filter(f => f.severity === 'error').length;
+    console.log(`\nSummary: ${passCount} passed, ${errorCount} errors, ${warnCount} warnings`);
+
+    // Exit code driven by registry findings only — system findings are diagnostic.
+    if (registryExitCode === 2) process.exit(2);
     return;
   }
 
   if (cmd === 'consult') {
+    const showStatus = args.includes('--status');
+    if (!showStatus) {
+      // Check git repository presence before squad resolution.
+      const startDir = getSquadStartDir();
+      let isGitRepo = false;
+      try {
+        const { execSync: _execSync } = await import('node:child_process');
+        _execSync('git rev-parse --git-dir', { cwd: startDir, stdio: ['pipe', 'pipe', 'pipe'] });
+        isGitRepo = true;
+      } catch {
+        isGitRepo = false;
+      }
+      if (!isGitRepo) {
+        console.error('Not a git repository');
+        process.exit(1);
+        return;
+      }
+      // Resolution is the precondition for setup and dry-run modes.
+      if (!sdkResolveSquadDir({ cwd: startDir, env: process.env })) {
+        fatal(
+          'No squad found.\n' +
+            '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
+        );
+        return;
+      }
+    }
     const { runConsult } = await import('./cli/commands/consult.js');
     await runConsult(getSquadStartDir(), args.slice(1));
     return;
@@ -1005,6 +1298,13 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'link') {
+    if (!sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env })) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
+      );
+      return;
+    }
     const { runLink } = await import('./cli/commands/link.js');
     const teamPath = args[1];
     if (!teamPath) {
@@ -1031,13 +1331,30 @@ async function main(): Promise<void> {
   if (cmd === 'rc' || cmd === 'remote-control') {
     console.log(`\n${YELLOW}⚠ DEPRECATED:${RESET} "squad rc" is deprecated and will be removed in a future release.`);
     console.log(`  Use the GitHub Copilot CLI directly: ${BOLD}gh copilot${RESET}\n`);
-    const { runRC } = await import('./cli/commands/rc.js');
     const hasTunnel = args.includes('--tunnel');
     const portIdx = args.indexOf('--port');
     const port = (portIdx !== -1 && args[portIdx + 1]) ? parseInt(args[portIdx + 1]!, 10) : 0;
     const pathIdx = args.indexOf('--path');
     const rcPath = (pathIdx !== -1 && args[pathIdx + 1]) ? args[pathIdx + 1] : undefined;
-    await runRC(rcPath || getSquadStartDir(), { tunnel: hasTunnel, port });
+    const rcStartDir = rcPath || getSquadStartDir();
+    let resolvedForRc: ResolvedSquad | null = null;
+    try {
+      resolvedForRc = sdkResolveSquadDir({ cwd: rcStartDir, env: process.env });
+    } catch (err) {
+      fatal(err instanceof Error ? err.message : String(err));
+    }
+    if (!resolvedForRc) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad init" to create a new squad host, or "squad assign <callsign>" to bind this checkout to a registered squad.',
+      );
+      return;
+    }
+    if (!existsSync(resolvedForRc.path) || !statSync(resolvedForRc.path).isDirectory()) {
+      fatal(`Resolved squad path does not exist or is not a directory: ${resolvedForRc.path}`);
+    }
+    const { runRC } = await import('./cli/commands/rc.js');
+    await runRC(rcStartDir, { tunnel: hasTunnel, port, squadDir: resolvedForRc.path });
     return;
   }
 
@@ -1053,14 +1370,19 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'init-remote') {
-    const { writeRemoteConfig } = await import('./cli/commands/init-remote.js');
     const teamPath = args[1];
     if (!teamPath) {
       fatal('Usage: squad init-remote <team-repo-path>');
     }
-    const dest = process.cwd();
-    writeRemoteConfig(dest, teamPath);
-    await runInit(dest);
+    const { runInit: runRegistryInit } = await import('./commands/init.js');
+    try {
+      await runRegistryInit({ cwd: process.cwd(), remoteTeamPath: teamPath });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const isConflict = err instanceof ConfigurationError;
+      process.exit(isConflict ? 2 : 1);
+    }
     return;
   }
 
@@ -1109,13 +1431,13 @@ async function main(): Promise<void> {
 
   if (cmd === 'discover') {
     const { discoverCommand } = await import('./cli/commands/cross-squad.js');
-    await discoverCommand();
+    await discoverCommand(getSquadStartDir());
     return;
   }
 
   if (cmd === 'delegate') {
     const { delegateCommand } = await import('./cli/commands/cross-squad.js');
-    await delegateCommand(args.slice(1));
+    await delegateCommand(args.slice(1), getSquadStartDir());
     return;
   }
 
@@ -1140,6 +1462,197 @@ async function main(): Promise<void> {
   if (cmd === 'config') {
     const { runConfig } = await import('./cli/commands/config.js');
     await runConfig(getSquadStartDir(), args.slice(1));
+    return;
+  }
+
+  if (cmd === 'assign') {
+    const { parseAssignArgs } = await import('./commands/assign-args.js');
+    const { callsignOrUrl, cloneTo, callsign, registryPath, targetDir, skillsFrom, inboxHandle, stateRemote, stateBranch, configRemote, configBranch, yes, allowOriginCollision, noBind } = parseAssignArgs(args.slice(1));
+    const { runAssign } = await import('./commands/assign.js');
+    try {
+      const result = await runAssign({
+        callsignOrUrl,
+        cloneTo,
+        callsign,
+        registryPath,
+        targetDir,
+        skillsFrom,
+        inboxHandle,
+        stateRemote,
+        stateBranch,
+        configRemote,
+        configBranch,
+        yes,
+        allowOriginCollision,
+        noBind,
+        cwd: getSquadStartDir(),
+      });
+      // Emit warnings only on result kinds that carry them.
+      if (result.kind === 'assigned' || result.kind === 'reactivated') {
+        for (const w of result.warnings) {
+          console.warn(w);
+        }
+      }
+      switch (result.kind) {
+        case 'assigned':
+          console.log(`✓ Assigned "${result.callsign}" → ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'reactivated':
+          console.log(`✓ Reactivated "${result.callsign}" → ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'alreadyAssigned':
+          console.log(`ℹ "${result.callsign}" already assigned to ${result.clonePath ?? result.hostPath}`);
+          break;
+        case 'noOp':
+          console.log(`ℹ Running from squad host — no assignment needed for "${result.callsign}"`);
+          break;
+        default: {
+          // Compile-time exhaustiveness guard — TypeScript will error here if a
+          // new AssignKind variant is added without a corresponding case above.
+          const _exhaustive: never = result;
+          void _exhaustive;
+          break;
+        }
+      }
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cmd === 'assign-to-copilot') {
+    // Dispatch-level guard: consistent pattern with consult and link.
+    const guardResult = sdkResolveSquadDir({ cwd: getSquadStartDir(), env: process.env });
+    if (!guardResult) {
+      fatal(
+        'No squad found.\n' +
+          '   Run "squad assign <callsign>" to bind this checkout first,\n' +
+          '   or pass --callsign to specify the target squad.',
+      );
+      return;
+    }
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = callsignIdx !== -1 ? args[callsignIdx + 1] : undefined;
+    const registryPathIdx = args.indexOf('--registry-path');
+    const registryPath = registryPathIdx !== -1 ? args[registryPathIdx + 1] : undefined;
+    const dryRun = args.includes('--dry-run');
+    const noInstallAgent = args.includes('--no-install-agent');
+    const homeIdx = args.indexOf('--home');
+    const home = homeIdx !== -1 ? args[homeIdx + 1] : undefined;
+    if (home !== undefined && (!path.isAbsolute(home) || home.replace(/\\/g, '/').split('/').includes('..'))) {
+      fatal(`--home must be an absolute path without ".." traversal, got: "${home}"`);
+      return;
+    }
+    const { runAssignToCopilot } = await import('./commands/assign.js');
+    try {
+      await runAssignToCopilot({
+        cwd: getSquadStartDir(),
+        env: process.env,
+        callsign,
+        registryPath,
+        dryRun,
+        noInstallAgent,
+        home,
+        resolved: guardResult,
+      });
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cmd === 'unassign') {
+    const { parseUnassignArgs } = await import('./commands/assign-args.js');
+    const { callsign, registryPath, targetDir } = parseUnassignArgs(args.slice(1));
+    const { runUnassign } = await import('./commands/unassign.js');
+    try {
+      const result = await runUnassign({
+        callsign,
+        registryPath,
+        targetDir,
+        cwd: getSquadStartDir(),
+      });
+      if (result.hostPathGuard) {
+        // Message already emitted inside runUnassign.
+      } else if (result.alreadyUnassigned) {
+        console.log(`ℹ Already unassigned — no matching registry entry for this directory.`);
+      }
+      // demoted and normal removal messages are emitted inside runUnassign.
+    } catch (err) {
+      const prefix = noColor ? 'Error:' : `${RED}✗${RESET} Error:`;
+      console.error(`${prefix} ${err instanceof Error ? err.message : String(err)}`);
+      const exitCode = (err as { exitCode?: number }).exitCode ?? 1;
+      process.exit(exitCode);
+    }
+    return;
+  }
+
+  if (cmd === 'sync') {
+    const subCmd = args[1];
+    const syncRegistryPathIdx = args.indexOf('--registry-path');
+    const syncRegistryPath = (syncRegistryPathIdx !== -1 && args[syncRegistryPathIdx + 1])
+      ? args[syncRegistryPathIdx + 1]
+      : undefined;
+    if (subCmd === 'status') {
+      const { runSyncStatus } = await import('./cli/commands/sync.js');
+      await runSyncStatus({ cwd: getSquadStartDir(), registryPath: syncRegistryPath });
+      return;
+    }
+
+    const hasPush = args.includes('--push');
+    const hasPull = args.includes('--pull');
+    const hasBoth = args.includes('--both');
+    const hasPushConfig = args.includes('--push-config');
+    let direction: 'push' | 'pull' | 'both' = 'both';
+    if (hasPush && !hasPull) direction = 'push';
+    else if (hasPull && !hasPush) direction = 'pull';
+    else if (hasBoth) direction = 'both';
+    else if (subCmd === 'push') direction = 'push';
+    else if (subCmd === 'pull') direction = 'pull';
+    else if (hasPushConfig) direction = 'push'; // config-only push: no implicit pull
+
+    // Piece 53 §A: `--push-config` publishes the durable lane. When it is the SOLE direction
+    // flag, suppress the ephemeral state push/pull so a bare `squad sync --push-config` does
+    // not also fold ephemeral state.
+    const pushConfigOnly = hasPushConfig && !hasPush && !hasPull && !hasBoth
+      && subCmd !== 'push' && subCmd !== 'pull';
+
+    const remoteIdx = args.indexOf('--remote');
+    const syncRemote = remoteIdx !== -1 ? args[remoteIdx + 1] : undefined;
+    const inboxHandleIdx = args.indexOf('--inbox-handle');
+    const inboxHandle = inboxHandleIdx !== -1 ? args[inboxHandleIdx + 1] : undefined;
+    const developerIdx = args.indexOf('--developer');
+    const developer = developerIdx !== -1 ? args[developerIdx + 1] : undefined;
+    const syncQuiet = args.includes('--quiet');
+    const syncDryRun = args.includes('--dry-run');
+
+    const { runSync } = await import('./cli/commands/sync.js');
+    await runSync({ direction, remote: syncRemote, inboxHandle: inboxHandle ?? developer, quiet: syncQuiet, dryRun: syncDryRun, registryPath: syncRegistryPath, pushConfig: hasPushConfig, pushConfigOnly });
+    return;
+  }
+
+  if (cmd === 'install-fold-pipeline') {
+    const platform = args[1] as string | undefined;
+    if (platform !== 'github' && platform !== 'ado') {
+      fatal(`install-fold-pipeline requires a platform argument: github or ado\nUsage: squad install-fold-pipeline <github|ado> [--callsign <name>] [--force] [--delete-folded-refs] [--fold-service-connection <name>] [--runner "<labels>"] [--state-only | --config-only]`);
+      return;
+    }
+    const callsignIdx = args.indexOf('--callsign');
+    const callsign = (callsignIdx !== -1 && args[callsignIdx + 1]) ? args[callsignIdx + 1] : undefined;
+    const force = args.includes('--force');
+    const deleteFoldedRefs = args.includes('--delete-folded-refs');
+    const fscIdx = args.indexOf('--fold-service-connection');
+    const foldServiceConnection = (fscIdx !== -1 && args[fscIdx + 1]) ? args[fscIdx + 1] : undefined;
+    const runnerIdx = args.indexOf('--runner');
+    const runner = (runnerIdx !== -1 && args[runnerIdx + 1]) ? args[runnerIdx + 1] : undefined;
+    const stateOnly = args.includes('--state-only');
+    const configOnly = args.includes('--config-only');
+    const { installFoldPipeline } = await import('./cli/commands/install-fold-pipeline.js');
+    await installFoldPipeline(platform, { cwd: getSquadStartDir(), callsign, force, deleteFoldedRefs, foldServiceConnection, runner, stateOnly, configOnly });
     return;
   }
 

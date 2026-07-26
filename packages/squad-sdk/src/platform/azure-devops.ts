@@ -8,8 +8,10 @@ import { execFileSync } from 'node:child_process';
 import type { PlatformAdapter, PlatformType, WorkItem, PullRequest } from './types.js';
 
 const IS_WINDOWS = process.platform === 'win32';
+/** On Windows, batch-wrapper CLIs must be invoked with their .cmd extension when shell is false. */
+const AZ_CMD = IS_WINDOWS ? 'az.cmd' : 'az';
 const EXEC_OPTS: { encoding: 'utf-8'; stdio: ['pipe', 'pipe', 'pipe'] } = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
-const AZ_OPTS = { ...EXEC_OPTS, shell: IS_WINDOWS };
+const AZ_OPTS = EXEC_OPTS;
 
 /** Descriptor for a work item type returned by process template introspection. */
 export interface WorkItemTypeInfo {
@@ -24,7 +26,7 @@ export interface WorkItemTypeInfo {
 /** Check whether the az CLI with devops extension is available */
 function assertAzCliAvailable(): void {
   try {
-    execFileSync('az', ['devops', '-h'], AZ_OPTS);
+    execFileSync(AZ_CMD, ['devops', '-h'], AZ_OPTS);
   } catch {
     throw new Error(
       'Azure DevOps CLI not found. Install it with:\n' +
@@ -64,7 +66,7 @@ export function getAvailableWorkItemTypes(org: string, project: string): WorkIte
   try {
     // Timeout after 3 s so tests and CI aren't blocked when az CLI is slow
     // or tries to reach a non-existent org.  The catch block returns defaults.
-    const raw = execFileSync('az', [
+    const raw = execFileSync(AZ_CMD, [
       'boards', 'work-item', 'type', 'list',
       '--org', orgUrl,
       '--project', project,
@@ -160,11 +162,7 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
   }
 
   private az(args: string[]): string {
-    // On Windows, shell:true joins args with spaces without quoting — quote any arg containing whitespace.
-    const safeArgs = IS_WINDOWS
-      ? args.map((a) => (/\s/.test(a) ? `"${a}"` : a))
-      : args;
-    return execFileSync('az', safeArgs, AZ_OPTS).trim();
+    return execFileSync(AZ_CMD, args, AZ_OPTS).trim();
   }
 
   async listWorkItems(options: { tags?: string[]; state?: string; limit?: number }): Promise<WorkItem[]> {
@@ -236,7 +234,7 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
    * Query the available work item types for this adapter's work item project.
    * Delegates to the module-level `getAvailableWorkItemTypes`.
    */
-  getAvailableWorkItemTypes(): WorkItemTypeInfo[] {
+  private getAvailableWorkItemTypesList(): WorkItemTypeInfo[] {
     const wiOrg = this.workItemConfig?.org ?? this.org;
     const wiProj = this.workItemConfig?.project ?? this.project;
     return getAvailableWorkItemTypes(wiOrg, wiProj);
@@ -245,25 +243,14 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
   /**
    * Validate a work item type against the project's process template.
    */
-  validateWorkItemType(typeName: string): { valid: boolean; available: string[] } {
+  private validateWorkItemTypeByName(typeName: string): { valid: boolean; available: string[] } {
     const wiOrg = this.workItemConfig?.org ?? this.org;
     const wiProj = this.workItemConfig?.project ?? this.project;
     return validateWorkItemType(wiOrg, wiProj, typeName);
   }
 
-  async createWorkItem(options: { title: string; description?: string; tags?: string[]; assignedTo?: string; type?: string; areaPath?: string; iterationPath?: string; validateType?: boolean }): Promise<WorkItem> {
+  async createWorkItem(options: { title: string; description?: string; tags?: string[]; assignedTo?: string; type?: string }): Promise<WorkItem> {
     const wiType = options.type ?? this.workItemConfig?.defaultWorkItemType ?? 'User Story';
-
-    // Optional validation: check if the type exists in the project's process template
-    if (options.validateType) {
-      const result = this.validateWorkItemType(wiType);
-      if (!result.valid) {
-        throw new Error(
-          `Work item type "${wiType}" is not available in this project. ` +
-          `Available types: ${result.available.join(', ')}`,
-        );
-      }
-    }
 
     const fields: string[] = [
       `System.Title=${options.title}`,
@@ -277,15 +264,12 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
     if (options.assignedTo) {
       fields.push(`System.AssignedTo=${options.assignedTo}`);
     }
-    // Area path: explicit > config > omit (uses project default)
-    const areaPath = options.areaPath ?? this.workItemConfig?.areaPath;
-    if (areaPath) {
-      fields.push(`System.AreaPath=${areaPath}`);
+    // Area path and iteration path come from config only (not exposed on the public interface).
+    if (this.workItemConfig?.areaPath) {
+      fields.push(`System.AreaPath=${this.workItemConfig.areaPath}`);
     }
-    // Iteration path: explicit > config > omit (uses project default)
-    const iterationPath = options.iterationPath ?? this.workItemConfig?.iterationPath;
-    if (iterationPath) {
-      fields.push(`System.IterationPath=${iterationPath}`);
+    if (this.workItemConfig?.iterationPath) {
+      fields.push(`System.IterationPath=${this.workItemConfig.iterationPath}`);
     }
 
     const output = this.az([
@@ -351,6 +335,48 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
       '--fields', `System.AssignedTo=${value}`, ...this.workItemArgs, '--output', 'json',
     ]);
   }
+
+  /**
+   * Assign a work item to the given assignee.
+   *
+   * The `@me` sentinel resolves to the currently authenticated Azure DevOps
+   * identity before updating `System.AssignedTo`. If identity lookup fails,
+   * the assignment no-ops rather than sending an ambiguous value.
+   * Literal assignee strings are passed through unchanged.
+   */
+  async assignWorkItem(id: number, assignee: string): Promise<void> {
+    let resolvedAssignee = assignee;
+
+    if (assignee === '@me') {
+      const currentUser = this.getCurrentUser();
+      if (!currentUser) {
+        // Cannot resolve @me — no-op rather than send ambiguous value.
+        return;
+      }
+      resolvedAssignee = currentUser;
+    }
+
+    this.az([
+      'boards', 'work-item', 'update', '--id', String(id),
+      '--fields', `System.AssignedTo=${resolvedAssignee}`,
+      ...this.workItemArgs, '--output', 'json',
+    ]);
+  }
+
+  /**
+   * Return the display name of the currently authenticated Azure DevOps user,
+   * or undefined if identity cannot be resolved.
+   */
+  getCurrentUser(): string | undefined {
+    try {
+      const raw = this.az(['account', 'show', '--output', 'json']);
+      const account = parseJson<{ user?: { name?: string } }>(raw);
+      return account.user?.name ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
 
   async listPullRequests(options: { status?: string; limit?: number }): Promise<PullRequest[]> {
     const args = [
@@ -458,7 +484,7 @@ export class AzureDevOpsAdapter implements PlatformAdapter {
 
       try {
         const orgUrl = `https://dev.azure.com/${targetOrg}`;
-        execFileSync('az', ['devops', 'configure', '--defaults', `organization=${orgUrl}`], AZ_OPTS);
+        execFileSync(AZ_CMD, ['devops', 'configure', '--defaults', `organization=${orgUrl}`], AZ_OPTS);
       } catch {
         // az CLI might not be installed — non-fatal
       }

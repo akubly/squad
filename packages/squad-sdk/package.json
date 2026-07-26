@@ -221,6 +221,30 @@
     "./upstream": {
       "types": "./dist/upstream/index.d.ts",
       "import": "./dist/upstream/index.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
+    "./resolution-v2": {
+      "types": "./dist/resolution-v2.d.ts",
+      "import": "./dist/resolution-v2.js"
+    },
+    "./path-utils": {
+      "types": "./dist/path-utils.d.ts",
+      "import": "./dist/path-utils.js"
+    },
+    "./copilot-payload": {
+      "types": "./dist/copilot-payload.d.ts",
+      "import": "./dist/copilot-payload.js"
+    },
+    "./validation": {
+      "types": "./dist/validation.d.ts",
+      "import": "./dist/validation.js"
+    },
+    "./adapter-factory": {
+      "types": "./dist/platform/adapter-factory.d.ts",
+      "import": "./dist/platform/adapter-factory.js"
     }
   },
   "files": [

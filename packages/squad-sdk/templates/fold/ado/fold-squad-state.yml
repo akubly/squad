@@ -1,0 +1,235 @@
+# Squad fold pipeline — ADO variant
+# Folds Squad inbox branches into per-callsign Squad state branches.
+#
+# Trigger: push to any branch under refs/heads/squad/inbox/* (serialized by batch: true).
+# This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
+
+# Manual run: use "Run pipeline" in the CI platform UI. No parameters required —
+# a manual run folds every discovered callsign exactly as the scheduled sweep does.
+parameters: []
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - refs/heads/squad/inbox/*
+
+schedules:
+  - cron: '*/15 * * * *'
+    displayName: Fold squad inbox every 15 minutes (fallback)
+    branches:
+      include:
+        - main
+    always: false
+
+variables:
+  - name: DELETE_FOLDED_REFS
+    value: 'false'
+
+stages:
+  - stage: fold
+    displayName: Fold Squad inbox by callsign
+    # Serialize fold runs at the run level: this stage references a protected
+    # Environment resource and an exclusive lock applies, so a push-triggered run
+    # and the scheduled run never execute the fetch->fold->push critical section
+    # for squad/state/<callsign> concurrently. batch: true still coalesces and
+    # --force-with-lease remains the integrity backstop.
+    lockBehavior: sequential
+    jobs:
+      - deployment: fold
+        displayName: Fold Squad inbox by callsign
+        environment: squad-fold
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # This pipeline is the sole writer to squad/state/<callsign>. No other automation or manual push should target these branches.
+
+                - checkout: self
+                  fetchDepth: 0
+                  persistCredentials: true
+
+                - bash: |
+                    git config user.email "squad-fold@noreply"
+                    git config user.name "Squad Fold Pipeline"
+                  displayName: Configure git identity
+
+                - bash: |
+                    set -euo pipefail
+
+                    callsigns="`git ls-remote --heads origin 'refs/heads/squad/inbox/*' \
+                      | sed -nE 's#^[0-9a-f]+\srefs/heads/squad/inbox/([^/]+)/.*#\1#p' \
+                      | sort -u`"
+
+                    if [ -z "$callsigns" ]; then
+                      echo "No Squad inbox callsigns discovered — nothing to do."
+                      exit 0
+                    fi
+
+                    for CALLSIGN in $callsigns; do
+                      if ! [[ "$CALLSIGN" =~ ^[a-z][a-z0-9-]{1,38}$ ]]; then
+                        echo "##vso[task.logissue type=warning]WARNING: Skipping invalid callsign '$CALLSIGN'."
+                        continue
+                      fi
+
+                      STATE_BRANCH="squad/state/$CALLSIGN"
+                      echo "Folding inbox refs for $CALLSIGN into $STATE_BRANCH ..."
+
+                      # A workspace-reusing (self-hosted) runner can carry a local $STATE_BRANCH from a
+                      # previous run; detach and drop it so the checkout/--orphan below is not blocked by
+                      # "a branch named ... already exists". Hosted runners start clean, so this is a no-op.
+                      git checkout --detach >/dev/null 2>&1 || true
+                      git branch -D "$STATE_BRANCH" >/dev/null 2>&1 || true
+
+                      if git ls-remote --exit-code origin "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
+                        git fetch origin "$STATE_BRANCH"
+                        git checkout -B "$STATE_BRANCH" "origin/$STATE_BRANCH"
+                      else
+                        git checkout --orphan "$STATE_BRANCH"
+                        git rm -rf . >/dev/null 2>&1 || true
+                        git commit --allow-empty -m "Initialize Squad state branch for $CALLSIGN"
+                      fi
+
+                      HISTORY_FILE=".squad/publish-history.json"
+                      FOLDED_REFS=""
+                      if [ ! -s "$HISTORY_FILE" ] || ! jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
+                        if [ -e "$HISTORY_FILE" ]; then
+                          echo "##vso[task.logissue type=warning]$HISTORY_FILE is missing, empty, or non-array JSON — resetting to []."
+                          printf '%s\n' '[]' > "$HISTORY_FILE"
+                        fi
+                      else
+                        FOLDED_REFS=`jq -r '.[].foldedRefs[].ref // empty' "$HISTORY_FILE" 2>/dev/null | tr -d '\r' || true`
+                      fi
+
+                      INBOX_REFS=`git ls-remote --heads origin "refs/heads/squad/inbox/${CALLSIGN}/*" | awk '{print $2}' | tr -d '\r'`
+                      SORT_LIST=()
+                      STALE_FOLDED_REFS=()
+                      while IFS= read -r REF; do
+                        [ -z "$REF" ] && continue
+                        if [ -n "$FOLDED_REFS" ] && printf '%s\n' "$FOLDED_REFS" | grep -qxF "$REF"; then
+                          echo "  Skipping $REF (already recorded in publish-history.json)"
+                          # Recorded as folded yet still present on the remote: a delete that did not
+                          # complete on a prior run. Collect it for idempotent garbage collection below.
+                          STALE_FOLDED_REFS+=("$REF")
+                          continue
+                        fi
+                        TS=`echo "$REF" | grep -oP '\d{8}-\d{6}' || echo "00000000-000000"`
+                        SESSION=`echo "$REF" | sed 's|.*/||'`
+                        SORT_LIST+=("${TS}"$'\t'"${SESSION}"$'\t'"${REF}")
+                      done <<< "$INBOX_REFS"
+
+                      # Garbage-collect inbox refs that publish-history.json records as folded but that
+                      # are still present on the remote — the residue of a prior delete that did not
+                      # complete. Re-delete them best-effort; because eligibility is driven entirely by
+                      # publish-history.json, only already-folded refs are ever deleted (an unfolded ref
+                      # is never in this set) and the retry is idempotent across runs. This runs before
+                      # the no-unfolded-refs early-out so orphans are collected even when there is
+                      # nothing new to fold. Gated by the same opt-in as the post-fold cleanup.
+                      if [ "$(DELETE_FOLDED_REFS)" = "true" ] && [ ${#STALE_FOLDED_REFS[@]} -gt 0 ]; then
+                        for REF in "${STALE_FOLDED_REFS[@]}"; do
+                          REF="${REF%$'\r'}"
+                          [ -z "$REF" ] && continue
+                          echo "  GC: deleting recorded-but-present Squad inbox ref: $REF"
+                          git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to GC-delete $REF — continuing."
+                        done
+                      fi
+
+                      if [ ${#SORT_LIST[@]} -eq 0 ]; then
+                        echo "No unfolded refs for $CALLSIGN — nothing to do."
+                        continue
+                      fi
+
+                      SORTED_REFS=`printf '%s\n' "${SORT_LIST[@]}" | sort | cut -f3`
+                      FOLDED_ENTRIES="[]"
+
+                      while IFS= read -r REF; do
+                        [ -z "$REF" ] && continue
+                        SHORT_REF="${REF#refs/heads/}"
+                        echo "  Folding $REF ..."
+
+                        REF_SHA=`git ls-remote origin "$REF" | awk '{print $1}'`
+                        if [ -z "$REF_SHA" ]; then
+                          echo "  WARNING: Cannot resolve $REF — skipping."
+                          continue
+                        fi
+
+                        git fetch origin "+${REF}:refs/fold-tmp/inbox" 2>/dev/null
+
+                        METADATA_SHA=`git ls-tree refs/fold-tmp/inbox .squad/publish-metadata.json 2>/dev/null | awk '{print $3}'`
+                        PUB_AT="1970-01-01T00:00:00Z"
+                        DEV_ALIAS="unknown"
+                        if [ -n "$METADATA_SHA" ]; then
+                          META_JSON=`git cat-file blob "$METADATA_SHA" 2>/dev/null || echo '{}'`
+                          PUB_AT=`echo "$META_JSON" | jq -r '.publishedAt // "1970-01-01T00:00:00Z"'`
+                          DEV_ALIAS=`echo "$META_JSON" | jq -r '.developerAlias // "unknown"'`
+                        else
+                          echo "  WARNING: Missing .squad/publish-metadata.json on $REF — using defaults."
+                        fi
+
+                        INBOX_SQUAD_TREE=`git ls-tree refs/fold-tmp/inbox .squad 2>/dev/null | awk '{print $3}'`
+                        if [ -z "$INBOX_SQUAD_TREE" ]; then
+                          echo "  WARNING: No .squad/ subtree in $REF — skipping."
+                          git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+                          continue
+                        fi
+
+                        git archive refs/fold-tmp/inbox .squad \
+                          | tar -x --exclude='.squad/publish-history.json'
+                        git add .squad/
+
+                        if git diff --cached --quiet; then
+                          echo "  $SHORT_REF already folded (no changes) — recording without commit."
+                          ENTRY=`jq -n --arg ref "$REF" --arg sha "$REF_SHA" --arg alias "$DEV_ALIAS" --arg pubAt "$PUB_AT" '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+                          FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+                        elif GIT_AUTHOR_DATE="$PUB_AT" GIT_COMMITTER_DATE="$PUB_AT" \
+                          git commit --author="Squad Fold Pipeline <squad-fold@noreply>" -m "fold: $SHORT_REF (alias=$DEV_ALIAS publishedAt=$PUB_AT)"; then
+                          ENTRY=`jq -n --arg ref "$REF" --arg sha "$REF_SHA" --arg alias "$DEV_ALIAS" --arg pubAt "$PUB_AT" '{ref: $ref, sha: $sha, developerAlias: $alias, publishedAt: $pubAt}'`
+                          FOLDED_ENTRIES=`echo "$FOLDED_ENTRIES" | jq --argjson e "$ENTRY" '. + [$e]'`
+                        else
+                          echo "##vso[task.logissue type=warning]WARNING: Fold commit failed for $REF — not recording it in publish-history.json."
+                          git reset --hard HEAD >/dev/null 2>&1 || true
+                        fi
+
+                        git update-ref -d refs/fold-tmp/inbox 2>/dev/null || true
+                      done <<< "$SORTED_REFS"
+
+                      FINAL_SHA=`git rev-parse HEAD 2>/dev/null || echo ""`
+                      EXISTING="[]"
+                      if [ -s "$HISTORY_FILE" ] && jq -e 'type == "array"' "$HISTORY_FILE" >/dev/null 2>&1; then
+                        EXISTING=`cat "$HISTORY_FILE"`
+                      fi
+
+                      FOLD_TS=`date -u +"%Y-%m-%dT%H:%M:%SZ"`
+                      NEW_RECORD=`jq -n \
+                        --arg ts "$FOLD_TS" \
+                        --arg sha "$FINAL_SHA" \
+                        --argjson entries "$FOLDED_ENTRIES" \
+                        '{foldTimestamp: $ts, foldedRefs: $entries, foldCommitSha: $sha}'`
+
+                      UPDATED_HISTORY=`printf '%s\n' "$EXISTING" | jq --argjson r "$NEW_RECORD" '. + [$r]'`
+                      if [ -z "$UPDATED_HISTORY" ] || ! printf '%s\n' "$UPDATED_HISTORY" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                        echo "##vso[task.logissue type=error]Failed to produce valid publish-history.json — aborting to prevent data loss."
+                        exit 1
+                      fi
+                      mkdir -p "`dirname "$HISTORY_FILE"`"
+                      printf '%s\n' "$UPDATED_HISTORY" > "$HISTORY_FILE"
+                      git add "$HISTORY_FILE"
+                      git commit -m "fold: update publish-history.json (foldTimestamp=$FOLD_TS)"
+
+                      git push origin HEAD:refs/heads/${STATE_BRANCH} --force-with-lease
+
+                      if [ "$(DELETE_FOLDED_REFS)" = "true" ]; then
+                        FOLDED_REF_LIST=`echo "$FOLDED_ENTRIES" | jq -r '.[].ref' | tr -d '\r'`
+                        while IFS= read -r REF; do
+                          REF="${REF%$'\r'}"
+                          [ -z "$REF" ] && continue
+                          echo "  Deleting folded Squad inbox ref: $REF"
+                          git push origin --delete "${REF#refs/heads/}" || echo "  WARNING: Failed to delete $REF — continuing."
+                        done <<< "$FOLDED_REF_LIST"
+                      fi
+                    done
+                  displayName: Discover callsigns and fold inbox refs
+                  env:
+                    SYSTEM_ACCESSTOKEN: $(System.AccessToken)

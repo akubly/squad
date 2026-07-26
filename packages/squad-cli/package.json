@@ -172,6 +172,34 @@
     "./commands/cast": {
       "types": "./dist/cli/commands/cast.d.ts",
       "import": "./dist/cli/commands/cast.js"
+    },
+    "./core/squad-file-conventions": {
+      "types": "./dist/cli/core/squad-file-conventions.d.ts",
+      "import": "./dist/cli/core/squad-file-conventions.js"
+    },
+    "./commands/init": {
+      "types": "./dist/commands/init.d.ts",
+      "import": "./dist/commands/init.js"
+    },
+    "./commands/list": {
+      "types": "./dist/commands/list.d.ts",
+      "import": "./dist/commands/list.js"
+    },
+    "./cli/commands/doctor": {
+      "types": "./dist/cli/commands/doctor.d.ts",
+      "import": "./dist/cli/commands/doctor.js"
+    },
+    "./commands/triage": {
+      "types": "./dist/commands/triage.d.ts",
+      "import": "./dist/commands/triage.js"
+    },
+    "./commands/assign": {
+      "types": "./dist/commands/assign.d.ts",
+      "import": "./dist/commands/assign.js"
+    },
+    "./commands/unassign": {
+      "types": "./dist/commands/unassign.d.ts",
+      "import": "./dist/commands/unassign.js"
     }
   },
   "files": [

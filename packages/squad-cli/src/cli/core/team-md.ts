@@ -4,6 +4,7 @@
 
 import path from 'node:path';
 import { FSStorageProvider } from '@bradygaster/squad-sdk';
+import { hasCodingAgent } from './squad-file-conventions.js';
 
 const storage = new FSStorageProvider();
 
@@ -32,9 +33,10 @@ export function writeTeamMd(squadDir: string, content: string): void {
 
 /**
  * Check if @copilot section exists in team.md
+ * @deprecated Use hasCodingAgent from squad-file-conventions instead.
  */
 export function hasCopilot(content: string): boolean {
-  return content.includes('🤖 Coding Agent');
+  return hasCodingAgent(content);
 }
 
 /**
