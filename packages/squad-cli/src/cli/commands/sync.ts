@@ -1063,6 +1063,18 @@ async function hydrateTeamRootFromRef(
   //     already local and re-fetches all reachable objects under the current (unfiltered) filter,
   //     landing every lane blob in one transfer. Without it the cat-file write-out below silently
   //     falls back to O(files) per-blob promisor fetches inside the cat-file subprocess.
+  //   - Cost model: this collapses the write-out's network cost to a SINGLE bulk fetch invocation
+  //     per lane (O(1) child processes, not O(files)). Because `--refetch` disables negotiation it
+  //     re-transfers the tip's full reachable blob set on each *changed*-tip hydrate rather than
+  //     just the delta — O(snapshot) bytes per changed tip — which is the intended trade for
+  //     eliminating the O(files) per-blob round trips; the sentinel fast-path keeps unchanged-tip
+  //     re-pulls free, and git's auto-gc reclaims any duplicate packs `--refetch` leaves behind.
+  //   - `--refetch` requires git >= 2.36. On an older git the option is unknown and the fetch errors;
+  //     rather than abort a hydrate that would otherwise still succeed via the slower per-blob lazy
+  //     path, the bulk fetch is treated as a best-effort optimization — a failure is logged and the
+  //     write-out below falls back to lazy promisor fetches (the pre-optimization behavior). This
+  //     also covers transient bulk-fetch failures: any genuinely fatal object miss surfaces as a
+  //     clear per-file error from the cat-file loop instead of masking it here.
   let isPartialClone = false;
   try {
     const promisorRemotes = (_hydrateGit.exec(
@@ -1079,9 +1091,15 @@ async function hydrateTeamRootFromRef(
         `refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
       ], { cwd: teamRoot, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err: unknown) {
+      // Best-effort optimization: never abort the hydrate on a bulk-fetch failure. The write-out
+      // loop below still materializes every blob via per-blob lazy promisor fetches — slower, but
+      // the pre-`--refetch` behavior. This keeps managed cold-start working on git < 2.36 (where
+      // `--refetch` is an unknown option) instead of hard-failing a hydrate that used to succeed.
       const msg = err instanceof Error ? ((err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? err.message) : String(err);
-      throw new Error(
-        `hydrateTeamRootFromRef: failed to bulk-fetch blobs for "${branch}" from "${remote}": ${msg}`,
+      console.warn(
+        `squad sync: warning: bulk blob hydrate for "${branch}" from "${remote}" failed ` +
+        `(${msg.trim()}); falling back to per-blob fetch (slower). ` +
+        `Managed hosts need git >= 2.36 for the fast path.`,
       );
     }
   }

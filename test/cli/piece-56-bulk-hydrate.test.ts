@@ -252,6 +252,7 @@ describe('piece 56 §B — bulk managed hydrate', { timeout: 120_000 }, () => {
 
     let blobsPresent = false;
     let lazyBlobFetches = 0;
+    let bulkFetchArgs: string[] | null = null;
 
     const spy = vi.spyOn(_hydrateGit, 'exec').mockImplementation((args: string[], opts: Record<string, unknown>) => {
       // Partial-clone signal lives under `origin`, never under the driving token (`squad-config`).
@@ -261,7 +262,7 @@ describe('piece 56 §B — bulk managed hydrate', { timeout: 120_000 }, () => {
       if (args[0] === 'fetch') {
         // Only an unfiltered fetch that ignores negotiation (`--refetch`) backfills blobs on the
         // already-present ref. Step-1's filtered fetch and a plain `--no-filter` re-fetch add none.
-        if (args.includes('--no-filter') && args.includes('--refetch')) blobsPresent = true;
+        if (args.includes('--no-filter') && args.includes('--refetch')) { blobsPresent = true; bulkFetchArgs = args; }
         return '';
       }
       if (args.includes('cat-file')) {
@@ -279,6 +280,14 @@ describe('piece 56 §B — bulk managed hydrate', { timeout: 120_000 }, () => {
     // pre-`--refetch` code the bulk fetch no-ops, blobs stay absent, and this equals FILE_COUNT (40) —
     // the O(files) regression an exec-call counter is blind to. This fails on today's code, passes after the fix.
     expect(lazyBlobFetches).toBe(0);
+
+    // The bulk fetch must target the DRIVING remote token and the lane refspec exactly — guards a
+    // future refactor that passes `--refetch` but to the wrong remote/refspec (which would silently
+    // reopen the O(files) fallback on the real path while this test's flag check alone still passed).
+    expect(bulkFetchArgs).toEqual([
+      'fetch', '--refetch', '--no-filter', DRIVE_REMOTE,
+      `refs/heads/${branch}:refs/remotes/${DRIVE_REMOTE}/${branch}`,
+    ]);
   });
 
   it('P56.B1s (56a regression): network-touching git invocation count is O(1) per lane — identical for 5 files and for 1,500 — on the non-promisor-named remote token', async () => {
@@ -381,6 +390,62 @@ describe('piece 56 §B — bulk managed hydrate', { timeout: 120_000 }, () => {
       const p = path.join(host, '.squad', `file${i}.md`);
       expect(fs.existsSync(p)).toBe(true);
       expect(fs.readFileSync(p, 'utf-8')).toBe(`content-${i}-${'x'.repeat(128)}\n`);
+    }
+  });
+
+  it('P56.B4 (56a review fix): a bulk-fetch failure (e.g. git < 2.36 lacking --refetch) is NON-FATAL — hydrate still materialises every file via the lazy path', async () => {
+    // F1 guard. On git 2.19–2.35 the clone is partial (so §B runs) but `--refetch` is an unknown
+    // option, so the bulk fetch exits non-zero. It must be treated as a best-effort optimization:
+    // the hydrate warns and falls back to the (slower) per-blob lazy path rather than hard-crashing
+    // a managed cold-start that pre-`--refetch` succeeded. This is a real behaviour test, not a
+    // change-detector: it drives the write-out and asserts the files actually land on disk.
+    const branch = 'squad-state';
+    const DRIVE_REMOTE = 'squad-config';
+    const FILE_COUNT = 6;
+
+    const teamRoot = makeTmpDir('bulkfail');
+    execFileSync('git', ['init', '-b', 'main', teamRoot], { stdio: 'pipe' });
+    const treeList = Array.from({ length: FILE_COUNT }, (_, i) => `.squad/file${i + 1}.md`).join('\n');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let bulkFetchAttempts = 0;
+    let lazyBlobFetches = 0;
+
+    const spy = vi.spyOn(_hydrateGit, 'exec').mockImplementation((args: string[], opts: Record<string, unknown>) => {
+      if (args.includes('--get-regexp')) return 'remote.origin.promisor true\n';
+      if (args[0] === 'rev-parse') return 'a'.repeat(40) + '\n';
+      if (args.includes('ls-tree')) return treeList;
+      if (args[0] === 'fetch') {
+        if (args.includes('--refetch')) {
+          // Simulate `git fetch --refetch` on git < 2.36: unknown option ⇒ non-zero exit.
+          bulkFetchAttempts++;
+          const e = new Error("error: unknown option `refetch'") as Error & { stderr?: string };
+          e.stderr = "error: unknown option `refetch'";
+          throw e;
+        }
+        return ''; // Step-1 filtered fetch succeeds
+      }
+      if (args.includes('cat-file')) {
+        lazyBlobFetches++; // blobs never backfilled ⇒ each write-out lazily promisor-fetches
+        return Buffer.from('blob-body\n');
+      }
+      return (opts && opts['encoding'] === null) ? Buffer.alloc(0) : '';
+    });
+
+    // The bulk fetch throws, but the hydrate itself must NOT.
+    await expect(hydrateTeamRootFromStateRef(teamRoot, DRIVE_REMOTE, branch)).resolves.toBeUndefined();
+    spy.mockRestore();
+
+    expect(bulkFetchAttempts).toBe(1);         // it did attempt the fast path
+    expect(warnSpy).toHaveBeenCalledOnce();    // and warned that it fell back
+    expect(lazyBlobFetches).toBe(FILE_COUNT);  // then used the per-blob lazy path
+    warnSpy.mockRestore();
+
+    // Correctness: despite the failed optimization, every lane file is still written to the team root.
+    for (let i = 1; i <= FILE_COUNT; i++) {
+      const p = path.join(teamRoot, '.squad', `file${i}.md`);
+      expect(fs.existsSync(p)).toBe(true);
+      expect(fs.readFileSync(p, 'utf-8')).toBe('blob-body\n');
     }
   });
 });

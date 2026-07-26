@@ -150,6 +150,16 @@ Empirical confirmation (real `akubly_microsoft/squads`, isolated blobless clone)
 git(['fetch', '--refetch', '--no-filter', remote, refspec]);
 ```
 
+### Adversarial review refinements (2026-07-25)
+
+A Team adversarial review of the v2 `--refetch` fix surfaced three actionable items; all are addressed on the same branch:
+
+- **F1 — git-version floor made the fast path a hard dependency (fixed → best-effort).** `git fetch --refetch` requires git ≥ 2.36, but partial clones exist since 2.19. On an intermediate git the clone is partial (so §B runs) yet `--refetch` is an unknown option, so the bulk fetch would throw and the v2 `catch` **rethrew** — turning a hydrate that previously succeeded (slowly, via the lazy path) into a hard crash. The `catch` now logs a `console.warn` and **falls back to the per-blob lazy path** instead of rethrowing. The optimization is best-effort; correctness never depends on it. New test `P56.B4` drives a throwing bulk fetch and asserts the hydrate does not throw and still materializes every file (red on rethrow, green on fallback).
+- **F2 — "O(1) per lane" wording was imprecise (corrected).** §B is O(1) fetch *invocations* per lane (one bulk transfer replacing O(files) per-blob spawns), but **not** O(1) bytes: `--refetch` disables negotiation, so it re-transfers the tip's full reachable blob set on each *changed*-tip hydrate — O(snapshot) bytes per changed tip, not a delta. The sentinel keeps unchanged-tip re-pulls free; git auto-gc/repack reclaims the duplicate packs. Wording corrected in the sync.ts comment, the changeset, and here.
+- **F3 — B1b was a pure change-detector (partially tightened).** B1b models git object semantics through the exec seam (unavoidable: the host VFS/Scalar git fork prefetches all blobs over `file://`, so a real blobless fixture cannot reproduce the missing-blob state locally). It now additionally asserts the bulk fetch targets the correct **driving remote token and lane refspec**, so a refactor that passes `--refetch` to the wrong remote/refspec is caught rather than silently reopening the O(files) fallback. B4 adds genuine end-to-end behavior coverage (files land on disk via the fallback).
+
+**CI fidelity gap (restated).** The original §B unit test asserted only exec-*call-count*, which is blind to per-blob lazy fetches that happen **inside** the `cat-file` subprocess — that is how both the no-op re-fetch (v2) and the missing floor (F1) shipped green. The strengthened tests assert *object-store population* and *fallback behavior*, not just invocation counts.
+
 `--refetch` tells git to ignore what it already has and re-fetch all reachable objects under the
 current (now unfiltered) filter, backfilling exactly the blobs Step 1 skipped — in one
 O(1)-per-lane transfer. Decision G1's O(1)-per-lane guarantee and the `.last-hydrate-sha` /
