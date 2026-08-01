@@ -12,16 +12,36 @@
 import path from 'node:path';
 import { FSStorageProvider, clearResolveSquadCache } from '@wifi-aware/squad-sdk';
 import { fatal } from '../core/errors.js';
+import { ensureSquadStateMcpInRoot } from '../core/mcp-root.js';
+import { localSquadStateMcpSpec } from '../core/mcp-spec.js';
+import { getPackageVersion } from '../core/version.js';
 
 const storage = new FSStorageProvider();
+
+/**
+ * Options for {@link runLink}. Omitted for interactive `squad link` (messages go to the console);
+ * supplied by programmatic callers (e.g. the managed cold-start in `assign`) that collect their own
+ * structured output.
+ */
+export interface RunLinkOptions {
+  /**
+   * Sink for the non-fatal `.mcp.json` wiring warning. When set, the warning is handed here instead
+   * of printed, so the caller can fold it into its own `warnings[]` rather than interleaving raw
+   * `console.warn` output with a structured summary.
+   */
+  onWarn?: (msg: string) => void;
+  /** Suppress the interactive success log line (callers that print their own onboarding summary). */
+  quiet?: boolean;
+}
 
 /**
  * Link the current project to a remote team root.
  *
  * @param projectDir - Project root (cwd or explicit).
  * @param teamRepoPath - Path (relative or absolute) to the team repo.
+ * @param opts - Optional programmatic-caller hooks (warning sink / quiet). See {@link RunLinkOptions}.
  */
-export function runLink(projectDir: string, teamRepoPath: string): void {
+export function runLink(projectDir: string, teamRepoPath: string, opts: RunLinkOptions = {}): void {
   // Resolve the team repo path to an absolute path
   const absoluteTeam = path.resolve(projectDir, teamRepoPath);
 
@@ -80,5 +100,22 @@ export function runLink(projectDir: string, teamRepoPath: string): void {
   // instead of after the 5-second TTL.
   clearResolveSquadCache();
 
-  console.log(`✅ Linked to team root: ${relativePath}`);
+  // Piece 57 §D — wire the squad_state MCP bridge into THIS consumer clone so Copilot's `.mcp.json`
+  // auto-load (which walks up from cwd to the git root) finds a bridge whose command resolves
+  // locally. This fires for EVERY `squad link` — direct or via the managed cold-start — by design:
+  // any clone being linked to a remote team root is a consumer that benefits from a discoverable
+  // state bridge, and `squad` is on PATH for anyone who just ran `squad link`/`squad assign`. The
+  // `squad_state` key is Squad-owned, so refreshing it to the locally-resolvable spec is intended.
+  // Best-effort: a link must never fail because the .mcp.json write hit a malformed pre-existing file.
+  try {
+    ensureSquadStateMcpInRoot(projectDir, getPackageVersion(), localSquadStateMcpSpec());
+  } catch (err) {
+    const msg = `Linked, but could not wire squad_state MCP into .mcp.json: ${err instanceof Error ? err.message : String(err)}`;
+    if (opts.onWarn) opts.onWarn(msg);
+    else console.warn(`⚠ ${msg}`);
+  }
+
+  if (!opts.quiet) {
+    console.log(`✅ Linked to team root: ${relativePath}`);
+  }
 }

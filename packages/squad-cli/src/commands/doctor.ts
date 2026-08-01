@@ -24,6 +24,7 @@ import { diagnoseCopilotPayload } from '@wifi-aware/squad-sdk/copilot-payload';
 import { resolveRegistryFilePath } from './_registry-path.js';
 import { findCloseMatch } from '../lib/close-match.js';
 import { TEMPLATE_MANIFEST } from '../cli/core/templates.js';
+import { deriveConfigBranch, hydrateTeamRootFromConfigRef, resolveStateRemote } from '../cli/commands/sync.js';
 
 export interface RunDoctorOpts {
   cwd: string;
@@ -417,7 +418,174 @@ export async function runDoctor(opts: RunDoctorOpts): Promise<RunDoctorResult> {
     // Payload diagnosis is best-effort; suppress errors to keep the doctor non-fatal.
   }
 
+  // Piece 57 §E — managed host that RESOLVES but whose durable config lane never hydrated.
+  // The live `wifi-aware` symptom: a managed host stood up with only the ephemeral state lane
+  // (so `.squad/` exists on disk) is missing `team.md` and the `.last-config-hydrate-sha`
+  // sentinel, so registry-aware callers resolve it yet agents/Copilot silently get "no team.md".
+  // Report RED and point at the heal (`squad doctor --fix` / `squad sync --pull`). We only flag a
+  // host whose `.squad/` EXISTS — a host with no `.squad/` at all is a different (harsher) state
+  // already covered by the managed no-checkout handling above.
+  for (const entry of entries) {
+    if (entry.managed !== true) continue;
+    const hostRepoRoot = path.dirname(entry.path);
+    if (!fs.existsSync(path.join(hostRepoRoot, '.squad'))) continue;
+    const reasons = _managedHostConfigLaneReasons(hostRepoRoot);
+    if (reasons.length > 0) {
+      findings.push(
+        `Managed host issue: "${entry.callsign ?? entry.path}" at ${hostRepoRoot} resolves but its ` +
+        `durable config lane is not hydrated (${reasons.join(', ')}); agents and Copilot will see ` +
+        `"no team.md". Run "squad doctor --fix"${entry.callsign ? ` ${entry.callsign}` : ''} ` +
+        `(or "squad sync --pull" from ${hostRepoRoot}) to hydrate the config lane.`,
+      );
+      escalate('error');
+    }
+  }
+
   return { severity, findings };
+}
+
+/**
+ * Piece 57 §E — reasons a managed host's durable config lane is considered un-hydrated.
+ *
+ * The harm §E guards against is agents/Copilot seeing "no team.md". So the RED gate is strictly
+ * the ABSENCE of the durable `team.md`: a host that has a team root is not stale, even when the
+ * `.last-config-hydrate-sha` sentinel is missing (e.g. a state-only squad whose config branch was
+ * never published, or a host hydrated by a pre-sentinel Squad version). Flagging those on the
+ * sentinel alone produced an UNFIXABLE false-positive RED — the heal fetches a config branch that
+ * may not exist, so the finding could never clear. When team.md IS missing, the sentinel state is
+ * reported as corroborating detail. Returns an empty array when the lane is present (GREEN).
+ * Exported for the CLI heal path and tests.
+ */
+export function _managedHostConfigLaneReasons(hostRepoRoot: string): string[] {
+  const squadDir = path.join(hostRepoRoot, '.squad');
+  if (fs.existsSync(path.join(squadDir, 'team.md'))) return [];
+  const reasons = ['no team.md'];
+  if (!fs.existsSync(path.join(squadDir, '.last-config-hydrate-sha'))) {
+    reasons.push('no .last-config-hydrate-sha sentinel');
+  }
+  return reasons;
+}
+
+/** Options for {@link healManagedConfigLane} (piece 57 §E). */
+export interface HealManagedConfigLaneOpts {
+  /** Restrict the heal to a single callsign; when omitted, all stale managed hosts are healed. */
+  callsign?: string;
+  registryPath?: string;
+  env?: Record<string, string>;
+  /** @internal Injectable seam: config-ref hydrate. Defaults to hydrateTeamRootFromConfigRef. */
+  _hydrateConfigFn?: (teamRoot: string, remote: string, branch: string, managed?: boolean) => Promise<void>;
+  /**
+   * @internal Injectable seam: resolve the registry's config-remote URL to a git remote NAME in the
+   * host clone. Defaults to {@link _defaultResolveConfigRemote}. Tests that do not stand up a real
+   * git host inject a passthrough so no git is invoked.
+   */
+  _resolveConfigRemoteFn?: (hostRepoRoot: string, entry: RegistryEntry) => string;
+}
+
+/**
+ * Piece 57 §E — resolve a managed entry's config remote to a git remote NAME usable by
+ * {@link hydrateTeamRootFromConfigRef}. The registry records the remote as a URL (see
+ * `assign.ts`), but `hydrateTeamRootFromRef` embeds the remote token into a
+ * `refs/remotes/<remote>/<branch>` refspec — a URL there is an INVALID ref name and git rejects it
+ * before any network access, so the heal must convert URL→name exactly as the assign cold-start
+ * does. When the config remote differs from the state remote, a distinct `squad-config` remote is
+ * (re)registered first, mirroring `assign`. Throws (via resolveStateRemote) when nothing resolves.
+ */
+export function _defaultResolveConfigRemote(hostRepoRoot: string, entry: RegistryEntry): string {
+  const raw = entry.configRemote ?? entry.stateRemote;
+  if (!raw) throw new Error('no config/state remote recorded on the registry entry');
+  let configConfigured: string | undefined;
+  if (entry.configRemote && entry.configRemote !== entry.stateRemote) {
+    try {
+      execFileSync('git', ['-C', hostRepoRoot, 'remote', 'remove', 'squad-config'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch { /* remote may not exist yet */ }
+    try {
+      execFileSync('git', ['-C', hostRepoRoot, 'remote', 'add', 'squad-config', entry.configRemote], { stdio: ['pipe', 'pipe', 'pipe'] });
+      configConfigured = 'squad-config';
+    } catch { /* fall back to host-clone remote resolution below */ }
+  }
+  return resolveStateRemote(hostRepoRoot, configConfigured ?? raw);
+}
+
+/** Result of {@link healManagedConfigLane}. */
+export interface HealManagedConfigLaneResult {
+  healed: Array<{ callsign: string; hostRepoRoot: string }>;
+  skipped: Array<{ callsign: string; reason: string }>;
+}
+
+/**
+ * Piece 57 §E — heal the stale managed-host config lane.
+ *
+ * For each managed registry entry that resolves but is missing its durable config lane (per
+ * {@link _managedHostConfigLaneReasons}), re-run the config-ref hydrate against the host team
+ * root using the remote + branch recorded on the entry. This is the durable form of the proven
+ * live mitigation (`squad sync --pull` from the host). Best-effort per entry — a heal failure is
+ * recorded in `skipped`, never thrown, so one bad host does not abort the others.
+ */
+export async function healManagedConfigLane(
+  opts: HealManagedConfigLaneOpts = {},
+): Promise<HealManagedConfigLaneResult> {
+  const healed: HealManagedConfigLaneResult['healed'] = [];
+  const skipped: HealManagedConfigLaneResult['skipped'] = [];
+
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: opts.env ?? {} });
+  let registry: Registry | null = null;
+  try {
+    ({ registry } = loadRegistryFromDisk({ registryPath: registryFilePath ?? undefined }));
+  } catch {
+    return { healed, skipped };
+  }
+  const entries = registry?.squads ?? [];
+  const hydrateFn = opts._hydrateConfigFn ?? hydrateTeamRootFromConfigRef;
+  const resolveRemoteFn = opts._resolveConfigRemoteFn ?? _defaultResolveConfigRemote;
+
+  for (const entry of entries) {
+    if (entry.managed !== true) continue;
+    const label = entry.callsign ?? entry.path;
+    if (opts.callsign && entry.callsign !== opts.callsign) continue;
+
+    const hostRepoRoot = path.dirname(entry.path);
+    if (!fs.existsSync(path.join(hostRepoRoot, '.squad'))) {
+      skipped.push({ callsign: label, reason: 'host .squad/ not present on disk' });
+      continue;
+    }
+    if (_managedHostConfigLaneReasons(hostRepoRoot).length === 0) {
+      continue; // already GREEN
+    }
+
+    const branch = entry.configBranch ?? (entry.callsign ? deriveConfigBranch(undefined, entry.callsign) : undefined);
+    if (!branch) {
+      skipped.push({ callsign: label, reason: 'no config branch recorded on the registry entry' });
+      continue;
+    }
+
+    // Convert the registry's config-remote URL into a git remote NAME before hydrating — a URL in
+    // the hydrate refspec is rejected as an invalid ref (see _defaultResolveConfigRemote).
+    let remote: string;
+    try {
+      remote = resolveRemoteFn(hostRepoRoot, entry);
+    } catch (err) {
+      skipped.push({ callsign: label, reason: `could not resolve config remote: ${err instanceof Error ? err.message : String(err)}` });
+      continue;
+    }
+
+    try {
+      await hydrateFn(hostRepoRoot, remote, branch, true);
+      // Convergence gate: only claim a heal once the durable lane is actually present. The hydrate
+      // can complete as a no-op (sentinel already at the fetched tip) or fetch a config ref that
+      // carries no team.md; in either case the host stays RED, so record it as unresolved rather
+      // than print a false "Healed".
+      if (_managedHostConfigLaneReasons(hostRepoRoot).length === 0) {
+        healed.push({ callsign: label, hostRepoRoot });
+      } else {
+        skipped.push({ callsign: label, reason: 'config hydrate completed but team.md is still absent (the config ref may not carry a team root)' });
+      }
+    } catch (err) {
+      skipped.push({ callsign: label, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { healed, skipped };
 }
 
 // ============================================================

@@ -866,3 +866,96 @@ export function resolveSquadState(startDir?: string, cliOverride?: StateBackendT
 
   return { paths, backend, repoRoot, storage: stateStorage, resolution };
 }
+
+// ============================================================================
+// Machine-readable team-root resolution (piece 57 §C/§F)
+// ============================================================================
+
+/**
+ * Options for {@link resolveTeamRoot}. Mirrors the registry resolver's inputs
+ * so a caller can point it at a specific cwd / registry without touching the
+ * ambient process environment.
+ */
+export interface ResolveTeamRootOpts {
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  registryPath?: string;
+}
+
+/**
+ * Result of {@link resolveTeamRoot}: a machine-readable description of the
+ * resolved team root that callers and agents can consume instead of walking
+ * the filesystem in search of `.squad/team.md`.
+ */
+export interface TeamRootInfo {
+  /** True when a team root was resolved. */
+  resolved: boolean;
+  /** Resolver precedence bucket that matched, or null when unresolved. */
+  source: ResolvedSquad['source'] | null;
+  /** Registry callsign when the squad is registry-known, else null. */
+  callsign: string | null;
+  /**
+   * Absolute path to the resolved team `.squad/` directory — the directory
+   * that holds `team.md`. For a linked/managed consumer clone this follows the
+   * `.squad/config.json` `teamRoot` pointer to the HOST `.squad`, so no caller
+   * has to probe the filesystem for it.
+   */
+  teamRoot: string | null;
+  /** 'local' when the .squad is co-located, 'remote' when it follows a pointer. */
+  mode: 'local' | 'remote' | null;
+  /** Machine-parseable reason when {@link resolved} is false. */
+  reason?: string;
+}
+
+/**
+ * Resolve the team root machine-readably.
+ *
+ * This is the single resolver that `squad status --json`, `squad team-root`,
+ * and the coordinator agent bootstrap all call. It reuses the registry-aware
+ * resolver ({@link resolveSquadState}'s underlying chain) and the dual-root
+ * `resolveSquadPaths` pointer-follow, so a managed consumer clone (whose only
+ * anchor is a `.squad/config.json` written by `squad link`) resolves to the
+ * host `.squad` without any `team.md` filesystem search.
+ *
+ * @param opts - cwd / env / registryPath overrides. All optional.
+ * @returns A {@link TeamRootInfo}; `resolved:false` with a `reason` on failure.
+ */
+export function resolveTeamRoot(opts: ResolveTeamRootOpts = {}): TeamRootInfo {
+  const cwd = opts.cwd ?? process.cwd();
+  const resolution = resolveRegistrySquad({ cwd, env: opts.env, registryPath: opts.registryPath });
+  if (!resolution) {
+    return { resolved: false, source: null, callsign: null, teamRoot: null, mode: null, reason: 'no-squad-resolved' };
+  }
+
+  const paths = resolveSquadPaths(resolution.path);
+  if (!paths) {
+    return {
+      resolved: false,
+      source: resolution.source,
+      callsign: resolution.callsign ?? null,
+      teamRoot: null,
+      mode: null,
+      reason: 'squad-paths-unresolved',
+    };
+  }
+
+  // In local mode teamDir already IS the `.squad` directory. In remote mode
+  // teamDir is the team repo root (per `squad link`); the team `.squad` is its
+  // nested `.squad/` when present, otherwise teamDir itself (a pointer that was
+  // written straight to a `.squad` directory).
+  let teamRoot: string;
+  if (paths.mode === 'remote') {
+    const nested = path.join(paths.teamDir, '.squad');
+    teamRoot = storage.existsSync(nested) && storage.isDirectorySync(nested) ? nested : paths.teamDir;
+  } else {
+    teamRoot = paths.teamDir;
+  }
+
+  return {
+    resolved: true,
+    source: resolution.source,
+    callsign: resolution.callsign ?? null,
+    teamRoot,
+    mode: paths.mode,
+  };
+}

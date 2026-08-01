@@ -7,7 +7,10 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { formatRegistryStatusBlock, resolveStatusRegistryPath } from '../status.js';
+import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { formatRegistryStatusBlock, resolveStatusRegistryPath, buildStatusJson } from '../status.js';
+import { clearResolveSquadCache } from '@wifi-aware/squad-sdk';
 import type { ResolvedSquad } from '@wifi-aware/squad-sdk/resolution-v2';
 import { defaultRegistryFilePath } from '@wifi-aware/squad-sdk/path-utils';
 
@@ -189,5 +192,98 @@ describe('formatRegistryStatusBlock() — origins source', () => {
     const block = formatRegistryStatusBlock(resolved, { SQUAD_REGISTRY_PATH: path.join('/r', 'reg.json') });
     expect(block).toContain('Match via:     origin URL');
     expect(block).not.toContain('Matched origin:');
+  });
+});
+
+// ============================================================
+// buildStatusJson — machine-readable `squad status --json` (piece 57 §C)
+// ============================================================
+
+describe('buildStatusJson()', () => {
+  const TEST_ROOT = path.join(os.tmpdir(), `.test-status-json-${randomBytes(4).toString('hex')}`);
+
+  function mkGitRepo(dir: string): void {
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+  }
+
+  function cleanup(): void {
+    clearResolveSquadCache();
+    if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  }
+
+  it('SJ.1 returns resolved=false with a reason for an unresolved directory', () => {
+    cleanup();
+    const bare = path.join(TEST_ROOT, 'bare');
+    mkGitRepo(bare);
+    try {
+      const json = buildStatusJson(bare, { SQUAD_REGISTRY_PATH: path.join(TEST_ROOT, 'registry.json') });
+      expect(json.resolved).toBe(false);
+      expect(json.teamRoot).toBeNull();
+      expect(json.managed).toBe(false);
+      expect(json.stateBackend).toBe('local');
+      expect(typeof json.reason).toBe('string');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('SJ.2 resolves a managed linked clone: managed=true, source=local, host teamRoot + stateBackend from host config', () => {
+    cleanup();
+    const host = path.join(TEST_ROOT, 'host');
+    mkGitRepo(host);
+    fs.mkdirSync(path.join(host, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(host, '.squad', 'team.md'), '# Team\n');
+    fs.writeFileSync(
+      path.join(host, '.squad', 'config.json'),
+      JSON.stringify({ version: 1, stateBackend: 'orphan' }, null, 2),
+    );
+
+    const product = path.join(TEST_ROOT, 'product');
+    mkGitRepo(product);
+    fs.mkdirSync(path.join(product, '.squad'), { recursive: true });
+    fs.writeFileSync(
+      path.join(product, '.squad', 'config.json'),
+      JSON.stringify({ version: 1, teamRoot: '../host', projectKey: null }, null, 2),
+    );
+
+    const registryPath = path.join(TEST_ROOT, 'registry.json');
+    fs.writeFileSync(
+      registryPath,
+      JSON.stringify(
+        { version: 1, squads: [{ callsign: 'demo', path: path.join(host, '.squad'), managed: true, clones: [product] }] },
+        null,
+        2,
+      ),
+    );
+
+    try {
+      const json = buildStatusJson(product, { SQUAD_REGISTRY_PATH: registryPath });
+      expect(json.resolved).toBe(true);
+      expect(json.source).toBe('local');
+      expect(json.teamRoot).toBe(path.join(host, '.squad'));
+      expect(json.managed).toBe(true);
+      expect(json.callsign).toBe('demo');
+      expect(json.stateBackend).toBe('orphan');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('SJ.3 a plain local squad reports managed=false and default stateBackend', () => {
+    cleanup();
+    const repo = path.join(TEST_ROOT, 'plain');
+    mkGitRepo(repo);
+    fs.mkdirSync(path.join(repo, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.squad', 'team.md'), '# Team\n');
+    try {
+      const json = buildStatusJson(repo, { SQUAD_REGISTRY_PATH: path.join(TEST_ROOT, 'registry.json') });
+      expect(json.resolved).toBe(true);
+      expect(json.source).toBe('local');
+      expect(json.managed).toBe(false);
+      expect(json.teamRoot).toBe(path.join(repo, '.squad'));
+      expect(json.stateBackend).toBe('local');
+    } finally {
+      cleanup();
+    }
   });
 });

@@ -25,25 +25,22 @@ You are **Squad (Coordinator)** — the orchestrator for this project's AI team.
 
 ### State & Team Root Resolution (before mode check)
 
-Before deciding Init vs Team mode, resolve where the team state actually lives:
+Before deciding Init vs Team mode, resolve where the team state actually lives. **Each step is a probe, not a gate.** Work top to bottom and STOP at the first step that yields a team root; do NOT walk the filesystem hunting for `team.md`. The managed model puts the team root, skills, and runtime config in a host clone elsewhere, so a filesystem search from the product clone finds nothing even when the team is healthy — the machine-readable resolver in step 1 is what follows the pointer for you.
 
-1. **Read `.squad/config.json`** (if it exists in the current `.squad/` directory).
-2. **External state** — if `stateLocation` is `"external"`:
-   - Resolve the external state path: `{platform_appdata}/squad/projects/{projectKey}/`
-   - The team root is that external path. Load `team.md` from there.
-3. **Remote/satellite mode** — if `teamRoot` is present:
-   - The team root is the value of `teamRoot` (absolute path to another `.squad/` directory).
-   - Load `team.md` from `{teamRoot}/.squad/team.md` (or `{teamRoot}/team.md` if teamRoot already points inside `.squad/`).
-4. **Neither** — team root is the local `.squad/` directory (default behavior).
+1. **Machine-readable resolver (authoritative).** Run `squad team-root` (alias `squad where`) for a single absolute path, or `squad status --json` and read the `teamRoot` field. Both invoke the registry- and config-aware resolver and follow any `.squad/config.json` `teamRoot` pointer to the host `.squad` for you. Exit 0 with a path → that path IS the resolved team `.squad` directory; store it as `TEAM_ROOT` and skip to the Mode-Switch Check.
+2. **Registry by callsign/origin.** If the `squad` CLI is unavailable, and `SQUAD_CALLSIGN` (or the current git origin) matches an entry in `~/.squad/registry.json`, that entry's `path` is `TEAM_ROOT`.
+3. **Config pointer.** Read `.squad/config.json` in the current `.squad/` directory; if `teamRoot` is present, `TEAM_ROOT` is that value (resolved to its `.squad/` directory).
+4. **External state.** If `stateLocation` is `"external"`, resolve `{platform_appdata}/squad/projects/{projectKey}/` and use that path as `TEAM_ROOT`.
+5. **Local default.** Otherwise the local `.squad/` directory is `TEAM_ROOT`.
 
-Store the resolved team root as `TEAM_ROOT`. All subsequent `.squad/` path references use this root.
+**None matched** — you may ONLY conclude this after explicitly attempting steps 1–5. Before declaring "no team found", cite the negative results from steps 1–5. Record the resolver exit code, the registry miss, the absent config pointer, the missing external state, and the absent local `.squad/`. Store the resolved team root as `TEAM_ROOT`. All subsequent `.squad/` path references use this root.
 
 ### Mode-Switch Check
 
-Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for repos migrating from older installs)
-- **No** → Init Mode
-- **Yes, but `## Members` has zero roster entries** → Init Mode (treat as unconfigured — scaffold exists but no team was cast)
-- **Yes, with roster entries** → Team Mode
+Read `{TEAM_ROOT}/team.md` (the single path the resolver returned — no directory search, no `.ai-team/` fallback probing).
+- **Missing, or steps 1–5 all came back negative** → Init Mode
+- **Present, but `## Members` has zero roster entries** → Init Mode (treat as unconfigured — scaffold exists but no team was cast)
+- **Present, with roster entries** → Team Mode
 
 ---
 

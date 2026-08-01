@@ -225,6 +225,7 @@ async function main(): Promise<void> {
     console.log(`  ${b}${'upgrade'.padEnd(COMMAND_COL_WIDTH)}${r}Update Squad-owned files to latest`);
     console.log(`  ${b}${'migrate'.padEnd(COMMAND_COL_WIDTH)}${r}Convert markdown <-> SDK squad formats`);
     console.log(`  ${b}${'status'.padEnd(COMMAND_COL_WIDTH)}${r}Show which squad is active and why`);
+    console.log(`  ${b}${'team-root'.padEnd(COMMAND_COL_WIDTH)}${r}Print the resolved team-root path (alias: where)`);
     console.log(`  ${b}${'roles'.padEnd(COMMAND_COL_WIDTH)}${r}List built-in Squad roles`);
     console.log(`  ${b}${'cost'.padEnd(COMMAND_COL_WIDTH)}${r}Report token usage`);
     console.log(`  ${b}${'triage'.padEnd(COMMAND_COL_WIDTH)}${r}Scan for work and categorize issues`);
@@ -339,7 +340,8 @@ async function main(): Promise<void> {
       console.log(`Usage: squad doctor [options]\n`);
       console.log(`  squad doctor [--registry-path <path>]`);
       console.log(`  squad doctor --normalize-callsigns [--apply] [--yes] [--registry-path <path>]`);
-      console.log(`  squad doctor --purge <callsign> [--yes] [--registry-path <path>]\n`);
+      console.log(`  squad doctor --purge <callsign> [--yes] [--registry-path <path>]`);
+      console.log(`  squad doctor --fix [<callsign>] [--registry-path <path>]\n`);
       console.log(`Runs system checks (Node, git, config) and`);
       console.log(`registry health (entries, paths, resolution).`);
       console.log(`Exit 0 unless registry has error-severity issues.\n`);
@@ -347,6 +349,7 @@ async function main(): Promise<void> {
       console.log(`  ${b}--normalize-callsigns${r}  Detect case-colliding callsign pairs`);
       console.log(`  ${b}--apply${r}               Merge collisions (requires --normalize-callsigns)`);
       console.log(`  ${b}--purge <callsign>${r}    Remove a registry entry entirely`);
+      console.log(`  ${b}--fix [<callsign>]${r}    Heal stale managed hosts (hydrate a missing config lane)`);
       console.log(`  ${b}--yes${r}                 Skip confirmation prompts`);
       console.log(`  ${b}--registry-path${r}       Alternate registry file\n`);
       return;
@@ -986,9 +989,37 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'team-root' || cmd === 'where') {
+    const { resolveTeamRoot } = await import('@wifi-aware/squad-sdk');
+    const wantJson = args.includes('--json');
+    const info = resolveTeamRoot({ cwd: getSquadStartDir(), env: process.env as Record<string, string | undefined> });
+    if (!info.resolved || !info.teamRoot) {
+      if (wantJson) {
+        console.log(JSON.stringify(info));
+      } else {
+        console.error(`squad: could not resolve a team root (${info.reason ?? 'no-squad-resolved'})`);
+      }
+      process.exit(1);
+    }
+    if (wantJson) {
+      console.log(JSON.stringify(info));
+    } else {
+      console.log(info.teamRoot);
+      console.log(`source=${info.source}`);
+    }
+    return;
+  }
+
   if (cmd === 'status') {
-    const sdk = await lazySquadSdk();
     const startDir = getSquadStartDir();
+    if (args.includes('--json')) {
+      const { buildStatusJson } = await import('./commands/status.js');
+      const payload = buildStatusJson(startDir, process.env as Record<string, string | undefined>);
+      console.log(JSON.stringify(payload));
+      if (!payload.resolved) process.exitCode = 1;
+      return;
+    }
+    const sdk = await lazySquadSdk();
     const resolvedSquad = sdkResolveSquadDir({ cwd: startDir, env: process.env });
     const repoSquad = resolvedSquad?.path ?? null;
     const globalPath = sdk.resolveGlobalSquadPath();
@@ -1150,6 +1181,8 @@ async function main(): Promise<void> {
     const hasApply = args.includes('--apply');
     const purgeIdx = args.indexOf('--purge');
     const hasPurge = purgeIdx !== -1;
+    const fixIdx = args.indexOf('--fix');
+    const hasFix = fixIdx !== -1;
 
     // N5: --apply requires --normalize-callsigns
     if (hasApply && !hasNormalize) {
@@ -1218,6 +1251,25 @@ async function main(): Promise<void> {
         return;
       }
       return;
+    }
+
+    // --fix mode (piece 57 §E): heal stale managed-host config lanes (a host that resolves but
+    // never hydrated its durable config lane — no team.md / no .last-config-hydrate-sha), then
+    // fall through to the normal report so the user sees the RED→GREEN transition.
+    if (hasFix) {
+      const nextArg = args[fixIdx + 1];
+      const fixCallsign = nextArg && !nextArg.startsWith('--') ? nextArg : undefined;
+      const { healManagedConfigLane } = await import('./commands/doctor.js');
+      const heal = await healManagedConfigLane({ registryPath, callsign: fixCallsign });
+      for (const h of heal.healed) {
+        console.log(`Healed managed config lane for "${h.callsign}" at ${h.hostRepoRoot}.`);
+      }
+      for (const s of heal.skipped) {
+        console.log(`Skipped "${s.callsign}": ${s.reason}`);
+      }
+      if (heal.healed.length === 0 && heal.skipped.length === 0) {
+        console.log('No stale managed config lanes found.');
+      }
     }
 
     // Unified doctor: system + registry findings in a single pass

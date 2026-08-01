@@ -26,10 +26,27 @@ export interface SquadStateMcpSpec {
   /** Argv for the executable. */
   args: string[];
   /** How the spec was resolved — useful for logging + tests. */
-  source: 'pinned' | 'insider';
+  source: 'pinned' | 'insider' | 'local-bin';
 }
 
 const PACKAGE_NAME = '@wifi-aware/squad-cli';
+
+/**
+ * Piece 57 §D (decision H1) — locally-resolvable launch spec for the
+ * `squad_state` MCP bridge in a MANAGED consumer clone.
+ *
+ * `resolveSquadStateMcpSpec` emits an `npx -y @wifi-aware/squad-cli@<tag>`
+ * command. That is correct for a published package, but the managed fork's
+ * scope is unpublished, so `npx` resolves to an E401 and Copilot can never
+ * spawn the bridge in the product clone. The managed cold-start / `squad link`
+ * path instead writes THIS spec: the `squad` binary is already on PATH (the
+ * user just ran `squad assign`/`squad link`), so `squad state-mcp` resolves on
+ * this machine with no network. H2 (a pinned `npx` follow-up) is deferred until
+ * the scope is published — see `.squad/decisions/inbox/piece-57-triage.md`.
+ */
+export function localSquadStateMcpSpec(): SquadStateMcpSpec {
+  return { command: 'squad', args: ['state-mcp'], source: 'local-bin' };
+}
 
 export interface ResolveSquadStateMcpSpecOptions {
   /**

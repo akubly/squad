@@ -29,8 +29,8 @@ export function resolveSquadDir(startDirOrOpts?: string | ResolveOpts): string |
 export const resolveSquad: typeof resolveSquadDir = resolveSquadDir;
 
 // Export public API
-export { resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePersonalSquadDir, ensureSquadPath, ensureSquadPathTriple, loadDirConfig, isConsultMode, scratchDir, scratchFile, deriveProjectKey, resolveExternalStateDir, resolveSquadHome, ensureSquadHome, resolvePresetsDir, resolveSquadState, clearResolveSquadCache } from './resolution.js';
-export type { ResolvedSquadPaths, SquadDirConfig, SquadStateContext } from './resolution.js';
+export { resolveGlobalSquadPath, resolvePersonalSquadDir, ensurePersonalSquadDir, ensureSquadPath, ensureSquadPathTriple, loadDirConfig, isConsultMode, scratchDir, scratchFile, deriveProjectKey, resolveExternalStateDir, resolveSquadHome, ensureSquadHome, resolvePresetsDir, resolveSquadState, resolveTeamRoot, clearResolveSquadCache } from './resolution.js';
+export type { ResolvedSquadPaths, SquadDirConfig, SquadStateContext, TeamRootInfo, ResolveTeamRootOpts } from './resolution.js';
 export type { Registry, RegistryEntry } from './registry.js';
 export { upsertEntry, registerEntry } from './registry.js';
 export type { ResolvedSquad, ResolveOpts, ResolveErrorCode } from './resolution-v2.js';

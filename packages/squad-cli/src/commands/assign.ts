@@ -27,6 +27,7 @@ import { fatal } from '../cli/core/errors.js';
 import { getGitRoot as _defaultGetGitRoot } from '../lib/git-root.js';
 import { INBOX_HANDLE_RE, CALLSIGN_RE } from '@wifi-aware/squad-sdk/validation';
 import { installCrossRepoHook, installProductSquadForbidHook } from '../cli/commands/install-hooks.js';
+import { runLink } from '../cli/commands/link.js';
 import { PUBLISH_ALLOWLIST_EXACT, PUBLISH_ALLOWLIST_PREFIX, resolveStateRemote, deriveStateBranch, deriveConfigBranch, hydrateTeamRootFromStateRef, hydrateTeamRootFromConfigRef, writeLastPublish } from '../cli/commands/sync.js';
 import { managedHostPath } from '@wifi-aware/squad-sdk';
 
@@ -1298,6 +1299,27 @@ async function _managedColdStart(ctx: _ManagedColdStartCtx): Promise<SquadAssign
           `${err instanceof Error ? err.message : String(err)}. ` +
           `Run "squad assign ${callsign}" from that clone` +
           ` (add --allow-origin-collision if it shares an origin with sibling squads).`,
+        );
+      }
+
+      // Piece 57 §A/§D — restore the filesystem `local` anchor in the product clone and wire the
+      // state-MCP bridge there. The managed model (pieces 55/56) moved the team root, skills, and
+      // runtime .mcp.json into the host clone but left the product clone — where agents and Copilot
+      // actually run — with NO discoverable anchor: registry-aware callers resolve, but Copilot's
+      // .mcp.json auto-load and any agent that walks cwd for the team root find nothing. `runLink`
+      // writes the product clone's `.squad/config.json` teamRoot pointer (flipping the resolver to
+      // source=local) AND the locally-resolvable `.mcp.json` bridge — the exact repair the pilot
+      // performed by hand with `squad link`. Best-effort: onboarding must not fail on the anchor.
+      try {
+        runLink(productGitRoot, managedProjectDir, {
+          quiet: true,
+          onWarn: (msg) => warnings.push(msg),
+        });
+      } catch (err) {
+        warnings.push(
+          `Managed host is ready, but restoring the local team-root anchor in "${productGitRoot}" failed: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          `Run "squad link ${managedProjectDir}" from that clone.`,
         );
       }
     }

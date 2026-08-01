@@ -231,9 +231,16 @@ const COMMAND_HELP: Record<string, HelpPrinter> = {
 
   doctor: (version) => {
     header('doctor', version, 'Validate squad setup');
-    console.log(`Usage: squad doctor\n`);
+    console.log(`Usage: squad doctor [options]\n`);
     console.log(`Checks for required files, valid config, and a reachable Copilot CLI.`);
     console.log(`Exits non-zero if any required check fails.\n`);
+    console.log(`Options:`);
+    console.log(`  ${BOLD}--normalize-callsigns${RESET}       Detect case-colliding callsign pairs`);
+    console.log(`  ${BOLD}--apply${RESET}                     Merge collisions (requires --normalize-callsigns)`);
+    console.log(`  ${BOLD}--purge <callsign>${RESET}          Remove a registry entry entirely`);
+    console.log(`  ${BOLD}--fix [<callsign>]${RESET}          Heal stale managed hosts (hydrate a missing config lane)`);
+    console.log(`  ${BOLD}--yes${RESET}                       Skip confirmation prompts`);
+    console.log(`  ${BOLD}--registry-path <path>${RESET}      Alternate registry file\n`);
   },
 
   consult: (version) => {
