@@ -107,8 +107,25 @@ export function runLink(projectDir: string, teamRepoPath: string, opts: RunLinkO
   // state bridge, and `squad` is on PATH for anyone who just ran `squad link`/`squad assign`. The
   // `squad_state` key is Squad-owned, so refreshing it to the locally-resolvable spec is intended.
   // Best-effort: a link must never fail because the .mcp.json write hit a malformed pre-existing file.
+  // Capture whether a `.mcp.json` already existed BEFORE we (possibly) create it: if Squad freshly
+  // creates the file it is machine-local (the bridge command resolves against THIS machine's install)
+  // and must be gitignored like config.json; if the repo already owned a `.mcp.json` we merged into,
+  // it is the project's file and we must not gitignore it.
+  const mcpRootPath = path.join(projectDir, '.mcp.json');
+  const mcpPreexisted = storage.existsSync(mcpRootPath);
   try {
     ensureSquadStateMcpInRoot(projectDir, getPackageVersion(), localSquadStateMcpSpec());
+    // Only ignore a `.mcp.json` that Squad itself created (machine-local); never a pre-existing one.
+    if (!mcpPreexisted) {
+      const mcpIgnoreEntry = '.mcp.json';
+      const currentIgnore = storage.existsSync(gitignorePath) ? (storage.readSync(gitignorePath) ?? '') : '';
+      if (!currentIgnore.split(/\r?\n/).some((l) => l.trim() === mcpIgnoreEntry)) {
+        const block = (currentIgnore && !currentIgnore.endsWith('\n') ? '\n' : '')
+          + '# Squad: local MCP bridge config (machine-specific command, never commit)\n'
+          + mcpIgnoreEntry + '\n';
+        storage.appendSync(gitignorePath, block);
+      }
+    }
   } catch (err) {
     const msg = `Linked, but could not wire squad_state MCP into .mcp.json: ${err instanceof Error ? err.message : String(err)}`;
     if (opts.onWarn) opts.onWarn(msg);

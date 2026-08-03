@@ -164,6 +164,35 @@ describe('piece 57 — cold-start restores the local anchor + wires the state-MC
     expect(JSON.stringify(entry)).not.toContain('@insider');
   });
 
+  it('P57.D2: a Squad-created .mcp.json is added to .gitignore (never left untracked in the product repo)', async () => {
+    const bare = await seedRemote('d2');
+    const home = makeTmpDir('d2-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    const productClone = initWorkingRepo(makeTmpDir('d2-product'), 'https://example.com/product.git');
+
+    await runAssign({
+      callsign: 'probe',
+      stateRemote: bare,
+      stateBranch: 'squad/state/probe',
+      skillsFrom: 'host',
+      inboxHandle: 'dev1',
+      home,
+      registryPath,
+      cwd: productClone,
+      _runUpgradeFn: vi.fn(async () => {}),
+      _installCrossRepoHookFn: vi.fn(() => {}),
+    });
+
+    // The bridge command is machine-local (resolves against THIS install), so the file must be
+    // gitignored — otherwise every managed consumer clone shows a stray untracked `.mcp.json`.
+    expect(fs.existsSync(path.join(productClone, '.mcp.json'))).toBe(true);
+    const gitignore = fs.readFileSync(path.join(productClone, '.gitignore'), 'utf-8');
+    expect(gitignore.split(/\r?\n/).some((l) => l.trim() === '.mcp.json')).toBe(true);
+    // git must actually consider it ignored (not merely a line in the file).
+    const ignored = execFileSync('git', ['check-ignore', '.mcp.json'], { cwd: productClone, encoding: 'utf-8' }).trim();
+    expect(ignored).toBe('.mcp.json');
+  });
+
   it('P57.B1: product clone remains bound into the managed entry clones[] (regression guard)', async () => {
     const bare = await seedRemote('b1');
     const home = makeTmpDir('b1-home');
