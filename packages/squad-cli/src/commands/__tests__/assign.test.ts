@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { runAssign } from '../assign.js';
+import { _sanitizeInboxHandle } from '../assign.js';
 import type { SquadAssignOpts, AssignKind, SquadAssignResult } from '../assign.js';
 
 const TEST_ROOT = path.join(process.cwd(), `.test-assign-${randomBytes(4).toString('hex')}`);
@@ -1204,5 +1205,115 @@ describe('runAssign: origins dedup at write boundary', () => {
     expect(origins2).toHaveLength(2);
     expect(origins2.filter(o => o === 'github.com/owner/repo')).toHaveLength(1);
     expect(origins2.filter(o => o === 'github.com/owner/fork')).toHaveLength(1);
+  });
+});
+
+// ============================================================
+// Piece 58 §B — inbox-handle sanitization (decision I)
+// ============================================================
+
+describe('piece 58 §B: _sanitizeInboxHandle (decision I)', () => {
+  it('P58.I1 passes an already-valid handle through unchanged', () => {
+    expect(_sanitizeInboxHandle('dev1')).toBe('dev1');
+    expect(_sanitizeInboxHandle('aaron-kubly')).toBe('aaron-kubly');
+  });
+
+  it('P58.I2 lowercases and hyphenates a human name', () => {
+    expect(_sanitizeInboxHandle('Aaron Kubly')).toBe('aaron-kubly');
+    expect(_sanitizeInboxHandle('  Jane   Q. Doe  ')).toBe('jane-q-doe');
+  });
+
+  it('P58.I3 strips leading non-letters so the handle starts with a letter', () => {
+    expect(_sanitizeInboxHandle('123abc')).toBe('abc');
+    expect(_sanitizeInboxHandle('42-team')).toBe('team');
+  });
+
+  it('P58.I4 returns undefined for an unsanitizable value', () => {
+    expect(_sanitizeInboxHandle('123')).toBeUndefined();
+    expect(_sanitizeInboxHandle('!!!')).toBeUndefined();
+    expect(_sanitizeInboxHandle('')).toBeUndefined();
+  });
+});
+
+// ============================================================
+// Piece 58 §B — origin-collision interactive prompt (decision J)
+// ============================================================
+
+describe('piece 58 §B: origin-collision interactive prompt (decision J)', () => {
+  let hostDir: string;
+  let cloneDir: string;
+  let registryPath: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    hostDir = makeDir('host');
+    const squadPath = makeSquadHost(hostDir);
+    const hostDir2 = makeDir('host2');
+    const squadPath2 = makeSquadHost(hostDir2);
+    const hostDir3 = makeDir('host3');
+    const squadPath3 = makeSquadHost(hostDir3);
+    cloneDir = makeDir('clone');
+    registryPath = path.join(TEST_ROOT, 'registry.json');
+    writeRegistry(registryPath, [
+      { callsign: 'alpha', path: squadPath, origins: [], clones: [] },
+      { callsign: 'beta', path: squadPath2, origins: ['github.com/example/shared'], clones: [] },
+      { callsign: 'gamma', path: squadPath3, origins: ['github.com/example/shared'], clones: [] },
+    ]);
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  const collisionOpts = (extra: Partial<SquadAssignOpts>): SquadAssignOpts => ({
+    callsignOrUrl: 'alpha',
+    registryPath,
+    cwd: cloneDir,
+    getGitRoot: (dir) => dir,
+    getRemoteUrls: () => ['https://github.com/example/shared'],
+    ...extra,
+  });
+
+  it('J1 non-interactive still hard-requires --allow-origin-collision', async () => {
+    await expect(runAssign(collisionOpts({ _interactive: false })))
+      .rejects.toThrow(/ERR_ASSIGN_ORIGIN_AMBIGUITY/);
+  });
+
+  it('J2 interactive prompt confirmed → records the assignment', async () => {
+    const result = await runAssign(collisionOpts({
+      _interactive: true,
+      _promptOriginCollisionFn: () => true,
+    }));
+    expect(result.kind).toBe('assigned');
+    const warnings = (result as { warnings: string[] }).warnings;
+    expect(warnings.some(w => /confirmed interactively/.test(w))).toBe(true);
+  });
+
+  it('J3 interactive prompt declined → cancels', async () => {
+    await expect(runAssign(collisionOpts({
+      _interactive: true,
+      _promptOriginCollisionFn: () => false,
+    }))).rejects.toThrow(/cancelled/);
+  });
+
+  it('J4 --yes never prompts (hard-requires the flag) even when interactive', async () => {
+    let prompted = false;
+    await expect(runAssign(collisionOpts({
+      _interactive: true,
+      yes: true,
+      _promptOriginCollisionFn: () => { prompted = true; return true; },
+    }))).rejects.toThrow(/ERR_ASSIGN_ORIGIN_AMBIGUITY/);
+    expect(prompted).toBe(false);
+  });
+
+  it('J5 --allow-origin-collision bypasses the prompt entirely', async () => {
+    let prompted = false;
+    const result = await runAssign(collisionOpts({
+      allowOriginCollision: true,
+      _interactive: true,
+      _promptOriginCollisionFn: () => { prompted = true; return true; },
+    }));
+    expect(result.kind).toBe('assigned');
+    expect(prompted).toBe(false);
   });
 });

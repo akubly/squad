@@ -39,9 +39,21 @@ export interface RegistryEntry {
   [key: string]: unknown;
 }
 
+export interface RegistryDefaults {
+  /**
+   * System-wide default state remote (piece 58 §B, decision H1). Consulted by
+   * `squad assign --callsign <cs>` when neither `--state-remote` nor `SQUAD_STATE_REMOTE`
+   * supplies a value, so a managed consumer can onboard from callsign alone.
+   */
+  stateRemote?: string;
+  [key: string]: unknown;
+}
+
 export interface Registry {
   version: number;
   squads: RegistryEntry[];
+  /** Optional system-wide defaults (piece 58 §B / decision H1). */
+  defaults?: RegistryDefaults;
 }
 
 type RegistryOptions = {
@@ -277,7 +289,29 @@ export function validateRegistry(obj: unknown): Registry {
     return entry;
   });
 
-  return { version: 1, squads };
+  // Piece 58 §B / decision H1 — tolerate and round-trip a top-level `defaults` block carrying the
+  // system-wide state remote (and any forward-compatible sibling keys).
+  let defaults: RegistryDefaults | undefined;
+  if (obj['defaults'] !== undefined) {
+    if (!isRecord(obj['defaults'])) {
+      throw validationError('Registry defaults must be an object.');
+    }
+    const rawDefaults = obj['defaults'];
+    const out: RegistryDefaults = {};
+    if (rawDefaults['stateRemote'] !== undefined) {
+      if (typeof rawDefaults['stateRemote'] !== 'string') {
+        throw validationError('Registry defaults.stateRemote must be a string.');
+      }
+      out.stateRemote = rawDefaults['stateRemote'];
+    }
+    // Preserve unknown forward-compatible default fields for round-trip fidelity.
+    for (const [key, val] of Object.entries(rawDefaults)) {
+      if (!(key in out)) out[key] = val;
+    }
+    defaults = out;
+  }
+
+  return { version: 1, squads, ...(defaults ? { defaults } : {}) };
 }
 
 export function upsertEntry(entry: RegistryEntry, opts: { onWarn?: (msg: string) => void } = {}): RegistryEntry {

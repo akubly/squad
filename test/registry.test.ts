@@ -78,3 +78,52 @@ describe('RegistryEntry — piece-32 state fields', () => {
     expect(parsed.squads[0]!.developerAlias).toBeUndefined();
   });
 });
+
+describe('Registry defaults — piece 58 §B / decision H1', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = makeCaseDir('p58-defaults');
+  });
+
+  afterEach(() => {
+    fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  });
+
+  it('P58.B1 tolerates and round-trips a top-level defaults.stateRemote block', () => {
+    const registryPath = path.join(dir, 'registry.json');
+    const json = JSON.stringify({
+      version: 1,
+      squads: [{ callsign: 'alpha', path: squadPath(dir) }],
+      defaults: { stateRemote: 'https://example.com/shared.git' },
+    });
+    const parsed = parseRegistry(json);
+    expect(parsed.defaults?.stateRemote).toBe('https://example.com/shared.git');
+
+    writeRegistry(registryPath, parsed);
+    const { registry: loaded } = loadRegistryFromDisk({ registryPath });
+    expect(loaded!.defaults?.stateRemote).toBe('https://example.com/shared.git');
+  });
+
+  it('P58.B2 a registry without defaults loads with defaults undefined', () => {
+    const parsed = parseRegistry(JSON.stringify({ version: 1, squads: [{ callsign: 'beta', path: squadPath(dir) }] }));
+    expect(parsed.defaults).toBeUndefined();
+  });
+
+  it('P58.B3 preserves forward-compatible sibling keys inside defaults', () => {
+    const parsed = parseRegistry(JSON.stringify({
+      version: 1,
+      squads: [],
+      defaults: { stateRemote: 'origin', futureKnob: 'keep-me' },
+    }));
+    expect(parsed.defaults?.stateRemote).toBe('origin');
+    expect((parsed.defaults as Record<string, unknown>).futureKnob).toBe('keep-me');
+  });
+
+  it('P58.B4 rejects a non-object defaults / non-string stateRemote', () => {
+    expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [], defaults: 'nope' })))
+      .toThrow(/defaults must be an object/);
+    expect(() => parseRegistry(JSON.stringify({ version: 1, squads: [], defaults: { stateRemote: 42 } })))
+      .toThrow(/defaults\.stateRemote must be a string/);
+  });
+});

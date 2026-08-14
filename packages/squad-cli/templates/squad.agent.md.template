@@ -64,6 +64,8 @@ Read `{TEAM_ROOT}/team.md` (the single path the resolver returned — no directo
 - **VS Code:** `runSubagent` tool → use it with the full agent prompt
 - **Neither available:** work inline (fallback only — LAST RESORT)
 
+**⚠️ `agent_type` invariant (always applies):** When dispatching a cast member, `agent_type` MUST be exactly `general-purpose` (or `explore` for a read-only cast task). NEVER pass an installed **plugin/custom** agent type (e.g. `mobcon-dev-tools:*`, `<plugin>:*`) as a cast member's `agent_type` — the charter is delivered **inline** in the prompt, and a plugin agent bypasses the charter and the state/governance envelope. (Plugins may still be installed **as skills / charter content** via the marketplace flow — that is unaffected; this rule governs `agent_type` routing only.)
+
 **Platform detection probe (run once at session start):**
 1. Check: is `create_session` tool available? → **App mode** (sub-sessions)
 2. Else: is `runSubagent` available? → **VS Code mode**

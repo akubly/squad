@@ -93,11 +93,14 @@ afterAll(() => {
 // ─── A — flag-driven cold-start identity (routing) ──────────────────────────────
 
 describe('piece 55 — A: flag-driven managed cold-start routing', () => {
-  it('A1 --callsign without --state-remote teaches the managed cold-start form', async () => {
-    await expect(runAssign({ callsign: 'probe', cwd: makeTmpDir('a1') })).rejects.toMatchObject({
+  it('A1 --callsign without any resolvable state remote teaches the managed cold-start form', async () => {
+    // Piece 58 §B: with no --state-remote, no SQUAD_STATE_REMOTE, and no registry.defaults.stateRemote,
+    // `--callsign` alone still cannot onboard — teach the (now callsign-first) form.
+    const iso = { registryPath: path.join(makeTmpDir('a1-reg'), 'registry.json'), env: {} };
+    await expect(runAssign({ callsign: 'probe', cwd: makeTmpDir('a1'), ...iso })).rejects.toMatchObject({
       code: 'ERR_ASSIGN_MANAGED_MISSING_IDENTITY',
     });
-    await expect(runAssign({ callsign: 'probe', cwd: makeTmpDir('a1b') })).rejects.toThrow(/--state-remote and --state-branch/);
+    await expect(runAssign({ callsign: 'probe', cwd: makeTmpDir('a1b'), ...iso })).rejects.toThrow(/--state-remote/);
   });
 
   it('A2 managed cold-start rejects a non-host --skills-from', async () => {
@@ -232,6 +235,201 @@ describe('piece 55 — B/C/D: managed cold-start hydrate + wire', { timeout: 60_
       const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
       expect(registry.squads.find((s: { callsign?: string }) => s.callsign === 'probe')).toBeUndefined();
     }
+  });
+});
+
+// ─── Piece 58 §B — assign ergonomics: derived/defaulted/system-wide identity ─────
+
+describe('piece 58 §B — assign --callsign ergonomics', { timeout: 90_000 }, () => {
+  async function seedOrphans(seed: string): Promise<void> {
+    await seedConfigOrphan(seed, 'squad/config/probe', { remote: 'origin' });
+    seedOrphanBranch(seed, 'squad/state/probe', { '.squad/log/session.md': '# session\n' });
+  }
+
+  it('B1 --callsign with SQUAD_STATE_REMOTE derives the full managed identity', async () => {
+    const bare = makeTmpDir('b1-bare');
+    initBareRepo(bare);
+    const seed = initWorkingRepo(makeTmpDir('b1-seed'), bare);
+    await scaffold(seed);
+    await seedOrphans(seed);
+
+    const home = makeTmpDir('b1-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    const result = await runAssign({
+      callsign: 'probe',
+      home,
+      registryPath,
+      cwd: makeTmpDir('b1-cwd'),
+      noBind: true,
+      env: { SQUAD_STATE_REMOTE: bare, SQUAD_INBOX_HANDLE: 'dev1' },
+      _runUpgradeFn: vi.fn(async () => {}),
+      _installCrossRepoHookFn: vi.fn(() => {}),
+    });
+
+    expect(result.kind).toBe('assigned');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    const entry = registry.squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+    expect(entry.managed).toBe(true);
+    expect(entry.stateRemote).toBe(bare);
+    expect(entry.stateBranch).toBe('squad/state/probe');
+    expect(entry.configBranch).toBe('squad/config/probe');
+    expect(entry.inboxHandle).toBe('dev1');
+  });
+
+  it('B2 --callsign with registry.defaults.stateRemote (H1) derives the managed identity', async () => {
+    const bare = makeTmpDir('b2-bare');
+    initBareRepo(bare);
+    const seed = initWorkingRepo(makeTmpDir('b2-seed'), bare);
+    await scaffold(seed);
+    await seedOrphans(seed);
+
+    const home = makeTmpDir('b2-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    // Pre-seed a system-wide default state remote (decision H1).
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(registryPath, JSON.stringify({ version: 1, squads: [], defaults: { stateRemote: bare } }, null, 2));
+
+    const result = await runAssign({
+      callsign: 'probe',
+      home,
+      registryPath,
+      cwd: makeTmpDir('b2-cwd'),
+      noBind: true,
+      env: { SQUAD_INBOX_HANDLE: 'dev2' },
+      _runUpgradeFn: vi.fn(async () => {}),
+      _installCrossRepoHookFn: vi.fn(() => {}),
+    });
+
+    expect(result.kind).toBe('assigned');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    // The system-wide default is preserved across the write.
+    expect(registry.defaults.stateRemote).toBe(bare);
+    const entry = registry.squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+    expect(entry.stateRemote).toBe(bare);
+    expect(entry.stateBranch).toBe('squad/state/probe');
+    expect(entry.configBranch).toBe('squad/config/probe');
+    expect(entry.inboxHandle).toBe('dev2');
+  });
+
+  it('B3 the full explicit form yields a registry entry identical to the short form', async () => {
+    const bare = makeTmpDir('b3-bare');
+    initBareRepo(bare);
+    const seed = initWorkingRepo(makeTmpDir('b3-seed'), bare);
+    await scaffold(seed);
+    await seedOrphans(seed);
+
+    const home = makeTmpDir('b3-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    const seams = { home, registryPath, noBind: true, _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}) };
+
+    // Short form.
+    await runAssign({ callsign: 'probe', cwd: makeTmpDir('b3-cwd1'), env: { SQUAD_STATE_REMOTE: bare, SQUAD_INBOX_HANDLE: 'dev1' }, ...seams });
+    const entryShort = JSON.parse(fs.readFileSync(registryPath, 'utf-8')).squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+
+    // Full explicit form — idempotent re-run against the same managed host must produce an
+    // identical entry (proves the short form derives exactly the explicit values).
+    await runAssign({
+      callsign: 'probe',
+      cwd: makeTmpDir('b3-cwd2'),
+      stateRemote: bare,
+      stateBranch: 'squad/state/probe',
+      configBranch: 'squad/config/probe',
+      inboxHandle: 'dev1',
+      skillsFrom: 'host',
+      env: {},
+      ...seams,
+    });
+    const entryExplicit = JSON.parse(fs.readFileSync(registryPath, 'utf-8')).squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+
+    expect(entryExplicit).toEqual(entryShort);
+  });
+
+  it('B4 --callsign with no resolvable state remote fails naming all three sources', async () => {
+    const home = makeTmpDir('b4-home');
+    let err: unknown;
+    try {
+      await runAssign({
+        callsign: 'probe',
+        home,
+        registryPath: path.join(home, '.squad', 'registry.json'),
+        cwd: makeTmpDir('b4-cwd'),
+        env: {},
+      });
+    } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(AssignError);
+    expect((err as AssignError).code).toBe('ERR_ASSIGN_MANAGED_MISSING_IDENTITY');
+    expect((err as Error).message).toMatch(/--state-remote/);
+    expect((err as Error).message).toMatch(/SQUAD_STATE_REMOTE/);
+    expect((err as Error).message).toMatch(/registry\.defaults\.stateRemote/);
+  });
+
+  it('B5a inbox precedence: --inbox-handle flag beats SQUAD_INBOX_HANDLE', async () => {
+    const bare = makeTmpDir('b5a-bare');
+    initBareRepo(bare);
+    const seed = initWorkingRepo(makeTmpDir('b5a-seed'), bare);
+    await scaffold(seed);
+    await seedOrphans(seed);
+    const home = makeTmpDir('b5a-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    await runAssign({
+      callsign: 'probe', stateRemote: bare, home, registryPath,
+      cwd: makeTmpDir('b5a-cwd'), noBind: true,
+      inboxHandle: 'flagwins', env: { SQUAD_INBOX_HANDLE: 'envhandle' },
+      _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
+    });
+    const entry = JSON.parse(fs.readFileSync(registryPath, 'utf-8')).squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+    expect(entry.inboxHandle).toBe('flagwins');
+  });
+
+  it('B5b inbox precedence: SQUAD_INBOX_HANDLE (sanitized) beats git user.name', async () => {
+    const bare = makeTmpDir('b5b-bare');
+    initBareRepo(bare);
+    const seed = initWorkingRepo(makeTmpDir('b5b-seed'), bare);
+    await scaffold(seed);
+    await seedOrphans(seed);
+    const home = makeTmpDir('b5b-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    await runAssign({
+      callsign: 'probe', stateRemote: bare, home, registryPath,
+      cwd: makeTmpDir('b5b-cwd'), noBind: true,
+      env: { SQUAD_INBOX_HANDLE: 'From Env Name' },
+      _runUpgradeFn: vi.fn(async () => {}), _installCrossRepoHookFn: vi.fn(() => {}),
+    });
+    const entry = JSON.parse(fs.readFileSync(registryPath, 'utf-8')).squads.find((s: { callsign?: string }) => s.callsign === 'probe');
+    expect(entry.inboxHandle).toBe('from-env-name');
+  });
+
+  it('B6 (review F4) a bad SQUAD_INBOX_HANDLE does not preempt the warm-entry teaching path', async () => {
+    // A warm (unmanaged) entry already exists for the callsign. The short-form `--callsign` path
+    // short-circuits to the teaching error (bind via `squad assign <callsign>`) and must NOT throw
+    // an inbox-handle error — the handle is only resolved on a genuine cold-start, AFTER the
+    // warm-entry check. Regression for the pre-fix ordering where _resolveInboxHandle threw first.
+    const home = makeTmpDir('b6-home');
+    const registryPath = path.join(home, '.squad', 'registry.json');
+    const warmSquadDir = path.join(makeTmpDir('b6-warm'), '.squad');
+    fs.mkdirSync(warmSquadDir, { recursive: true });
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    fs.writeFileSync(registryPath, JSON.stringify({
+      version: 1,
+      squads: [{ callsign: 'probe', path: warmSquadDir }],
+    }, null, 2));
+
+    let err: unknown;
+    try {
+      await runAssign({
+        callsign: 'probe',
+        home,
+        registryPath,
+        cwd: makeTmpDir('b6-cwd'),
+        noBind: true,
+        // A resolvable state remote enters the cold-start branch; the unsanitizable handle would
+        // throw if it were resolved before the warm-entry check.
+        env: { SQUAD_STATE_REMOTE: makeTmpDir('b6-bare'), SQUAD_INBOX_HANDLE: '!!!' },
+      });
+    } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(AssignError);
+    expect((err as AssignError).code).toBe('ERR_ASSIGN_MANAGED_MISSING_IDENTITY');
+    expect((err as AssignError).code).not.toBe('ERR_ASSIGN_INVALID_INBOX_HANDLE');
   });
 });
 

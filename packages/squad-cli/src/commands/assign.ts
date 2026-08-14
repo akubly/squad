@@ -230,6 +230,7 @@ export type AssignErrorCode =
   | 'ERR_ASSIGN_NO_TEAM_MD'
   | 'ERR_ASSIGN_MANAGED_NO_TEAM_MD'
   | 'ERR_ASSIGN_MANAGED_MISSING_IDENTITY'
+  | 'ERR_ASSIGN_INVALID_INBOX_HANDLE'
   | 'ERR_ASSIGN_INVALID_SKILLS_SOURCE'
   | 'INVALID_ALIAS';
 
@@ -318,6 +319,18 @@ export interface SquadAssignOpts {
   /** --no-bind (piece 56 §A / decision H1): opt out of the managed cold-start auto-binding the
    *  invoking product clone. When set, cold-start stands up the managed host only. */
   noBind?: boolean;
+  /**
+   * @internal Piece 58 §B / decision J — injectable interactivity flag for the warm-path
+   * origin-collision guard. When omitted, interactivity is detected from the TTY. Non-interactive
+   * (or `--yes`) invocations keep hard-requiring `--allow-origin-collision`.
+   */
+  _interactive?: boolean;
+  /**
+   * @internal Piece 58 §B / decision J — injectable prompt seam for the warm-path origin-collision
+   * guard. Returns true to record the assignment anyway, false to cancel. Defaults to a stdin
+   * confirmation prompt in interactive mode.
+   */
+  _promptOriginCollisionFn?: (callsign: string, names: string) => boolean;
 }
 
 function _isUrlArg(s: string): boolean {
@@ -358,6 +371,124 @@ async function _defaultManagedCloneCommand(url: string, dest: string): Promise<v
     ['clone', '--filter=blob:none', '--no-checkout', '--', url, dest],
     { stdio: 'inherit' },
   );
+}
+
+/**
+ * Piece 58 §B / decision I — coerce an arbitrary identity string (e.g. `git config user.name`) into
+ * a valid inbox handle: lowercase, `/^[a-z][a-z0-9-]{1,38}$/`. Returns `undefined` when the input
+ * carries no usable letters (unsanitizable) so the caller can fail with an actionable error.
+ */
+export function _sanitizeInboxHandle(raw: string): string | undefined {
+  const t = raw.trim().toLowerCase();
+  if (!t) return undefined;
+  if (INBOX_HANDLE_RE.test(t)) return t;
+  let s = t
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (s.length > 39) s = s.slice(0, 39).replace(/-+$/, '');
+  return INBOX_HANDLE_RE.test(s) ? s : undefined;
+}
+
+/** Read `git config user.name` in `cwd` (falls back to global/system). Empty/errored → undefined. */
+function _readGitUserName(cwd: string): string | undefined {
+  try {
+    const out = _assignExecFileSync('git', ['-C', cwd, 'config', 'user.name'], {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString().trim();
+    return out || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Piece 58 §B / decision I — resolve the inbox handle by precedence: explicit `--inbox-handle`
+ * (validated by Guard 0) > `SQUAD_INBOX_HANDLE` env > sanitized `git config user.name`. A source that
+ * is present but cannot be sanitized to a valid handle is a hard error (do not silently drop it).
+ * Returns `undefined` only when no source supplies a value at all.
+ */
+function _resolveInboxHandle(
+  opts: SquadAssignOpts,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): string | undefined {
+  if (opts.inboxHandle !== undefined) return opts.inboxHandle;
+
+  const envHandle = env['SQUAD_INBOX_HANDLE']?.trim();
+  if (envHandle) {
+    const sanitized = _sanitizeInboxHandle(envHandle);
+    if (!sanitized) {
+      throw new AssignError(
+        'ERR_ASSIGN_INVALID_INBOX_HANDLE',
+        `SQUAD_INBOX_HANDLE "${envHandle}" cannot be sanitized to a valid inbox handle ` +
+        `(/${INBOX_HANDLE_RE.source}/). Pass --inbox-handle explicitly.`,
+      );
+    }
+    return sanitized;
+  }
+
+  const gitName = _readGitUserName(cwd);
+  if (gitName) {
+    const sanitized = _sanitizeInboxHandle(gitName);
+    if (!sanitized) {
+      throw new AssignError(
+        'ERR_ASSIGN_INVALID_INBOX_HANDLE',
+        `git config user.name "${gitName}" cannot be sanitized to a valid inbox handle ` +
+        `(/${INBOX_HANDLE_RE.source}/). Pass --inbox-handle or set SQUAD_INBOX_HANDLE.`,
+      );
+    }
+    return sanitized;
+  }
+
+  return undefined;
+}
+
+/**
+ * Piece 58 §B / decision H1 — resolve the effective managed-cold-start state remote by precedence:
+ * explicit `--state-remote` > `SQUAD_STATE_REMOTE` env > `registry.defaults.stateRemote`. Returns
+ * `undefined` when no source supplies one, so the caller can teach the onboarding form.
+ */
+function _resolveEffectiveStateRemote(
+  opts: SquadAssignOpts,
+  env: Record<string, string | undefined>,
+): string | undefined {
+  if (opts.stateRemote) return opts.stateRemote;
+
+  const envRemote = env['SQUAD_STATE_REMOTE']?.trim();
+  if (envRemote) return envRemote;
+
+  const registryFilePath = resolveRegistryFilePath({ explicit: opts.registryPath, env: env as Record<string, string> });
+  if (!registryFilePath) return undefined;
+  try {
+    const { registry } = loadRegistryFromDisk({ registryPath: registryFilePath });
+    const fromDefaults = registry?.defaults?.stateRemote?.trim();
+    return fromDefaults ? fromDefaults : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Decision J — default interactive confirmation for the warm-path origin-collision guard. */
+function _defaultPromptOriginCollision(callsign: string, names: string): boolean {
+  const answer = _promptStdin(
+    `Your fetch remotes also match origins registered for squads ${names}.\n` +
+    `Record this assignment to "${callsign}" anyway? [y/N] `,
+  );
+  return /^y(es)?$/i.test(answer.trim());
+}
+
+/** Minimal synchronous stdin prompt (decision J). Returns '' on any read failure. */
+function _promptStdin(question: string): string {
+  try {
+    process.stdout.write(question);
+    const buf = Buffer.alloc(256);
+    const bytes = fs.readSync(0, buf, 0, 256, null);
+    return buf.toString('utf-8', 0, bytes);
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -427,14 +558,38 @@ export async function runAssign(opts: SquadAssignOpts): Promise<SquadAssignResul
       if (hasStateIdentity && !warmEntry) {
         return _managedColdStart({ callsign, opts, cwd, writeRegistryFn, gitRootFn, remotesFn });
       }
-      // --callsign present but the managed identity is incomplete (or a warm entry already exists):
+      // Piece 58 §B — reduce the managed cold-start to `--callsign` alone: derive the state/config
+      // branches, default skills-from=host, resolve the inbox handle (flag→env→git), and resolve the
+      // state remote system-wide (flag→SQUAD_STATE_REMOTE→registry.defaults.stateRemote, decision H1).
+      const env = opts.env ?? process.env;
+      const resolvedStateRemote = _resolveEffectiveStateRemote(opts, env);
+      if (resolvedStateRemote) {
+        // Piece 58 review (F4) — run the warm-entry check BEFORE resolving the inbox handle.
+        // `_resolveInboxHandle` throws on an unsanitizable SQUAD_INBOX_HANDLE / git user.name; a
+        // pre-existing warm entry short-circuits to the teaching error below, so a bad inbox handle
+        // must not preempt it. `_findWarmEntry` keys on callsign only (registry path + env), so the
+        // derived branches / handle are irrelevant to the lookup.
+        if (!_findWarmEntry(callsign, opts)) {
+          const resolvedInboxHandle = _resolveInboxHandle(opts, env, cwd);
+          const effectiveOpts: SquadAssignOpts = {
+            ...opts,
+            stateRemote: resolvedStateRemote,
+            stateBranch: deriveStateBranch(opts.stateBranch, callsign),
+            configBranch: deriveConfigBranch(opts.configBranch, callsign),
+            skillsFrom: opts.skillsFrom ?? 'host',
+            ...(resolvedInboxHandle !== undefined ? { inboxHandle: resolvedInboxHandle } : {}),
+          };
+          return _managedColdStart({ callsign, opts: effectiveOpts, cwd, writeRegistryFn, gitRootFn, remotesFn });
+        }
+      }
+      // --callsign present but no state remote resolvable (or a warm entry already exists):
       // teach the one-command managed cold-start form rather than the generic missing-arg error.
       throw new AssignError(
         'ERR_ASSIGN_MANAGED_MISSING_IDENTITY',
-        `To onboard a shared-squad consumer with --callsign, also pass --state-remote and --state-branch:\n` +
-        `  squad assign --callsign ${callsign} \\\n` +
-        `    --state-remote <url> --state-branch squad/state/${callsign} \\\n` +
-        `    --config-branch squad/config/${callsign} --inbox-handle <handle> --skills-from host\n` +
+        `To onboard a shared-squad consumer with --callsign, supply a state remote via one of:\n` +
+        `    --state-remote <url>  |  SQUAD_STATE_REMOTE=<url>  |  registry.defaults.stateRemote\n` +
+        `  The state/config branches default to squad/state/${callsign} and squad/config/${callsign}:\n` +
+        `  squad assign --callsign ${callsign} --state-remote <url>\n` +
         `Or bind an existing squad by callsign:\n` +
         `  squad assign ${callsign}`,
       );
@@ -541,6 +696,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
       const newRegistry: Registry = {
         version: registry?.version ?? 1,
         squads: [...otherSquads, updatedEntry],
+        ...(registry?.defaults ? { defaults: registry.defaults } : {}),
       };
       fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
       writeRegistryFn(registryFilePath, newRegistry);
@@ -619,12 +775,28 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
 
   if (originMatchingEntries.length >= 2 && !targetOriginsMatch && !opts.allowOriginCollision) {
     const names = originMatchingEntries.map(e => `"${e.callsign ?? e.path}"`).join(', ');
-    throw new AssignError(
-      'ERR_ASSIGN_ORIGIN_AMBIGUITY',
-      `Your fetch remotes also match origins registered for squads ${names}.\n` +
-      `  You are assigning to "${callsign}". Re-run with --allow-origin-collision to record ` +
-      `this assignment, or remove the overlapping remote.`,
-    );
+    // Piece 58 §B / decision J: in an interactive session, auto-detect the collision and prompt.
+    // Non-interactive invocations (and `--yes`) keep hard-requiring --allow-origin-collision.
+    const interactive = opts._interactive ?? (!opts.yes && !!process.stdout.isTTY && !!process.stdin.isTTY);
+    if (interactive && !opts.yes) {
+      const promptFn = opts._promptOriginCollisionFn ?? _defaultPromptOriginCollision;
+      if (!promptFn(callsign, names)) {
+        throw new AssignError(
+          'ERR_ASSIGN_ORIGIN_AMBIGUITY',
+          `Assignment to "${callsign}" cancelled: fetch remotes also match squads ${names}.`,
+        );
+      }
+      warnings.push(
+        `Recorded assignment to "${callsign}" despite origin overlap with ${names} (confirmed interactively).`,
+      );
+    } else {
+      throw new AssignError(
+        'ERR_ASSIGN_ORIGIN_AMBIGUITY',
+        `Your fetch remotes also match origins registered for squads ${names}.\n` +
+        `  You are assigning to "${callsign}". Re-run with --allow-origin-collision to record ` +
+        `this assignment, or remove the overlapping remote.`,
+      );
+    }
   }
   if (originMatchingEntries.length >= 1) {
     const names = originMatchingEntries.map(e => `"${e.callsign ?? e.path}"`).join(', ');
@@ -656,6 +828,7 @@ async function _warmPath(ctx: _WarmCtx): Promise<SquadAssignResult> {
   const newRegistry: Registry = {
     version: registry?.version ?? 1,
     squads: [...otherSquads, updatedEntry],
+    ...(registry?.defaults ? { defaults: registry.defaults } : {}),
   };
 
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
@@ -963,6 +1136,7 @@ async function _coldStart(ctx: _ColdStartCtx): Promise<SquadAssignResult> {
   const newRegistry: Registry = {
     version: registry?.version ?? 1,
     squads: [...otherSquads, updatedEntry],
+    ...(registry?.defaults ? { defaults: registry.defaults } : {}),
   };
 
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
@@ -1223,7 +1397,12 @@ async function _managedColdStart(ctx: _ManagedColdStartCtx): Promise<SquadAssign
     ...(opts.inboxHandle !== undefined ? { inboxHandle: opts.inboxHandle } : {}),
   };
   const otherSquads = existingSquads.filter(s => s.callsign !== callsign);
-  const newRegistry: Registry = { version: registry?.version ?? 1, squads: [...otherSquads, managedEntry] };
+  const newRegistry: Registry = {
+    version: registry?.version ?? 1,
+    squads: [...otherSquads, managedEntry],
+    // Piece 58 §B / decision H1 — preserve the system-wide defaults block across the write.
+    ...(registry?.defaults ? { defaults: registry.defaults } : {}),
+  };
   fs.mkdirSync(path.dirname(registryFilePath), { recursive: true });
   writeRegistryFn(registryFilePath, newRegistry);
 

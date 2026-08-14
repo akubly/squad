@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -461,6 +461,67 @@ describe('resolveSquadState()', () => {
     const ctx = resolveSquadState(TMP);
     expect(ctx).not.toBeNull();
     expect(ctx!.storage.constructor.name).toBe('StateBackendStorageAdapter');
+  });
+});
+
+// ============================================================================
+// resolveSquadState() dual-root managed consumer (piece 58 §E)
+// ============================================================================
+describe('resolveSquadState() dual-root managed consumer (piece 58 E)', () => {
+  const HOST = join(process.cwd(), `.test-p58e-host-${randomBytes(4).toString('hex')}`);
+  const CONSUMER = join(process.cwd(), `.test-p58e-consumer-${randomBytes(4).toString('hex')}`);
+  const norm = (p: string) => p.replace(/\\/g, '/');
+  function initRepoAt(dir: string): void {
+    mkdirSync(dir, { recursive: true });
+    execSync('git init', { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync('git config user.email "test@test.com"', { cwd: dir });
+    execSync('git config user.name "Test"', { cwd: dir });
+    writeFileSync(join(dir, 'README.md'), '# test\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m init', { cwd: dir });
+  }
+  beforeEach(() => {
+    clearResolveSquadCache();
+    for (const d of [HOST, CONSUMER]) if (existsSync(d)) rmSync(d, { recursive: true, force: true });
+    // Host clone: holds the team `.squad/` with an orphan state backend.
+    initRepoAt(HOST);
+    mkdirSync(join(HOST, '.squad'), { recursive: true });
+    writeFileSync(join(HOST, '.squad', 'team.md'), '# Team');
+    writeFileSync(join(HOST, '.squad', 'config.json'), JSON.stringify({ version: 1, teamRoot: '.', stateBackend: 'orphan' }));
+    // Consumer clone: only anchor is a `.squad/config.json` pointer to the host repo root.
+    initRepoAt(CONSUMER);
+    mkdirSync(join(CONSUMER, '.squad'), { recursive: true });
+    const rel = norm(relative(CONSUMER, HOST));
+    writeFileSync(join(CONSUMER, '.squad', 'config.json'), JSON.stringify({ version: 1, teamRoot: rel }));
+  });
+  afterEach(() => {
+    clearResolveSquadCache();
+    for (const d of [HOST, CONSUMER]) if (existsSync(d)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('E.1 linked consumer resolves the HOST orphan backend and anchors teamDir at host .squad', () => {
+    const ctx = resolveSquadState(CONSUMER);
+    if (!ctx) throw new Error('Expected a resolved managed-consumer squad state context');
+    expect(ctx.paths.mode).toBe('remote');
+    // Backend must come from the HOST `.squad/config.json` (orphan), not the
+    // consumer's pointer-only config (which would default to local).
+    expect(ctx.backend.name).toBe('orphan');
+    // teamDir must be the host `.squad/` directory, not the host repo root.
+    expect(norm(ctx.paths.teamDir)).toBe(norm(join(HOST, '.squad')));
+    // repoRoot must be the HOST repo (where the orphan branch lives).
+    expect(norm(ctx.repoRoot)).toBe(norm(HOST));
+  });
+
+  it('E.2 local single-clone is unchanged: teamDir === projectDir, backend from own config', () => {
+    // A co-located squad with NO teamRoot pointer resolves in local mode; the
+    // dual-root branch must NOT fire and re-root it elsewhere.
+    writeFileSync(join(HOST, '.squad', 'config.json'), JSON.stringify({ version: 1, stateBackend: 'orphan' }));
+    const ctx = resolveSquadState(HOST);
+    if (!ctx) throw new Error('Expected a resolved local squad state context');
+    expect(ctx.paths.mode).toBe('local');
+    expect(norm(ctx.paths.teamDir)).toBe(norm(ctx.paths.projectDir));
+    expect(norm(ctx.paths.projectDir)).toBe(norm(join(HOST, '.squad')));
+    expect(ctx.backend.name).toBe('orphan');
   });
 });
 

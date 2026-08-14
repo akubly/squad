@@ -843,8 +843,22 @@ export function resolveSquadState(startDir?: string, cliOverride?: StateBackendT
   const paths = resolveSquadPaths(resolution.path);
   if (!paths) return null;
 
+  // Piece 58 §E — dual-root anchor for managed consumer clones.
+  // In remote mode `paths.teamDir` is the team repo ROOT (per `squad link`); the
+  // team state lives in its nested `.squad/` (config.json `stateBackend`, orphan
+  // branch, etc.). Anchor the backend, repo-root probe, and storage adapter at
+  // that host `.squad/` — NOT the consumer's pointer-only `.squad/` — so a linked
+  // consumer resolves the host's configured backend instead of defaulting to
+  // local. Gated strictly on remote mode; single-clone/local squads (where
+  // teamDir already collapses to their own `.squad/`) are unaffected.
+  let teamSquadDir = paths.projectDir;
+  if (paths.mode === 'remote') {
+    const nested = path.join(paths.teamDir, '.squad');
+    teamSquadDir = storage.existsSync(nested) && storage.isDirectorySync(nested) ? nested : paths.teamDir;
+  }
+
   // Resolve actual repo root via git — handles linked worktrees correctly
-  const repoRootStart = path.resolve(paths.projectDir, '..');
+  const repoRootStart = path.resolve(teamSquadDir, '..');
   let repoRoot: string;
   try {
     repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -856,15 +870,15 @@ export function resolveSquadState(startDir?: string, cliOverride?: StateBackendT
   }
 
   // Resolve the backend from config + CLI override
-  const backend = resolveStateBackend(paths.projectDir, repoRoot, cliOverride);
+  const backend = resolveStateBackend(teamSquadDir, repoRoot, cliOverride);
 
   // For local backend, use FSStorageProvider directly (more capable).
   // For git-notes/orphan, bridge via StateBackendStorageAdapter.
   const stateStorage: StorageProvider = backend.name === 'local'
     ? new FSStorageProvider()
-    : new StateBackendStorageAdapter(backend, paths.projectDir);
+    : new StateBackendStorageAdapter(backend, teamSquadDir);
 
-  return { paths, backend, repoRoot, storage: stateStorage, resolution };
+  return { paths: { ...paths, teamDir: teamSquadDir }, backend, repoRoot, storage: stateStorage, resolution };
 }
 
 // ============================================================================

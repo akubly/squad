@@ -641,44 +641,46 @@ describe('normalizeRemoteUrl()', () => {
   });
 
   it('N.6 ADO modern HTTPS normalizes to dev.azure.com form', () => {
+    // Piece 58 §D — canonical output is case-folded (org/project/repo are
+    // case-insensitive), so a mixed-case input lowercases in the canonical key.
     expect(normalizeRemoteUrl('https://dev.azure.com/contoso/MyProject/_git/MyRepo')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.7 ADO modern HTTPS strips .git suffix', () => {
     expect(normalizeRemoteUrl('https://dev.azure.com/contoso/MyProject/_git/MyRepo.git')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.8 ADO legacy HTTPS normalizes to dev.azure.com form', () => {
     expect(normalizeRemoteUrl('https://contoso.visualstudio.com/MyProject/_git/MyRepo')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.9 ADO legacy HTTPS with .git suffix', () => {
     expect(normalizeRemoteUrl('https://contoso.visualstudio.com/MyProject/_git/MyRepo.git')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.10 ADO modern SSH normalizes to dev.azure.com form', () => {
     expect(normalizeRemoteUrl('git@ssh.dev.azure.com:v3/contoso/MyProject/MyRepo')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.11 ADO modern SSH with trailing slash', () => {
     expect(normalizeRemoteUrl('git@ssh.dev.azure.com:v3/contoso/MyProject/MyRepo/')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
   it('N.12 ADO legacy SSH normalizes to dev.azure.com form', () => {
     expect(normalizeRemoteUrl('contoso@vs-ssh.visualstudio.com:v3/contoso/MyProject/MyRepo')).toBe(
-      'dev.azure.com/contoso/MyProject/_git/MyRepo',
+      'dev.azure.com/contoso/myproject/_git/myrepo',
     );
   });
 
@@ -691,6 +693,42 @@ describe('normalizeRemoteUrl()', () => {
   it('N.14 unknown URL lowercases entire input', () => {
     const url = 'ssh://custom.host.com/org/Repo';
     expect(normalizeRemoteUrl(url)).toBe(url.toLowerCase());
+  });
+
+  // Piece 58 §D — host/org/repo are case-insensitive, so the canonical key must
+  // be case-folded across the GitHub and ADO branches (not just the unknown
+  // fallback). Otherwise an origin-only registry entry misses a mixed-case live
+  // clone URL that differs only in case.
+  it('N.15 GitHub HTTPS is case-insensitive across org/repo', () => {
+    expect(normalizeRemoteUrl('https://github.com/MyOrg/MyRepo.git')).toBe(
+      normalizeRemoteUrl('https://github.com/myorg/myrepo.git'),
+    );
+    expect(normalizeRemoteUrl('https://GitHub.com/MyOrg/MyRepo')).toBe('github.com/myorg/myrepo');
+  });
+
+  it('N.16 GitHub SSH is case-insensitive across org/repo', () => {
+    expect(normalizeRemoteUrl('git@github.com:MyOrg/MyRepo.git')).toBe('github.com/myorg/myrepo');
+  });
+
+  it('N.17 ADO modern HTTPS is case-insensitive across org/project/repo', () => {
+    expect(normalizeRemoteUrl('https://dev.azure.com/Contoso/MyProject/_git/MyRepo')).toBe(
+      normalizeRemoteUrl('https://dev.azure.com/contoso/myproject/_git/myrepo'),
+    );
+    expect(normalizeRemoteUrl('https://dev.azure.com/Contoso/MyProject/_git/MyRepo')).toBe(
+      'dev.azure.com/contoso/myproject/_git/myrepo',
+    );
+  });
+
+  it('N.18 ADO modern SSH is case-insensitive across org/project/repo', () => {
+    expect(normalizeRemoteUrl('git@ssh.dev.azure.com:v3/Contoso/MyProject/MyRepo')).toBe(
+      'dev.azure.com/contoso/myproject/_git/myrepo',
+    );
+  });
+
+  it('N.19 ADO legacy HTTPS is case-insensitive across org/project/repo', () => {
+    expect(normalizeRemoteUrl('https://Contoso.visualstudio.com/MyProject/_git/MyRepo')).toBe(
+      'dev.azure.com/contoso/myproject/_git/myrepo',
+    );
   });
 });
 

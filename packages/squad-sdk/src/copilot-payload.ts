@@ -246,6 +246,16 @@ export function installCopilotPayload(opts: InstallCopilotPayloadOpts): InstallC
     }
   }
 
+  // Piece 58 §A/§G1 (review fix) — the `squad_state` bridge is deliberately NOT registered here.
+  // The single sanctioned user-level writer is the backend-gated `ensureSquadStateMcpInUserConfig`
+  // (hashed key), invoked by `squad link` / `squad assign` for orphan/two-layer backends only; a
+  // `local` backend keeps the repo-local `.mcp.json` (piece 57 §D). Synthesizing a second,
+  // callsign-keyed `squad_state` entry here duplicated that registration during a managed
+  // cold-start (link + this installer both write `~/.copilot/mcp-config.json`), and — because this
+  // installer has no state-backend context and also runs on every `squad upgrade` — it leaked a
+  // user-level entry for `local` backends, violating decision G1. copilot-payload therefore only
+  // copies any host-exposed MCP servers (above); it does not own the state bridge.
+
   if (keysStripped > 0 || mcpServersAdded > 0) {
     userMcp['mcpServers'] = userServers;
     fs.mkdirSync(copilotHome, { recursive: true });

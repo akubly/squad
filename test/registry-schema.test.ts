@@ -300,6 +300,28 @@ describe('upsertEntry()', () => {
       ],
     });
   });
+
+  it('UE.6 (piece 58 §D) deduplicates origins that differ only in case (GitHub + ADO)', () => {
+    // GitHub owner/repo and ADO org/project/repo are case-insensitive; origin dedup must
+    // canonicalise case-insensitively (mirrors the public normalizeRemoteUrl in resolution-v2)
+    // so an origin that differs only in case is not stored twice.
+    const entry = {
+      path: path.join(dir, 'alpha.squad'),
+      origins: [
+        'https://github.com/Example/Repo.git',
+        'git@github.com:example/repo.git',
+        'https://dev.azure.com/Contoso/Project/_git/Repo',
+        'https://dev.azure.com/contoso/project/_git/repo',
+      ],
+    };
+
+    // Each case-variant pair collapses to a single canonical form; dedup keeps the first
+    // occurrence's original string.
+    expect(upsertEntry(entry).origins).toEqual([
+      'https://github.com/Example/Repo.git',
+      'https://dev.azure.com/Contoso/Project/_git/Repo',
+    ]);
+  });
 });
 
 describe('registerEntry() backward-compatibility alias', () => {

@@ -169,32 +169,37 @@ function resolveByCallsign(callsign: string, opts: ResolveOpts): ResolvedSquad {
  * back to the registry or Git config.
  */
 export function normalizeRemoteUrl(url: string): string {
+  // Host, org/owner, project, and repo are all case-insensitive for GitHub and
+  // Azure DevOps, so every canonical output is lowercased (piece 58 §D). Without
+  // this, an origin-only registry entry misses a mixed-case live clone URL that
+  // differs only in case.
+
   // GitHub SSH: git@github.com:org/repo[.git]
   const ghSsh = /^git@github\.com:(.+?)(?:\.git)?$/i;
   const ghSshMatch = ghSsh.exec(url);
   if (ghSshMatch) {
-    return `github.com/${ghSshMatch[1]}`;
+    return `github.com/${ghSshMatch[1]}`.toLowerCase();
   }
 
   // GitHub HTTPS: https://[userinfo@]github.com/org/repo[.git][/]
   const ghHttps = /^https?:\/\/(?:[^@/]+@)?github\.com\/(.+?)(?:\.git)?\/?$/i;
   const ghHttpsMatch = ghHttps.exec(url);
   if (ghHttpsMatch) {
-    return `github.com/${ghHttpsMatch[1]}`;
+    return `github.com/${ghHttpsMatch[1]}`.toLowerCase();
   }
 
   // ADO modern SSH: git@ssh.dev.azure.com:v3/{org}/{project}/{repo}[/]
   const adoModernSsh = /^git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+?)\/?$/i;
   const adoModernSshMatch = adoModernSsh.exec(url);
   if (adoModernSshMatch) {
-    return `dev.azure.com/${adoModernSshMatch[1]}/${adoModernSshMatch[2]}/_git/${adoModernSshMatch[3]}`;
+    return `dev.azure.com/${adoModernSshMatch[1]}/${adoModernSshMatch[2]}/_git/${adoModernSshMatch[3]}`.toLowerCase();
   }
 
   // ADO legacy SSH: {org}@vs-ssh.visualstudio.com:v3/{org}/{project}/{repo}[/]
   const adoLegacySsh = /^[^@]+@vs-ssh\.visualstudio\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+?)\/?$/i;
   const adoLegacySshMatch = adoLegacySsh.exec(url);
   if (adoLegacySshMatch) {
-    return `dev.azure.com/${adoLegacySshMatch[1]}/${adoLegacySshMatch[2]}/_git/${adoLegacySshMatch[3]}`;
+    return `dev.azure.com/${adoLegacySshMatch[1]}/${adoLegacySshMatch[2]}/_git/${adoLegacySshMatch[3]}`.toLowerCase();
   }
 
   // ADO modern HTTPS: https://[userinfo@]dev.azure.com/{org}/{project}/_git/{repo}[.git][/]
@@ -202,7 +207,7 @@ export function normalizeRemoteUrl(url: string): string {
     /^https?:\/\/(?:[^@/]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i;
   const adoModernHttpsMatch = adoModernHttps.exec(url);
   if (adoModernHttpsMatch) {
-    return `dev.azure.com/${adoModernHttpsMatch[1]}/${adoModernHttpsMatch[2]}/_git/${adoModernHttpsMatch[3]}`;
+    return `dev.azure.com/${adoModernHttpsMatch[1]}/${adoModernHttpsMatch[2]}/_git/${adoModernHttpsMatch[3]}`.toLowerCase();
   }
 
   // ADO legacy HTTPS: https://[userinfo@]{org}.visualstudio.com/{project}/_git/{repo}[.git][/]
@@ -210,7 +215,7 @@ export function normalizeRemoteUrl(url: string): string {
     /^https?:\/\/(?:[^@/]+@)?([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i;
   const adoLegacyHttpsMatch = adoLegacyHttps.exec(url);
   if (adoLegacyHttpsMatch) {
-    return `dev.azure.com/${adoLegacyHttpsMatch[1]}/${adoLegacyHttpsMatch[2]}/_git/${adoLegacyHttpsMatch[3]}`;
+    return `dev.azure.com/${adoLegacyHttpsMatch[1]}/${adoLegacyHttpsMatch[2]}/_git/${adoLegacyHttpsMatch[3]}`.toLowerCase();
   }
 
   // Unknown form: lowercase entire input for last-resort exact comparison.

@@ -12,11 +12,38 @@
 import path from 'node:path';
 import { FSStorageProvider, clearResolveSquadCache } from '@wifi-aware/squad-sdk';
 import { fatal } from '../core/errors.js';
-import { ensureSquadStateMcpInRoot } from '../core/mcp-root.js';
+import { ensureSquadStateMcpInRoot, ensureSquadStateMcpInUserConfig, tombstoneStaleHashedSquadStateInUserMcp } from '../core/mcp-root.js';
 import { localSquadStateMcpSpec } from '../core/mcp-spec.js';
 import { getPackageVersion } from '../core/version.js';
 
 const storage = new FSStorageProvider();
+
+/**
+ * Read the declared `stateBackend` from a team `.squad`/`.ai-team` config.json.
+ * Independent of {@link loadDirConfig}'s `teamRoot` requirement — we only need
+ * the backend string, which a host config may carry without a `teamRoot` field.
+ * Returns undefined for missing/unreadable/malformed config.
+ */
+function readTeamStateBackend(teamSquadDir: string): string | undefined {
+  const cfgPath = path.join(teamSquadDir, 'config.json');
+  if (!storage.existsSync(cfgPath)) return undefined;
+  try {
+    const parsed = JSON.parse(storage.readSync(cfgPath) ?? '{}') as { stateBackend?: unknown };
+    return typeof parsed?.stateBackend === 'string' ? parsed.stateBackend : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True when the team's state backend is git-native (orphan / two-layer, or the
+ * deprecated git-notes alias that migrates to two-layer). Piece 58 §A/§G1: these
+ * backends get a USER-LEVEL `squad_state` registration and skip the repo-local
+ * `.mcp.json`; a `local` team keeps piece 57 §D's repo-local writer.
+ */
+function isUserLevelBackend(backend: string | undefined): boolean {
+  return backend === 'orphan' || backend === 'two-layer' || backend === 'git-notes';
+}
 
 /**
  * Options for {@link runLink}. Omitted for interactive `squad link` (messages go to the console);
@@ -100,36 +127,54 @@ export function runLink(projectDir: string, teamRepoPath: string, opts: RunLinkO
   // instead of after the 5-second TTL.
   clearResolveSquadCache();
 
-  // Piece 57 §D — wire the squad_state MCP bridge into THIS consumer clone so Copilot's `.mcp.json`
-  // auto-load (which walks up from cwd to the git root) finds a bridge whose command resolves
-  // locally. This fires for EVERY `squad link` — direct or via the managed cold-start — by design:
-  // any clone being linked to a remote team root is a consumer that benefits from a discoverable
-  // state bridge, and `squad` is on PATH for anyone who just ran `squad link`/`squad assign`. The
-  // `squad_state` key is Squad-owned, so refreshing it to the locally-resolvable spec is intended.
-  // Best-effort: a link must never fail because the .mcp.json write hit a malformed pre-existing file.
-  // Capture whether a `.mcp.json` already existed BEFORE we (possibly) create it: if Squad freshly
-  // creates the file it is machine-local (the bridge command resolves against THIS machine's install)
-  // and must be gitignored like config.json; if the repo already owned a `.mcp.json` we merged into,
-  // it is the project's file and we must not gitignore it.
-  const mcpRootPath = path.join(projectDir, '.mcp.json');
-  const mcpPreexisted = storage.existsSync(mcpRootPath);
-  try {
-    ensureSquadStateMcpInRoot(projectDir, getPackageVersion(), localSquadStateMcpSpec());
-    // Only ignore a `.mcp.json` that Squad itself created (machine-local); never a pre-existing one.
-    if (!mcpPreexisted) {
-      const mcpIgnoreEntry = '.mcp.json';
-      const currentIgnore = storage.existsSync(gitignorePath) ? (storage.readSync(gitignorePath) ?? '') : '';
-      if (!currentIgnore.split(/\r?\n/).some((l) => l.trim() === mcpIgnoreEntry)) {
-        const block = (currentIgnore && !currentIgnore.endsWith('\n') ? '\n' : '')
-          + '# Squad: local MCP bridge config (machine-specific command, never commit)\n'
-          + mcpIgnoreEntry + '\n';
-        storage.appendSync(gitignorePath, block);
-      }
+  // Piece 58 §A/§G1 — deliver the squad_state bridge to the surface that matches the team's
+  // state backend. For orphan/two-layer (git-native) teams the bridge is registered at the
+  // USER level (`~/.copilot/mcp-config.json`) — the repo-local `.mcp.json` piece 57 §D wrote is
+  // NOT sanctioned for a shared-host orphan config, so it is skipped here. For a `local` team we
+  // keep piece 57 §D's repo-local `.mcp.json`. In BOTH cases the bridge is the locally-resolvable
+  // `squad state-mcp` spec (`squad` is on PATH for anyone who just ran `squad link`/`squad assign`),
+  // and `squad state-mcp` resolves the squad from the session cwd — so one user-level entry serves
+  // every clone. Best-effort: a link must never fail because an MCP write hit a malformed file.
+  const teamSquadDir = hasSquad ? path.join(absoluteTeam, '.squad') : path.join(absoluteTeam, '.ai-team');
+  const teamBackend = readTeamStateBackend(teamSquadDir);
+
+  if (isUserLevelBackend(teamBackend)) {
+    try {
+      ensureSquadStateMcpInUserConfig(localSquadStateMcpSpec());
+      // Reap any stale per-path `squad_state_<hash>` entries an earlier build wrote
+      // into HOME, so one stable `squad_state` entry remains (piece 58 §A fix).
+      tombstoneStaleHashedSquadStateInUserMcp();
+    } catch (err) {
+      const msg = `Linked, but could not wire squad_state MCP into the user config: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.onWarn) opts.onWarn(msg);
+      else console.warn(`⚠ ${msg}`);
     }
-  } catch (err) {
-    const msg = `Linked, but could not wire squad_state MCP into .mcp.json: ${err instanceof Error ? err.message : String(err)}`;
-    if (opts.onWarn) opts.onWarn(msg);
-    else console.warn(`⚠ ${msg}`);
+  } else {
+    // `local` (or undeclared) backend — keep the repo-root `.mcp.json` writer (piece 57 §D).
+    // Capture whether a `.mcp.json` already existed BEFORE we (possibly) create it: if Squad
+    // freshly creates the file it is machine-local (the bridge command resolves against THIS
+    // machine's install) and must be gitignored like config.json; if the repo already owned a
+    // `.mcp.json` we merged into, it is the project's file and we must not gitignore it.
+    const mcpRootPath = path.join(projectDir, '.mcp.json');
+    const mcpPreexisted = storage.existsSync(mcpRootPath);
+    try {
+      ensureSquadStateMcpInRoot(projectDir, getPackageVersion(), localSquadStateMcpSpec());
+      // Only ignore a `.mcp.json` that Squad itself created (machine-local); never a pre-existing one.
+      if (!mcpPreexisted) {
+        const mcpIgnoreEntry = '.mcp.json';
+        const currentIgnore = storage.existsSync(gitignorePath) ? (storage.readSync(gitignorePath) ?? '') : '';
+        if (!currentIgnore.split(/\r?\n/).some((l) => l.trim() === mcpIgnoreEntry)) {
+          const block = (currentIgnore && !currentIgnore.endsWith('\n') ? '\n' : '')
+            + '# Squad: local MCP bridge config (machine-specific command, never commit)\n'
+            + mcpIgnoreEntry + '\n';
+          storage.appendSync(gitignorePath, block);
+        }
+      }
+    } catch (err) {
+      const msg = `Linked, but could not wire squad_state MCP into .mcp.json: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.onWarn) opts.onWarn(msg);
+      else console.warn(`⚠ ${msg}`);
+    }
   }
 
   if (!opts.quiet) {

@@ -105,29 +105,51 @@ export function parseAzureDevOpsRemote(url: string): AzureDevOpsRemoteInfo | nul
  *   and legacy *.visualstudio.com) to `dev.azure.com/{org}/{project}/_git/{repo}`.
  * - Leave non-ADO hosts on a generic canonical `host/path` form.
  */
+/**
+ * Hosts whose org/owner, project, and repo path segments are case-insensitive
+ * (GitHub and Azure DevOps). For these the canonical form is fully lowercased so an
+ * origin that differs only in case still matches (piece 58 §D). This mirrors the
+ * public `normalizeRemoteUrl` in resolution-v2 so registry origin dedup and squad
+ * matching canonicalise identically. Other (e.g. self-hosted) hosts may have
+ * case-sensitive paths, so their path case is preserved.
+ */
+function isCaseInsensitiveGitHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return (
+    h === 'github.com' ||
+    h === 'dev.azure.com' ||
+    h === 'ssh.dev.azure.com' ||
+    h === 'vs-ssh.visualstudio.com' ||
+    h.endsWith('.visualstudio.com')
+  );
+}
+
 export function normalizeRemoteUrl(url: string): string {
   const trimmed = url.trim();
 
-  // Azure DevOps: normalise all forms to the canonical dev.azure.com path.
+  // Azure DevOps: normalise all forms to the canonical dev.azure.com path. ADO org/
+  // project/repo are case-insensitive, so lowercase the canonical output (piece 58 §D).
   const ado = parseAzureDevOpsRemote(trimmed);
   if (ado) {
-    return `dev.azure.com/${ado.org}/${ado.project}/_git/${ado.repo}`;
+    return `dev.azure.com/${ado.org}/${ado.project}/_git/${ado.repo}`.toLowerCase();
   }
 
   // SSH form: git@host:path/to/repo.git
   const sshMatch = trimmed.match(/^git@([^:]+):(.+)$/);
   if (sshMatch) {
     const host = sshMatch[1]!.toLowerCase();
-    const path = sshMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
-    return `${host}/${path}`;
+    const repoPath = sshMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
+    const canonical = `${host}/${repoPath}`;
+    return isCaseInsensitiveGitHost(host) ? canonical.toLowerCase() : canonical;
   }
 
   // HTTPS form: https?://[user@]host/path[.git][/]
   const httpsMatch = trimmed.match(/^https?:\/\/(?:[^@]+@)?([^/]+)\/(.+)$/);
   if (httpsMatch) {
     const host = httpsMatch[1]!.toLowerCase();
-    const path = httpsMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
-    return `${host}/${path}`;
+    const repoPath = httpsMatch[2]!.replace(/\.git$/, '').replace(/\/$/, '');
+    const canonical = `${host}/${repoPath}`;
+    return isCaseInsensitiveGitHost(host) ? canonical.toLowerCase() : canonical;
   }
 
   return trimmed.toLowerCase();

@@ -452,7 +452,6 @@ describe('MCP merge', () => {
 // ============================================================
 // Test 12: MCP refresh
 // ============================================================
-
 describe('MCP refresh', () => {
   let hostDir: string;
   let copilotHome: string;
@@ -479,6 +478,52 @@ describe('MCP refresh', () => {
     const servers = mcp['mcpServers'] as Record<string, unknown>;
     expect(servers['squad-alpha-serverA']).toBeUndefined();
     expect(servers['squad-alpha-serverB']).toBeDefined();
+  });
+});
+
+// ============================================================
+// Test 12b: piece 58 §A — squad_state local-bin bridge (Bug A/B)
+// ============================================================
+
+describe('piece 58 §A/§G1 (review fix) — does NOT register squad_state (owned by the CLI writer)', () => {
+  let hostDir: string;
+  let copilotHome: string;
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    // A MANAGED host keeps its runtime MCP at the repo-root `.mcp.json`, NOT at
+    // `.copilot/mcp-config.json` — so there is deliberately NO host mcp-config here.
+    hostDir = makeHost('host');
+    copilotHome = makeDir('copilot-home');
+  });
+
+  afterEach(() => fs.rmSync(TEST_ROOT, { recursive: true, force: true }));
+
+  it('adds no squad_state bridge (and no user MCP file) when the host has none to copy', () => {
+    // The single sanctioned user-level writer is the backend-gated
+    // `ensureSquadStateMcpInUserConfig` in the CLI (see link.test.ts). copilot-payload must not
+    // synthesize its own callsign-keyed entry — doing so duplicated the CLI registration during a
+    // managed cold-start and leaked a user-level entry for `local` backends (decision G1).
+    const res = installCopilotPayload({ hostDir, callsign: 'alpha', copilotHome });
+    expect(res.mcpServersAdded).toBe(0);
+    expect(fileExists(path.join(copilotHome, 'mcp-config.json'))).toBe(false);
+  });
+
+  it('copies host-exposed MCP servers but adds no squad_state bridge', () => {
+    addHostMcp(hostDir, { srv: { url: 'http://x' } });
+    installCopilotPayload({ hostDir, callsign: 'alpha', copilotHome });
+    const servers = readUserMcp(copilotHome)['mcpServers'] as Record<string, unknown>;
+    expect(servers['squad-alpha-srv']).toBeDefined();
+    expect(Object.keys(servers).some((k) => k.includes('squad_state'))).toBe(false);
+  });
+
+  it('preserves unrelated user MCP servers and never adds squad_state across repeat installs', () => {
+    writeUserMcp(copilotHome, { mcpServers: { unrelated: { url: 'http://other' } } });
+    installCopilotPayload({ hostDir, callsign: 'alpha', copilotHome });
+    installCopilotPayload({ hostDir, callsign: 'alpha', copilotHome });
+    const servers = readUserMcp(copilotHome)['mcpServers'] as Record<string, unknown>;
+    expect(servers['unrelated']).toBeDefined();
+    expect(Object.keys(servers).some((k) => k.includes('squad_state'))).toBe(false);
   });
 });
 
@@ -587,6 +632,8 @@ describe('uninstall cleanup', () => {
     expect(result.skillsRemoved).toBe(1);
     expect(result.agentsRemoved).toBe(1);
     expect(result.instructionsRemoved).toBe(true);
+    // Piece 58 §A/§G1 (review fix) — install copies the host's `srv` only and does NOT
+    // synthesize a squad_state bridge, so this callsign owns exactly 1 user-level MCP key.
     expect(result.mcpServersRemoved).toBe(1);
   });
 
